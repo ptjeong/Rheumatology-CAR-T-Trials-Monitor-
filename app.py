@@ -89,9 +89,10 @@ st.markdown(
 
     .block-container {{
         max-width: 1450px;
-        padding-top: 1.75rem;
+        padding-top: 1.6rem;
         padding-bottom: 2.2rem;
     }}
+
     h1, h2, h3 {{
         color: {THEME["text"]};
         letter-spacing: -0.02em;
@@ -119,11 +120,9 @@ st.markdown(
     .hero-title {{
         position: relative;
         z-index: 1;
-        font-size: clamp(2rem, 2.6vw, 3rem);
+        font-size: 2rem;
         font-weight: 700;
-        margin-bottom: 0.45rem;
-        line-height: 1.14;
-        overflow-wrap: anywhere;
+        margin-bottom: 0.4rem;
         color: {THEME["text"]};
     }}
 
@@ -182,13 +181,8 @@ st.markdown(
     }}
 
     div[data-testid="stSidebar"] {{
-        background: #0f151c;
-        border-right: 1px solid rgba(255,255,255,0.05);
-    }}
-
-    div[data-testid="stSidebar"] .block-container {{
-        padding-top: 1.05rem;
-        padding-bottom: 1rem;
+        background: linear-gradient(180deg, #0f141b 0%, #10161e 100%);
+        border-right: 1px solid {THEME["border"]};
     }}
 
     div[data-testid="stSidebar"] h1,
@@ -232,54 +226,15 @@ st.markdown(
         background: {THEME["panel"]};
     }}
 
-    div[data-testid="stSidebar"] div[data-baseweb="select"] > div,
-    div[data-testid="stSidebar"] div[data-baseweb="input"] > div {{
-        background: rgba(255,255,255,0.03) !important;
-        border: 1px solid rgba(255,255,255,0.06) !important;
-        color: {THEME["text"]} !important;
-        border-radius: 12px !important;
-        box-shadow: none !important;
-        min-height: 42px !important;
-    }}
-
-    div[data-testid="stSidebar"] div[data-baseweb="select"] > div:hover,
-    div[data-testid="stSidebar"] div[data-baseweb="input"] > div:hover {{
-        background: rgba(255,255,255,0.04) !important;
-        border-color: rgba(33,179,163,0.20) !important;
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div {{
+        background-color: {THEME["panel_3"]};
+        border-color: {THEME["border"]};
+        color: {THEME["text"]};
     }}
 
     .stTextInput input, .stSelectbox div, .stMultiSelect div {{
         color: {THEME["text"]};
-    }}
-
-    div[data-testid="stSidebar"] label {{
-        color: #b8c2cc !important;
-        font-size: 0.78rem !important;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        font-weight: 600;
-    }}
-
-    div[data-testid="stSidebar"] .stMarkdown p {{
-        color: #8d98a4;
-    }}
-
-    div[data-testid="stSidebar"] .stSlider,
-    div[data-testid="stSidebar"] .stSelectbox,
-    div[data-testid="stSidebar"] .stMultiSelect,
-    div[data-testid="stSidebar"] .stTextInput {{
-        margin-bottom: 0.25rem;
-    }}
-
-    div[data-testid="stSidebar"] .stMultiSelect [data-baseweb="tag"] {{
-        border-radius: 999px !important;
-        background: rgba(33,179,163,0.14) !important;
-        border: 1px solid rgba(33,179,163,0.16) !important;
-    }}
-
-    div[data-testid="stSidebar"] .stMultiSelect [data-baseweb="tag"] span,
-    div[data-testid="stSidebar"] .stMultiSelect input {{
-        color: {THEME["text"]} !important;
     }}
     </style>
     """,
@@ -606,7 +561,7 @@ if not df_sites.empty:
 total_trials = len(df_filt)
 recruiting_trials = int(df_filt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())
 german_trials_count = germany_study_view["NCTId"].nunique() if not germany_study_view.empty else 0
-top_target = df_filt["TargetCategory"].value_counts().idxmax() if not df_filt["TargetCategory"].dropna().empty else "â€”"
+top_target = df_filt["TargetCategory"].value_counts().idxmax() if not df_filt["TargetCategory"].dropna().empty else "—"
 
 m1, m2, m3, m4 = st.columns(4)
 with m1:
