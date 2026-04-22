@@ -1,3 +1,4 @@
+import re
 import requests
 import pandas as pd
 from datetime import datetime
@@ -24,101 +25,139 @@ def _safe_text(value) -> str:
     return str(value)
 
 
+def _normalize_text(text: str) -> str:
+    text = (text or "").lower()
+    text = text.replace("sjögren", "sjogren")
+    text = text.replace("r/r", "relapsed refractory")
+    text = text.replace("b-cell", "b cell")
+    text = text.replace("t-cell", "t cell")
+    text = text.replace("nk-cell", "nk cell")
+    text = re.sub(r"[^a-z0-9/+\- ]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _row_text(row: dict) -> str:
-    return " | ".join(
-        [
-            _safe_text(row.get("Conditions")),
-            _safe_text(row.get("BriefTitle")),
-            _safe_text(row.get("BriefSummary")),
-            _safe_text(row.get("Interventions")),
-        ]
-    ).lower()
+    return _normalize_text(
+        " | ".join(
+            [
+                _safe_text(row.get("Conditions")),
+                _safe_text(row.get("BriefTitle")),
+                _safe_text(row.get("BriefSummary")),
+                _safe_text(row.get("Interventions")),
+            ]
+        )
+    )
 
 
 def _contains_any(text: str | None, terms: list[str]) -> bool:
     if not text:
         return False
-    lower = text.lower()
-    return any(term.lower() in lower for term in terms)
+    normalized = _normalize_text(text)
+    return any(_normalize_text(term) in normalized for term in terms)
+
+
+def _match_terms(text: str, term_map: dict[str, list[str]]) -> list[str]:
+    matches = []
+    for label, terms in term_map.items():
+        if any(_normalize_text(term) in text for term in terms):
+            matches.append(label)
+    return matches
 
 
 def _assign_disease_entity(row: dict) -> str:
-    conditions_text = _safe_text(row.get("Conditions")).lower()
+    conditions_text = _normalize_text(_safe_text(row.get("Conditions")))
     full_text = _row_text(row)
 
-    basket_terms = {
+    disease_terms = {
         "SLE": [
             "systemic lupus erythematosus",
             "lupus nephritis",
-            "lupus erythematosus, systemic",
+            "sle",
         ],
         "SSc": [
             "systemic sclerosis",
             "systemic scleroderma",
-            "diffuse cutaneous systemic sclerosis",
+            "scleroderma",
+            "ssc",
         ],
         "IIM": [
             "idiopathic inflammatory myopathies",
             "idiopathic inflammatory myopathy",
+            "juvenile idiopathic inflammatory myopathy",
             "dermatomyositis",
             "polymyositis",
-            "myositis",
-            "immune-mediated necrotizing myopathy",
+            "immune mediated necrotizing myopathy",
             "antisynthetase syndrome",
-            "anti-synthetase syndrome",
-            "inflammatory myopathy",
-            "inflammatory myopathies",
+            "anti synthetase syndrome",
+            "myositis",
+            "iim",
         ],
         "Sjogren": [
             "sjogren syndrome",
-            "sjogren's syndrome",
-            "primary sjogren syndrome",
-            "primary sjogren's syndrome",
-            "primary sjögren syndrome",
+            "sjogren s syndrome",
+            "sjogren disease",
+            "sjd",
         ],
         "AAV": [
-            "anca-associated vasculitis",
             "anca associated vasculitis",
-            "microscopic polyangiitis",
+            "gpa",
+            "granulomatosis with polyangiitis",
             "granulomatous polyangiitis",
+            "mpa",
+            "microscopic polyangiitis",
         ],
-        "RA": [
-            "rheumatoid arthritis",
-        ],
-        "IgG4-RD": [
-            "igg4 related disease",
-            "igg4-related disease",
-        ],
-        "Behcet": [
-            "behcet disease",
-            "behcet's disease",
+        "RA": ["rheumatoid arthritis", "ra"],
+        "IgG4-RD": ["igg4 related disease", "igg4 rd"],
+        "Behcet": ["behcet disease", "behcet s disease"],
+        "T1D": ["type 1 diabetes", "stage 3 type 1 diabetes", "t1d"],
+        "cGVHD": ["chronic graft versus host disease", "chronic graft versus host", "cgvhd"],
+        "HLH": ["hemophagocytic lymphohistiocytosis", "hlh"],
+        "HS": ["hidradenitis suppurativa"],
+        "CPPD": ["cppd", "calcium pyrophosphate deposition"],
+        "Neurologic_autoimmune": [
+            "neurological autoimmune diseases",
+            "neurologic autoimmune diseases",
+            "neurologic immune disorders",
+            "neurological immune disorders",
         ],
     }
 
-    matched_entities = []
-    for entity, terms in basket_terms.items():
-        if any(term in conditions_text for term in terms):
-            matched_entities.append(entity)
+    matched_conditions = _match_terms(conditions_text, disease_terms)
+    matched_full = _match_terms(full_text, disease_terms)
+    matched = sorted(set(matched_conditions + matched_full))
 
-    if len(matched_entities) >= 2:
+    if len(matched) >= 2:
+        systemic_set = {"SLE", "SSc", "IIM", "Sjogren", "RA", "AAV", "IgG4-RD", "Behcet", "T1D", "cGVHD"}
+        if len([m for m in matched if m in systemic_set]) >= 2:
+            return "Basket/Multidisease"
+        return matched[0]
+    if len(matched) == 1:
+        return matched[0]
+
+    broad_basket_terms = [
+        "b cell mediated autoimmune disease",
+        "b cell mediated autoimmune diseases",
+        "b cell related autoimmune disease",
+        "b cell related autoimmune diseases",
+        "severe refractory systemic autoimmune rheumatic disease",
+    ]
+    if any(term in full_text for term in broad_basket_terms):
         return "Basket/Multidisease"
-    if len(matched_entities) == 1:
-        return matched_entities[0]
 
     broad_autoimmune_phrases = [
         "autoimmune disease",
         "autoimmune diseases",
-        "relapsed/refractory autoimmune disease",
-        "relapsed/refractory autoimmune diseases",
+        "relapsed refractory autoimmune disease",
+        "relapsed refractory autoimmune diseases",
         "systemic autoimmune disease",
         "systemic autoimmune diseases",
     ]
-
     if any(p in full_text for p in broad_autoimmune_phrases):
         return "Autoimmune_other"
 
     for entity, syns in DISEASE_ENTITIES.items():
-        specific_syns = [s.lower() for s in syns if len(s) > 5]
+        specific_syns = [_normalize_text(s) for s in syns if len(str(s)) > 3]
         if any(s in full_text for s in specific_syns):
             return entity
 
@@ -136,25 +175,44 @@ def _exclude_by_indication(row: dict) -> bool:
 def _assign_target(row: dict) -> str:
     text = _row_text(row)
 
-    has_cd19 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD19"]) or ("cd19" in text)
-    has_bcma = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BCMA"]) or ("bcma" in text)
-
-    has_car_nk = _contains_any(text, CAR_NK_TERMS)
+    has_car_nk = _contains_any(text, CAR_NK_TERMS) or ("car nk" in text)
     has_caar_t = _contains_any(text, CAAR_T_TERMS)
-    has_car_treg = _contains_any(text, CAR_TREG_TERMS)
+    has_car_treg = _contains_any(text, CAR_TREG_TERMS) or ("treg" in text and "car" in text)
+
+    has_cd19 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD19"]) or ("cd19" in text)
+    has_bcma = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BCMA"]) or ("bcma" in text) or ("b cell maturation antigen" in text)
+    has_baff = "baff" in text
+    has_cd20 = "cd20" in text
+    has_cd6 = "cd6" in text
+    has_cd7 = "cd7" in text
 
     if has_car_nk:
+        if has_cd19 and has_bcma:
+            return "CD19/BCMA dual"
+        if has_cd19:
+            return "CD19"
         return "CAR-NK"
+
     if has_caar_t:
         return "CAAR-T"
     if has_car_treg:
+        if has_cd6:
+            return "CD6"
         return "CAR-Treg"
     if has_cd19 and has_bcma:
         return "CD19/BCMA dual"
+    if has_cd19 and has_baff:
+        return "CD19/BAFF dual"
     if has_cd19:
         return "CD19"
     if has_bcma:
         return "BCMA"
+    if has_cd20:
+        return "CD20"
+    if has_cd6:
+        return "CD6"
+    if has_cd7:
+        return "CD7"
     if _contains_any(text, CAR_CORE_TERMS):
         return "CAR-T_unspecified"
     return "Other_or_unknown"
@@ -163,28 +221,24 @@ def _assign_target(row: dict) -> str:
 def _assign_product_type(row: dict) -> str:
     text = _row_text(row)
 
-    if "autoleucel" in text:
+    if "autoleucel" in text or "autologous" in text:
         return "Autologous"
 
     strong_allo_terms = [
         "ucart",
         "ucar",
-        "universal car-t",
         "universal car t",
-        "off-the-shelf",
         "off the shelf",
         "allogeneic",
-        "allo1",
         "healthy donor",
-        "donor-derived",
         "donor derived",
+        "donor sourced",
     ]
     if any(term in text for term in strong_allo_terms):
         return "Allogeneic/Off-the-shelf"
 
     if _contains_any(text, ALLOGENEIC_MARKERS):
         return "Allogeneic/Off-the-shelf"
-
     if _contains_any(text, AUTOL_MARKERS):
         return "Autologous"
 
@@ -194,48 +248,36 @@ def _assign_product_type(row: dict) -> str:
 def fetch_raw_trials(max_records: int = 1000, statuses: list[str] | None = None) -> list[dict]:
     term_query = (
         "("
-        " \"CAR T\" OR \"CAR-T\" OR \"chimeric antigen receptor\" "
-        " OR \"CAR-NK\" OR \"CAR NK\" OR \"CAAR-T\" OR \"CAR-Treg\" "
+        ' "CAR T" OR "CAR-T" OR "chimeric antigen receptor" '
+        ' OR "CAR-NK" OR "CAR NK" OR "CAAR-T" OR "CAR-Treg" '
         ") AND ("
-        " lupus OR nephritis OR "
-        " \"systemic lupus erythematosus\" OR \"idiopathic inflammatory myopathy\" "
-        " OR myositis OR \"systemic sclerosis\" OR scleroderma OR vasculitis "
-        " OR \"rheumatoid arthritis\" OR sjogren OR \"sjogren syndrome\" "
-        " OR \"igg4 related disease\" OR behcet OR \"autoimmune disease\" "
+        ' lupus OR nephritis OR "systemic lupus erythematosus" '
+        ' OR "idiopathic inflammatory myopathy" OR myositis '
+        ' OR "systemic sclerosis" OR scleroderma OR vasculitis '
+        ' OR "rheumatoid arthritis" OR sjogren OR "sjogren syndrome" '
+        ' OR "igg4 related disease" OR behcet OR "autoimmune disease" '
+        ' OR "type 1 diabetes" OR "graft versus host disease" '
         ")"
     )
 
-    params = {
-        "query.term": term_query,
-        "pageSize": 200,
-        "countTotal": "true",
-    }
-
+    params = {"query.term": term_query, "pageSize": 200, "countTotal": "true"}
     if statuses:
         params["filter.overallStatus"] = ",".join(statuses)
 
     studies = []
-
     while True:
         resp = requests.get(BASE_URL, params=params, timeout=30)
         if resp.status_code != 200:
-            raise requests.HTTPError(
-                f"ClinicalTrials.gov API error {resp.status_code}: {resp.text}"
-            )
-
+            raise requests.HTTPError(f"ClinicalTrials.gov API error {resp.status_code}: {resp.text}")
         data = resp.json()
         studies.extend(data.get("studies", []))
-
         if len(studies) >= max_records:
             break
-
         token = data.get("nextPageToken")
         if not token:
             break
-
         params["pageToken"] = token
-
-    return studies
+    return studies[:max_records]
 
 
 def _flatten_study(study: dict) -> dict:
@@ -249,54 +291,30 @@ def _flatten_study(study: dict) -> dict:
     arms_mod = ps.get("armsInterventionsModule", {})
     sponsor_mod = ps.get("sponsorCollaboratorsModule", {})
 
-    nct_id = ident.get("nctId")
-    title = ident.get("briefTitle")
-    overall_status = status.get("overallStatus")
-    start_date = (status.get("startDateStruct") or {}).get("date")
-    last_update = (status.get("lastUpdatePostDateStruct") or {}).get("date")
-
     phase_list = design.get("phases") or []
-    if isinstance(phase_list, list) and len(phase_list) > 0:
-        phase = "|".join(str(p) for p in phase_list if p)
-    else:
-        possible_phase = design.get("phase")
-        phase = possible_phase.strip() if isinstance(possible_phase, str) and possible_phase.strip() else "Unknown"
-
-    conditions = cond.get("conditions") or []
-    conditions_str = "|".join(conditions) if conditions else None
-
-    brief_summary = desc.get("briefSummary")
+    phase = "|".join(str(p) for p in phase_list if p) if phase_list else (design.get("phase") or "Unknown")
 
     interventions = []
     for inter in (arms_mod.get("interventions") or []):
         label = inter.get("name") or inter.get("description")
         if label:
             interventions.append(label)
-    interventions_str = "|".join(sorted(set(interventions))) if interventions else None
 
-    countries = []
-    for loc in (loc_mod.get("locations") or []):
-        c = loc.get("country")
-        if c:
-            countries.append(c)
-    countries_str = "|".join(sorted(set(countries))) if countries else None
-
-    enrollment = (design.get("enrollmentInfo") or {}).get("count")
-    lead_sponsor = (sponsor_mod.get("leadSponsor") or {}).get("name")
+    countries = sorted({loc.get("country") for loc in (loc_mod.get("locations") or []) if loc.get("country")})
 
     return {
-        "NCTId": nct_id,
-        "BriefTitle": title,
-        "OverallStatus": overall_status,
+        "NCTId": ident.get("nctId"),
+        "BriefTitle": ident.get("briefTitle"),
+        "OverallStatus": status.get("overallStatus"),
         "Phase": phase,
-        "Conditions": conditions_str,
-        "Interventions": interventions_str,
-        "StartDate": start_date,
-        "LastUpdatePostDate": last_update,
-        "EnrollmentCount": enrollment,
-        "Countries": countries_str,
-        "BriefSummary": brief_summary,
-        "LeadSponsor": lead_sponsor,
+        "Conditions": "|".join(cond.get("conditions") or []) or None,
+        "Interventions": "|".join(sorted(set(interventions))) or None,
+        "StartDate": (status.get("startDateStruct") or {}).get("date"),
+        "LastUpdatePostDate": (status.get("lastUpdatePostDateStruct") or {}).get("date"),
+        "EnrollmentCount": (design.get("enrollmentInfo") or {}).get("count"),
+        "Countries": "|".join(countries) or None,
+        "BriefSummary": desc.get("briefSummary"),
+        "LeadSponsor": (sponsor_mod.get("leadSponsor") or {}).get("name"),
     }
 
 
@@ -306,17 +324,13 @@ def _extract_sites(study: dict) -> list[dict]:
     status = ps.get("statusModule", {})
     loc_mod = ps.get("contactsLocationsModule", {})
 
-    nct_id = ident.get("nctId")
-    title = ident.get("briefTitle")
-    overall_status = status.get("overallStatus")
-
     sites = []
     for loc in (loc_mod.get("locations") or []):
         sites.append(
             {
-                "NCTId": nct_id,
-                "BriefTitle": title,
-                "OverallStatus": overall_status,
+                "NCTId": ident.get("nctId"),
+                "BriefTitle": ident.get("briefTitle"),
+                "OverallStatus": status.get("overallStatus"),
                 "Facility": loc.get("facility"),
                 "City": loc.get("city"),
                 "State": loc.get("state"),
@@ -330,14 +344,12 @@ def _extract_sites(study: dict) -> list[dict]:
 
 def build_clean_dataframe(max_records: int = 1000, statuses: list[str] | None = None) -> pd.DataFrame:
     studies = fetch_raw_trials(max_records=max_records, statuses=statuses)
-    rows = [_flatten_study(s) for s in studies]
-    df = pd.DataFrame(rows)
-
+    df = pd.DataFrame([_flatten_study(s) for s in studies])
     df = df.dropna(subset=["NCTId"]).drop_duplicates(subset=["NCTId"])
 
     df["DiseaseEntity"] = df.apply(lambda r: _assign_disease_entity(r.to_dict()), axis=1)
     mask_excl = df.apply(lambda r: _exclude_by_indication(r.to_dict()), axis=1)
-    df = df[~mask_excl]
+    df = df[~mask_excl].copy()
 
     df["TargetCategory"] = df.apply(lambda r: _assign_target(r.to_dict()), axis=1)
     df["ProductType"] = df.apply(lambda r: _assign_product_type(r.to_dict()), axis=1)
@@ -345,7 +357,6 @@ def build_clean_dataframe(max_records: int = 1000, statuses: list[str] | None = 
     df["StartDate"] = pd.to_datetime(df["StartDate"], errors="coerce")
     df["StartYear"] = df["StartDate"].dt.year
     df["LastUpdatePostDate"] = pd.to_datetime(df["LastUpdatePostDate"], errors="coerce")
-
     df["SnapshotDate"] = datetime.utcnow().date().isoformat()
 
     return df.reset_index(drop=True)
@@ -353,16 +364,10 @@ def build_clean_dataframe(max_records: int = 1000, statuses: list[str] | None = 
 
 def build_sites_dataframe(max_records: int = 1000, statuses: list[str] | None = None) -> pd.DataFrame:
     studies = fetch_raw_trials(max_records=max_records, statuses=statuses)
-
     site_rows = []
     for s in studies:
         site_rows.extend(_extract_sites(s))
-
     df_sites = pd.DataFrame(site_rows)
-
     if df_sites.empty:
         return df_sites
-
-    df_sites = df_sites.dropna(subset=["NCTId"]).drop_duplicates()
-
-    return df_sites.reset_index(drop=True)
+    return df_sites.dropna(subset=["NCTId"]).drop_duplicates().reset_index(drop=True)
