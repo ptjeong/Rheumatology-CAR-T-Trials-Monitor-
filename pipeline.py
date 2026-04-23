@@ -6,6 +6,7 @@ from datetime import datetime
 from config import (
     DISEASE_ENTITIES,
     EXCLUDED_INDICATION_TERMS,
+    HARD_EXCLUDED_NCT_IDS,
     CAR_CORE_TERMS,
     CAR_SPECIFIC_TARGET_TERMS,
     CAR_NK_TERMS,
@@ -174,7 +175,8 @@ def _exclude_by_indication(row: dict) -> bool:
 
     text = _row_text(row)
     return _contains_any(text, EXCLUDED_INDICATION_TERMS)
-    
+
+
 def _assign_target(row: dict) -> str:
     text = _row_text(row)
 
