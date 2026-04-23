@@ -437,5 +437,7 @@ NAMED_PRODUCT_TYPES = {
         "inaticabtagene autoleucel",        # Autologous for SLE-ITP
         "ytb323", "rapcabtagene autoleucel", # Novartis autologous CD19 (Juno)
         "kite-363", "kite363",              # Kite/Gilead autologous CD19
+        "azer-cel", "azercabtagene zapreleucel",  # AstraZeneca autologous CD19
+        "prg-1801",                         # Autologous BCMA CAR-T (Prologue/Tongji)
     ],
 }
