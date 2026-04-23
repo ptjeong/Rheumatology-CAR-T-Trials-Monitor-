@@ -79,6 +79,15 @@ def _assign_disease_entity(row: dict) -> str:
     conditions_raw = _safe_text(row.get("Conditions"))
     conditions_text = _normalize_text(conditions_raw)
     full_text = _row_text(row)
+    disease_context_text = _normalize_text(
+        " | ".join(
+            [
+                conditions_raw,
+                _safe_text(row.get("BriefTitle")),
+                _safe_text(row.get("Interventions")),
+            ]
+        )
+    )
 
     disease_terms = {
         "SLE": [
@@ -152,6 +161,12 @@ def _assign_disease_entity(row: dict) -> str:
     if len(matched) >= 2:
         if len([m for m in matched if m in systemic_set]) >= 2:
             return "Basket/Multidisease"
+        return matched_conditions[0]
+
+    if len(matched_conditions) == 1:
+        return matched_conditions[0]
+
+    if len(matched) >= 2:
         return matched[0]
     if len(matched) == 1:
         return matched[0]
