@@ -77,6 +77,7 @@ def _match_terms(text: str, term_map: dict[str, list[str]]) -> list[str]:
 
 def _assign_disease_entity(row: dict) -> str:
     conditions_raw = _safe_text(row.get("Conditions"))
+    conditions_text = _normalize_text(conditions_raw)
     full_text = _row_text(row)
     disease_context_text = _normalize_text(
         " | ".join(
@@ -144,13 +145,21 @@ def _assign_disease_entity(row: dict) -> str:
 
     condition_chunks = [_normalize_text(c) for c in conditions_raw.split("|") if _normalize_text(c)]
     matched_conditions = sorted({m for chunk in condition_chunks for m in _match_terms(chunk, disease_terms)})
-    matched_full = _match_terms(disease_context_text, disease_terms)
+    matched_full = _match_terms(full_text, disease_terms)
     matched = sorted(set(matched_conditions + matched_full))
 
     systemic_set = {"SLE", "SSc", "IIM", "Sjogren", "RA", "AAV", "IgG4-RD", "Behcet", "T1D", "cGVHD"}
 
     if len(matched_conditions) >= 2:
         if len([m for m in matched_conditions if m in systemic_set]) >= 2:
+            return "Basket/Multidisease"
+        return matched_conditions[0]
+
+    if len(matched_conditions) == 1:
+        return matched_conditions[0]
+
+    if len(matched) >= 2:
+        if len([m for m in matched if m in systemic_set]) >= 2:
             return "Basket/Multidisease"
         return matched_conditions[0]
 
