@@ -3008,7 +3008,7 @@ regulatory, or decision-support tool.
         f"Universitätsklinikum Köln; {date.today().year} "
         f"[cited {date.today().isoformat()}]. "
         f"Data snapshot: {snap_date}. "
-        f"Source: ClinicalTrials.gov API v2."
+        f"Available from: https://rheum-car-t-trial-monitor.streamlit.app"
     )
     st.code(citation, language="text")
     st.caption(
@@ -3039,6 +3039,8 @@ medical advice and must not be used to guide individual patient care.
 #### Angaben gemäß § 5 TMG
 
 **Verantwortlich für den Inhalt im Sinne des § 18 Abs. 2 MStV**
+
+Anbieter dieser Webanwendung: https://rheum-car-t-trial-monitor.streamlit.app
 
 Peter Jeong
 Universitätsklinikum Köln
