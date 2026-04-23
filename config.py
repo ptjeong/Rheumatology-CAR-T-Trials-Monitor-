@@ -110,7 +110,34 @@ EXCLUDED_INDICATION_TERMS = [
     "aiha",
     "graves disease",
     "membranous nephropathy",
+    "tumor",
+    "tumors",
+    "cancer",
+    "cancers",
+    "malignancies",
+    "malignan",
+    "leukemia",
+    "lymphoma",
+    "solid tumor",
+    "solid tumors",
+    "advanced solid",
+    "b-cell malignancies",
+    "b cell malignancies",
+    "hematopoetic",
+    "stem cell transplant",
+    "stem cell transplantation",
+    "advanced cancers",
+    "relapsed refractory b-cell",
 ]
+
+HARD_EXCLUDED_NCT_IDS = {
+    "NCT07284433", "NCT0594912", "NCT06825455", "NCT06643221", "NCT05302037",
+    "NCT06742593", "NCT03294954", "NCT05377827", "NCT05949125", "NCT06871410",
+    "NCT07040982", "NCT06323525", "NCT06481735", "NCT02028455", "NCT03971799",
+    "NCT04416984", "NCT05256641", "NCT05554939", "NCT07070219", "NCT06682793",
+    "NCT06861348", "NCT05640271", "NCT07441291", "NCT07087847", "NCT07464483",
+    "NCT06802406", "NCT02129543",
+}
 
 CAR_CORE_TERMS = [
     "car-t",

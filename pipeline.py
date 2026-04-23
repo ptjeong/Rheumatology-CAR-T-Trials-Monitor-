@@ -168,10 +168,13 @@ def _assign_disease_entity(row: dict) -> str:
 
 
 def _exclude_by_indication(row: dict) -> bool:
+    nct_id = _safe_text(row.get("NCTId")).strip()
+    if nct_id in HARD_EXCLUDED_NCT_IDS:
+        return True
+
     text = _row_text(row)
     return _contains_any(text, EXCLUDED_INDICATION_TERMS)
-
-
+    
 def _assign_target(row: dict) -> str:
     text = _row_text(row)
 
