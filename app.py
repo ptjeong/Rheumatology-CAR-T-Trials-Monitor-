@@ -586,6 +586,43 @@ st.markdown(
         letter-spacing: -0.03em !important;
     }}
 
+    /* ── Journal-style figure header (publication tab) ────────────────── */
+    .pub-fig-header {{
+        margin-top: 1.6rem;
+        padding-top: 1.1rem;
+        padding-bottom: 0.55rem;
+        border-top: 1px solid {THEME["border"]};
+    }}
+    .pub-fig-eyebrow {{
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: {THEME["primary"]};
+        margin-bottom: 0.35rem;
+    }}
+    .pub-fig-title {{
+        font-size: 1.05rem;
+        font-weight: 600;
+        letter-spacing: -0.012em;
+        line-height: 1.3;
+        color: {THEME["text"]};
+        margin-bottom: 0.2rem;
+    }}
+    .pub-fig-sub {{
+        font-size: 0.78rem;
+        font-weight: 400;
+        line-height: 1.5;
+        color: {THEME["muted"]};
+        margin-top: 0.15rem;
+    }}
+    /* Don't double-stroke the auto h3 border on figure headers */
+    .pub-fig-header + div h3,
+    .pub-fig-header ~ div[data-testid="stVerticalBlock"] h3 {{
+        border-top: none !important;
+        padding-top: 0 !important;
+    }}
+
     /* ── Preserve explicit white surfaces ─────────────────────────────── */
     .metric-card {{
         background: {THEME["surface"]} !important;
@@ -1799,8 +1836,24 @@ PUB_BASE = dict(
 )
 
 def _pub_title(text: str, pad_b: int = 10) -> dict:
+    """Legacy in-chart title helper. Retained for back-compat; new figures
+    should use _pub_header() above the chart instead."""
     return dict(text=text, x=0, pad=dict(b=pad_b),
                 font=dict(size=_TITLE_SZ, color="#000000", family="Arial, Helvetica, sans-serif"))
+
+
+def _pub_header(figure_num: str, title: str, subtitle: str | None = None) -> None:
+    """Render a journal-style figure header (eyebrow + title + optional sub)
+    above a publication chart. Replaces st.subheader + Plotly title."""
+    sub_html = f'<div class="pub-fig-sub">{subtitle}</div>' if subtitle else ""
+    st.markdown(
+        f'<div class="pub-fig-header">'
+        f'<div class="pub-fig-eyebrow">Figure {figure_num}</div>'
+        f'<div class="pub-fig-title">{title}</div>'
+        f'{sub_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 _V_XAXIS = dict(
     showline=True, linewidth=1.5, linecolor=_AX_COLOR, mirror=False,
@@ -1817,10 +1870,10 @@ _V_YAXIS = dict(
     zeroline=False,
 )
 
-# Full layout for standard vertical bar / line charts
+# Full layout for standard vertical bar / line charts (titles rendered by _pub_header)
 PUB_LAYOUT = dict(
     **PUB_BASE,
-    margin=dict(l=72, r=36, t=64, b=72),
+    margin=dict(l=72, r=36, t=24, b=72),
     xaxis=_V_XAXIS,
     yaxis=_V_YAXIS,
 )
@@ -1844,6 +1897,8 @@ PUB_EXPORT = {"toImageButtonOptions": {"format": "png", "width": 1600, "height":
 
 
 def pub_bar(df_plot, x, y, color=NEJM_BLUE, title="", xlab="", ylab="Number of trials", height=420):
+    """Title kept as a no-op kwarg for back-compat; the journal-style title
+    is rendered above the chart via _pub_header()."""
     fig = px.bar(
         df_plot, x=x, y=y, height=height,
         color_discrete_sequence=[color], template="plotly_white",
@@ -1857,7 +1912,6 @@ def pub_bar(df_plot, x, y, color=NEJM_BLUE, title="", xlab="", ylab="Number of t
     )
     fig.update_layout(
         **PUB_LAYOUT,
-        title=_pub_title(title),
         xaxis_title=xlab,
         yaxis_title=ylab,
         showlegend=False,
@@ -1883,7 +1937,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 1 — Temporal trends
     # ------------------------------------------------------------------
-    st.subheader("Figure 1 — Temporal trends")
+    _pub_header("1", "Trials by start year",
+                "CAR-T and related cell therapies in autoimmune disease, 2015–present.")
 
     years_raw = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
     fig1_data = (
@@ -1901,7 +1956,6 @@ with tab_pub:
         )
         fig1.update_layout(
             **PUB_LAYOUT,
-            title=_pub_title("CAR-T and Related Cell Therapies in Autoimmune Diseases — Trials by Start Year"),
             xaxis_title="Start year",
             yaxis_title="Number of trials",
         )
@@ -1947,7 +2001,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 2 — Phase distribution
     # ------------------------------------------------------------------
-    st.subheader("Figure 2 — Phase distribution")
+    _pub_header("2", "Distribution of clinical trial phases",
+                "Number of trials at each clinical development stage.")
 
     phase_counts = (
         df_filt.groupby("PhaseOrdered", observed=False).size().reset_index(name="Trials")
@@ -1984,7 +2039,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 3 — Target landscape
     # ------------------------------------------------------------------
-    st.subheader("Figure 3 — Target landscape")
+    _pub_header("3", "Antigen target distribution",
+                "Trials by primary CAR antigen target. Cell-therapy platforms (CAR-NK, CAR-Treg, CAAR-T, CAR-γδ T) are shown in Figure 6.")
 
     # CAR-NK / CAR-Treg / CAAR-T / CAR-γδ T are cell therapy platforms, not antigen targets —
     # they belong in the modality figure (Fig 6). Exclude them here.
@@ -2008,11 +2064,10 @@ with tab_pub:
         )
         fig3.update_layout(
             **PUB_BASE,
-            title=_pub_title("Antigen Target Distribution — CAR Cell Therapy Autoimmune Trials"),
             xaxis_title="Number of trials",
             yaxis_title=None,
             showlegend=False,
-            margin=dict(l=160, r=56, t=64, b=56),
+            margin=dict(l=160, r=56, t=24, b=56),
             yaxis=_H_YAXIS,
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
@@ -2042,7 +2097,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 4 — Disease distribution
     # ------------------------------------------------------------------
-    st.subheader("Figure 4 — Disease distribution")
+    _pub_header("4", "Disease entity distribution",
+                "Trials per disease. Basket and multi-disease trials are counted once per enrolled disease.")
 
     _dis_vals = split_pipe_values(df_filt["DiseaseEntities"])
     disease_counts = (
@@ -2064,19 +2120,13 @@ with tab_pub:
         )
         fig4.update_layout(
             **PUB_BASE,
-            title=_pub_title("Disease Entity Distribution — CAR Cell Therapy Trials"),
             xaxis_title="Number of trials",
             yaxis_title=None,
             showlegend=False,
-            margin=dict(l=160, r=56, t=64, b=56),
+            margin=dict(l=160, r=56, t=24, b=56),
             yaxis=_H_YAXIS,
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
-        )
-        fig4.add_annotation(
-            text="Basket trials counted once per enrolled disease",
-            xref="paper", yref="paper", x=0, y=-0.08,
-            showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
         )
         st.plotly_chart(fig4, use_container_width=True, config=PUB_EXPORT)
 
@@ -2097,7 +2147,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 5 — Geographic distribution
     # ------------------------------------------------------------------
-    st.subheader("Figure 5 — Geographic distribution")
+    _pub_header("5", "Global distribution of trial sites",
+                "Choropleth of trial counts by country, with leading countries shown below.")
 
     geo_vals = split_pipe_values(df_filt["Countries"])
     if geo_vals:
@@ -2115,8 +2166,7 @@ with tab_pub:
         fig5_map.update_layout(
             paper_bgcolor="white", plot_bgcolor="white",
             font=PUB_FONT,
-            margin=dict(l=0, r=0, t=48, b=0),
-            title=_pub_title("Global Distribution of CAR Cell Therapy Trial Sites"),
+            margin=dict(l=0, r=0, t=10, b=0),
             geo=dict(
                 bgcolor="white", lakecolor="#ddeeff", landcolor="#eeeeee",
                 showframe=False,
@@ -2144,12 +2194,18 @@ with tab_pub:
         )
         fig5_bar.update_layout(
             **PUB_BASE,
-            title=_pub_title("Top 10 Countries by Number of Trial Sites"),
             xaxis_title="Number of trials", yaxis_title=None, showlegend=False,
-            margin=dict(l=100, r=56, t=64, b=56),
+            margin=dict(l=100, r=56, t=24, b=56),
             yaxis=_H_YAXIS,
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
+        )
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 1rem; '
+            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+            '<strong style="color: #0b1220;">5b — Top 10 countries by number of trials</strong>'
+            '</div>',
+            unsafe_allow_html=True,
         )
         st.plotly_chart(fig5_bar, use_container_width=True, config=PUB_EXPORT)
 
@@ -2170,7 +2226,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 6 — Innovation signals (product type + modality over time)
     # ------------------------------------------------------------------
-    st.subheader("Figure 6 — Innovation signals")
+    _pub_header("6", "Innovation signals — product type and cell-therapy modality",
+                "Trial composition over time, by manufacturing approach (autologous / allogeneic / in vivo) and by cell-therapy platform.")
 
     # 6a: Autologous vs allogeneic by start year
     df_innov = df_filt[df_filt["StartYear"].notna()].copy()
@@ -2180,6 +2237,12 @@ with tab_pub:
         product_year = (
             df_innov.groupby(["StartYear", "ProductType"]).size()
             .reset_index(name="Trials")
+        )
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
+            '<strong style="color: #0b1220;">6a — Product type by start year</strong>'
+            '</div>',
+            unsafe_allow_html=True,
         )
         fig6a = px.bar(
             product_year, x="StartYear", y="Trials", color="ProductType",
@@ -2196,8 +2259,7 @@ with tab_pub:
         fig6a.update_traces(marker_line_width=0, opacity=1)
         fig6a.update_layout(
             **PUB_BASE,
-            title=_pub_title("CAR Cell Therapy Product Type by Start Year"),
-            margin=dict(l=64, r=36, t=64, b=110),
+            margin=dict(l=64, r=36, t=24, b=110),
             xaxis=dict(
                 tickmode="linear", dtick=1, tickformat="d", showgrid=False,
                 showline=True, linewidth=1.5, linecolor=_AX_COLOR,
@@ -2224,6 +2286,13 @@ with tab_pub:
         # 6b: Therapy modality — eight categories (CAR-T split by autologous/allogeneic + γδ T)
         # _MODALITY_ORDER, _MODALITY_COLORS, _modality() are module-level; Modality column pre-computed
         df_innov["Modality"] = df_innov.apply(_modality, axis=1)
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 1rem; '
+            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+            '<strong style="color: #0b1220;">6b — Cell-therapy modality distribution</strong>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         modality_counts = (
             df_innov["Modality"].value_counts()
             .rename_axis("Modality").reset_index(name="Trials")
@@ -2244,9 +2313,8 @@ with tab_pub:
         )
         fig6b.update_layout(
             **PUB_BASE,
-            title=_pub_title("Cell Therapy Modality Distribution"),
             xaxis_title="Number of trials", yaxis_title=None, showlegend=False,
-            margin=dict(l=110, r=56, t=64, b=56),
+            margin=dict(l=110, r=56, t=24, b=56),
             yaxis=_H_YAXIS,
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
@@ -2254,6 +2322,13 @@ with tab_pub:
         st.plotly_chart(fig6b, use_container_width=True, config=PUB_EXPORT)
 
         # 6c: Modality over time (stacked area gives better temporal story)
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 1rem; '
+            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+            '<strong style="color: #0b1220;">6c — Modality mix by start year</strong>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         mod_year = (
             df_innov.groupby(["StartYear", "Modality"]).size()
             .reset_index(name="Trials")
@@ -2271,8 +2346,7 @@ with tab_pub:
         fig6c.update_traces(marker_line_width=0, opacity=1)
         fig6c.update_layout(
             **PUB_BASE,
-            title=_pub_title("Cell Therapy Modality Mix by Start Year"),
-            margin=dict(l=64, r=36, t=64, b=110),
+            margin=dict(l=64, r=36, t=24, b=110),
             xaxis=dict(
                 tickmode="linear", dtick=1, tickformat="d", showgrid=False,
                 showline=True, linewidth=1.5, linecolor=_AX_COLOR,
@@ -2324,7 +2398,8 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 7 — Trial enrollment
     # ------------------------------------------------------------------
-    st.subheader("Figure 7 — Trial enrollment")
+    _pub_header("7", "Trial enrollment landscape",
+                "Distribution and median planned enrollment, with subgroup comparisons by phase, geography, and sponsor type.")
 
     df_enroll = df_filt.copy()
     df_enroll["EnrollmentCount"] = pd.to_numeric(df_enroll["EnrollmentCount"], errors="coerce")
@@ -2344,6 +2419,13 @@ with tab_pub:
         c4.metric("IQR", f"{p25}–{p75}")
 
         # 7a — Enrollment distribution histogram
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 1rem; '
+            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+            '<strong style="color: #0b1220;">7a — Distribution of planned enrollment</strong>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         fig7a = px.histogram(
             df_enroll_known, x="EnrollmentCount", nbins=40, height=400,
             color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
@@ -2357,7 +2439,6 @@ with tab_pub:
         )
         fig7a.update_layout(
             **PUB_LAYOUT,
-            title=_pub_title("Distribution of Planned Trial Enrollment"),
             xaxis_title="Planned enrollment (patients)",
             yaxis_title="Number of trials",
             shapes=[_vline_med],
@@ -2385,6 +2466,13 @@ with tab_pub:
             lambda r: f"{r['Median']} (n={r['N']})", axis=1
         )
 
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 1rem; '
+            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+            '<strong style="color: #0b1220;">7b — Median enrollment by trial phase</strong>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         fig7b = px.bar(
             _phase_enroll, x="Phase", y="Median", height=380,
             color_discrete_sequence=[NEJM_GREEN], template="plotly_white",
@@ -2397,7 +2485,6 @@ with tab_pub:
         )
         fig7b.update_layout(
             **PUB_LAYOUT,
-            title=_pub_title("Median Planned Enrollment by Trial Phase"),
             xaxis_title="Phase",
             yaxis_title="Median planned enrollment (patients)",
             uniformtext_minsize=9, uniformtext_mode="hide",
@@ -2422,6 +2509,14 @@ with tab_pub:
             )
             _dis_enroll_agg["TotalEnrolled"] = _dis_enroll_agg["TotalEnrolled"].astype(int)
 
+            st.markdown(
+                '<div class="pub-fig-sub" style="margin-top: 1rem; '
+                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+                '<strong style="color: #0b1220;">7c — Total planned enrollment by disease</strong> '
+                '<span style="color: #94a3b8;">— enrollment-weighted disease landscape</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
             fig7c = px.bar(
                 _dis_enroll_agg, x="TotalEnrolled", y="Disease", orientation="h",
                 height=max(380, len(_dis_enroll_agg) * 34 + 100),
@@ -2435,10 +2530,9 @@ with tab_pub:
             )
             fig7c.update_layout(
                 **PUB_BASE,
-                title=_pub_title("Total Planned Enrollment by Disease — Enrollment-Weighted Landscape"),
                 xaxis_title="Total planned patients (reported trials)",
                 yaxis_title=None, showlegend=False,
-                margin=dict(l=155, r=72, t=64, b=56),
+                margin=dict(l=155, r=72, t=24, b=56),
                 yaxis=_H_YAXIS,
                 xaxis=_H_XAXIS,
                 uniformtext_minsize=9, uniformtext_mode="hide",
@@ -2523,7 +2617,6 @@ with tab_pub:
             )
             fig.update_layout(
                 **PUB_LAYOUT,
-                title=_pub_title(title),
                 xaxis_title=None,
                 yaxis_title="Median planned enrollment (patients)",
                 showlegend=False,
@@ -2539,16 +2632,30 @@ with tab_pub:
         col_geo, col_spon = st.columns(2)
         with col_geo:
             if not geo_stats.empty:
+                st.markdown(
+                    '<div class="pub-fig-sub" style="margin-top: 1rem; '
+                    'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+                    '<strong style="color: #0b1220;">7d — Median enrollment: China vs non-China</strong>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
                 fig7d = _make_compare_fig(
-                    geo_stats, "Median Enrollment: China vs Non-China",
+                    geo_stats, "",
                     color_map={"China": NEJM_RED, "Non-China": NEJM_BLUE},
                 )
                 st.plotly_chart(fig7d, use_container_width=True, config=PUB_EXPORT)
 
         with col_spon:
             if not spon_stats.empty:
+                st.markdown(
+                    '<div class="pub-fig-sub" style="margin-top: 1rem; '
+                    'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+                    '<strong style="color: #0b1220;">7e — Median enrollment: academic vs industry sponsor</strong>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
                 fig7e = _make_compare_fig(
-                    spon_stats, "Median Enrollment: Academic vs Industry Sponsor",
+                    spon_stats, "",
                     color_map={"Academic": NEJM_GREEN, "Industry": NEJM_PURPLE},
                 )
                 st.plotly_chart(fig7e, use_container_width=True, config=PUB_EXPORT)
@@ -2571,6 +2678,13 @@ with tab_pub:
             .assign(Label=lambda d: d.apply(lambda r: f"n={r['N']}", axis=1))
         )
         if not cross_stats.empty:
+            st.markdown(
+                '<div class="pub-fig-sub" style="margin-top: 1rem; '
+                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+                '<strong style="color: #0b1220;">7f — Median enrollment: geography × sponsor type</strong>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
             _err_plus  = cross_stats["Q3"] - cross_stats["Median"]
             _err_minus = cross_stats["Median"] - cross_stats["Q1"]
             fig7f = px.bar(
@@ -2589,7 +2703,6 @@ with tab_pub:
             )
             fig7f.update_layout(
                 **PUB_LAYOUT,
-                title=_pub_title("Median Enrollment: Geography × Sponsor Type"),
                 xaxis_title=None,
                 yaxis_title="Median planned enrollment (patients)",
                 legend=dict(
