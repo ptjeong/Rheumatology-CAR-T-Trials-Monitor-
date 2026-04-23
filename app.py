@@ -134,18 +134,18 @@ def _modality(row) -> str:
 _PLATFORM_LABELS = {"CAR-NK", "CAR-Treg", "CAAR-T", "CAR-γδ T"}
 
 THEME = {
-    "bg":      "#fafafa",            # near-white
-    "surface": "#ffffff",            # white card
-    "surf2":   "#f1f5f9",            # slate-100
-    "surf3":   "#e2e8f0",            # slate-200
-    "text":    "#0f172a",            # slate-900
-    "muted":   "#64748b",            # slate-500
+    "bg":      "#ffffff",            # pure white canvas
+    "surface": "#ffffff",            # surface = canvas (flat, no card contrast)
+    "surf2":   "#f8fafc",            # slate-50 — subtle hover/strip
+    "surf3":   "#e5e7eb",            # gray-200
+    "text":    "#0b1220",            # near-black
+    "muted":   "#475569",            # slate-600 — readable secondary
     "faint":   "#94a3b8",            # slate-400
-    "border":  "#e2e8f0",            # slate-200
-    "primary": "#1d4ed8",            # blue-700 — scientific primary
-    "teal":    "#0891b2",            # cyan-600
-    "amber":   "#b45309",            # amber-700
-    "shadow":  "0 1px 2px rgba(0,0,0,0.04), 0 2px 6px rgba(0,0,0,0.05)",
+    "border":  "#e5e7eb",            # gray-200 — single hairline color
+    "primary": "#0b3d91",            # deep navy — clinical/scientific
+    "teal":    "#0f766e",            # teal-700
+    "amber":   "#92400e",            # amber-800
+    "shadow":  "none",               # flat aesthetic — no shadows
     "grid":    "#f1f5f9",            # slate-100
 }
 
@@ -169,25 +169,29 @@ st.markdown(
     }}
 
     .block-container {{
-        max-width: 1480px;
-        padding-top: 1.4rem;
+        max-width: 1320px;
+        padding-top: 1.2rem;
         padding-bottom: 2.4rem;
+        line-height: 1.55;
     }}
 
     h1 {{
         color: {THEME["text"]};
-        font-weight: 800;
-        letter-spacing: -0.06em;
+        font-weight: 600;
+        letter-spacing: -0.022em;
+        line-height: 1.2;
     }}
     h2 {{
         color: {THEME["text"]};
-        font-weight: 700;
-        letter-spacing: -0.04em;
+        font-weight: 600;
+        letter-spacing: -0.018em;
+        line-height: 1.25;
     }}
     h3 {{
         color: {THEME["text"]};
         font-weight: 600;
-        letter-spacing: -0.03em;
+        letter-spacing: -0.012em;
+        line-height: 1.3;
     }}
 
     /* ── Scrollbar ────────────────────────────────────────────────────── */
@@ -201,111 +205,109 @@ st.markdown(
 
     /* ── Hero ─────────────────────────────────────────────────────────── */
     .hero {{
-        padding: 2.4rem 2.6rem 2.2rem;
-        border: 1px solid {THEME["border"]};
-        border-radius: 12px;
-        background: {THEME["surface"]};
-        margin-bottom: 1.2rem;
-        box-shadow: {THEME["shadow"]};
+        padding: 1.6rem 0 1.4rem;
+        border-top: 3px solid {THEME["primary"]};
+        border-bottom: 1px solid {THEME["border"]};
+        background: transparent;
+        margin-bottom: 1.4rem;
     }}
 
     .hero-eyebrow {{
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        font-size: 0.67rem;
+        font-size: 0.66rem;
         font-weight: 600;
-        letter-spacing: 0.12em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
         color: {THEME["primary"]};
-        margin-bottom: 0.7rem;
+        margin-bottom: 0.55rem;
     }}
 
     .hero-eyebrow::before {{
         content: '';
         display: inline-block;
-        width: 14px;
-        height: 1.5px;
+        width: 18px;
+        height: 1px;
         background: {THEME["primary"]};
-        border-radius: 1px;
         flex-shrink: 0;
     }}
 
     .hero-title {{
-        font-size: 2.05rem;
-        font-weight: 800;
-        letter-spacing: -0.06em;
-        line-height: 1.1;
-        color: {THEME["text"]};
-        margin-bottom: 0.65rem;
-    }}
-
-    .hero-sub {{
-        font-size: 0.89rem;
-        line-height: 1.72;
-        color: {THEME["muted"]};
-        max-width: 780px;
-        font-weight: 400;
-        letter-spacing: -0.01em;
-    }}
-
-    /* ── Cards ────────────────────────────────────────────────────────── */
-    .section-card {{
-        background: {THEME["surface"]};
-        border: 1px solid {THEME["border"]};
-        border-radius: 10px;
-        padding: 1.25rem 1.3rem 1.1rem;
-        box-shadow: {THEME["shadow"]};
-        margin-bottom: 0.9rem;
-    }}
-
-    .section-card h3 {{
-        font-size: 0.875rem;
+        font-size: 1.7rem;
         font-weight: 600;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.022em;
+        line-height: 1.2;
         color: {THEME["text"]};
-        margin-top: 0;
-        margin-bottom: 0.75rem;
-        padding-bottom: 0.55rem;
-        border-bottom: 1px solid {THEME["border"]};
-    }}
-
-    .metric-card {{
-        background: {THEME["surface"]};
-        border: 1px solid {THEME["border"]};
-        border-top: 2px solid {THEME["primary"]};
-        border-radius: 10px;
-        padding: 1.15rem 1.2rem 1rem;
-        box-shadow: {THEME["shadow"]};
-        transition: box-shadow 0.15s ease;
-    }}
-
-    .metric-card:hover {{
-        box-shadow: 0 4px 16px rgba(0,0,0,0.08),
-                    0 0 0 1px rgba(29,78,216,0.14);
-    }}
-
-    .metric-label {{
-        font-size: 0.67rem;
-        font-weight: 600;
-        color: {THEME["muted"]};
-        letter-spacing: 0.10em;
-        text-transform: uppercase;
         margin-bottom: 0.55rem;
     }}
 
+    .hero-sub {{
+        font-size: 0.86rem;
+        line-height: 1.6;
+        color: {THEME["muted"]};
+        max-width: 820px;
+        font-weight: 400;
+    }}
+
+    /* ── Cards (flat, line-delineated) ────────────────────────────────── */
+    .section-card {{
+        background: transparent;
+        border: none;
+        border-top: 1px solid {THEME["border"]};
+        border-radius: 0;
+        padding: 1.0rem 0 0.8rem;
+        box-shadow: none;
+        margin-bottom: 0.6rem;
+    }}
+
+    .section-card h3 {{
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: {THEME["muted"]};
+        margin-top: 0;
+        margin-bottom: 0.85rem;
+        padding-bottom: 0;
+        border-bottom: none;
+    }}
+
+    .metric-card {{
+        background: transparent;
+        border: none;
+        border-top: 2px solid {THEME["primary"]};
+        border-radius: 0;
+        padding: 0.7rem 0.1rem 0.4rem;
+        box-shadow: none;
+        transition: none;
+    }}
+
+    .metric-card:hover {{
+        box-shadow: none;
+    }}
+
+    .metric-label {{
+        font-size: 0.66rem;
+        font-weight: 600;
+        color: {THEME["muted"]};
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 0.45rem;
+    }}
+
     .metric-value {{
-        font-size: 2.1rem;
-        font-weight: 700;
-        letter-spacing: -0.05em;
+        font-size: 1.65rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
         color: {THEME["text"]};
-        line-height: 1;
+        line-height: 1.05;
         font-variant-numeric: tabular-nums;
     }}
 
     .metric-foot {{
-        margin-top: 0.5rem;
-        font-size: 0.73rem;
+        margin-top: 0.35rem;
+        font-size: 0.72rem;
         color: {THEME["faint"]};
         font-weight: 400;
         line-height: 1.4;
@@ -322,11 +324,11 @@ st.markdown(
 
     /* ── Sidebar ──────────────────────────────────────────────────────── */
     div[data-testid="stSidebar"] {{
-        background: {THEME["surface"]};
+        background: {THEME["surf2"]};
         border-right: 1px solid {THEME["border"]};
     }}
 
-    /* Violet top accent strip */
+    /* Top accent strip */
     [data-testid="stSidebar"] > div:first-child {{
         border-top: 2px solid {THEME["primary"]};
     }}
@@ -360,83 +362,88 @@ st.markdown(
         font-size: 0.75rem;
     }}
 
-    /* Multiselect / select inputs — zinc-50 bg, compact */
+    /* Multiselect / select inputs — flat, square */
     div[data-testid="stSidebar"] div[data-baseweb="select"] > div {{
-        background: {THEME["surf2"]} !important;
+        background: {THEME["surface"]} !important;
         border: 1px solid {THEME["border"]} !important;
-        border-radius: 6px !important;
+        border-radius: 2px !important;
         min-height: 28px !important;
         font-size: 0.75rem !important;
     }}
     div[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {{
         border-color: {THEME["primary"]} !important;
-        box-shadow: 0 0 0 2px rgba(29,78,216,0.12) !important;
+        box-shadow: none !important;
     }}
 
     /* Radio options — hover highlight */
     div[data-testid="stSidebar"] div[data-testid="stRadio"] label {{
-        border-radius: 5px !important;
+        border-radius: 0 !important;
         padding: 0.28rem 0.45rem !important;
         transition: background 0.1s !important;
         margin-bottom: 0.06rem !important;
     }}
     div[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {{
-        background: {THEME["surf2"]} !important;
+        background: {THEME["surface"]} !important;
     }}
 
-    /* ── Buttons ──────────────────────────────────────────────────────── */
+    /* ── Buttons (flat, square) ───────────────────────────────────────── */
     .stButton > button,
     .stDownloadButton > button {{
         background: {THEME["surface"]};
         color: {THEME["text"]};
         border: 1px solid {THEME["border"]};
-        border-radius: 7px;
-        padding: 0.45rem 1rem;
-        font-size: 0.84rem;
+        border-radius: 2px;
+        padding: 0.42rem 0.95rem;
+        font-size: 0.82rem;
         font-weight: 500;
-        letter-spacing: -0.01em;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-        transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+        letter-spacing: -0.005em;
+        box-shadow: none;
+        transition: background 0.12s, border-color 0.12s;
     }}
 
     .stButton > button:hover,
     .stDownloadButton > button:hover {{
         background: {THEME["surf2"]};
-        border-color: {THEME["surf3"]};
-        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
-        color: {THEME["text"]};
+        border-color: {THEME["primary"]};
+        box-shadow: none;
+        color: {THEME["primary"]};
     }}
 
-    /* ── Tabs — pill style ────────────────────────────────────────────── */
+    /* ── Tabs — underline style (NEJM/Nature-inspired) ────────────────── */
     div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
-        background: {THEME["surf2"]};
-        border: 1px solid {THEME["border"]};
-        border-radius: 9px;
-        padding: 3px;
-        gap: 2px;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid {THEME["border"]};
+        border-radius: 0;
+        padding: 0;
+        gap: 0;
     }}
 
     div[data-testid="stTabs"] [data-baseweb="tab"] {{
-        border-radius: 6px;
-        padding: 6px 16px;
-        font-size: 0.865rem;
+        border-radius: 0;
+        padding: 10px 18px;
+        font-size: 0.84rem;
         font-weight: 500;
-        letter-spacing: -0.01em;
+        letter-spacing: -0.005em;
         color: {THEME["muted"]};
         background: transparent;
         border: none !important;
-        transition: background 0.12s, color 0.12s;
+        border-bottom: 2px solid transparent !important;
+        margin-bottom: -1px;
+        transition: color 0.12s, border-color 0.12s;
     }}
 
     div[data-testid="stTabs"] [data-baseweb="tab"]:hover {{
-        background: {THEME["surface"]};
+        background: transparent;
         color: {THEME["text"]};
     }}
 
     div[data-testid="stTabs"] button[aria-selected="true"] {{
-        background: {THEME["surface"]} !important;
-        color: {THEME["text"]} !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        background: transparent !important;
+        color: {THEME["primary"]} !important;
+        font-weight: 600 !important;
+        border-bottom: 2px solid {THEME["primary"]} !important;
+        box-shadow: none;
     }}
 
     div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
@@ -447,7 +454,7 @@ st.markdown(
     /* ── Data table ───────────────────────────────────────────────────── */
     div[data-testid="stDataFrame"] {{
         border: 1px solid {THEME["border"]};
-        border-radius: 8px;
+        border-radius: 2px;
         overflow: hidden;
         background: {THEME["surface"]};
     }}
@@ -458,38 +465,39 @@ st.markdown(
         background-color: {THEME["surface"]};
         border-color: {THEME["border"]} !important;
         color: {THEME["text"]};
-        border-radius: 7px;
+        border-radius: 2px;
     }}
 
     .stTextInput input,
     .stNumberInput input {{
         background: {THEME["surface"]};
         border-color: {THEME["border"]};
-        border-radius: 7px;
+        border-radius: 2px;
         color: {THEME["text"]};
     }}
 
     /* ── Expander ─────────────────────────────────────────────────────── */
     div[data-testid="stExpander"] {{
-        background: {THEME["surface"]};
-        border: 1px solid {THEME["border"]};
-        border-radius: 8px;
+        background: transparent;
+        border: none;
+        border-top: 1px solid {THEME["border"]};
+        border-radius: 0;
         box-shadow: none;
     }}
 
-    /* ── Multiselect tags — violet chips ─────────────────────────────── */
+    /* ── Multiselect tags — flat ──────────────────────────────────────── */
     div[data-baseweb="tag"] {{
-        background-color: rgba(29,78,216,0.08) !important;
-        border: 1px solid rgba(29,78,216,0.20) !important;
-        border-radius: 5px !important;
+        background-color: {THEME["surf2"]} !important;
+        border: 1px solid {THEME["border"]} !important;
+        border-radius: 2px !important;
     }}
     div[data-baseweb="tag"] span {{
-        color: {THEME["primary"]} !important;
+        color: {THEME["text"]} !important;
         font-weight: 500;
     }}
     div[data-baseweb="tag"] [role="button"] {{
-        color: {THEME["primary"]} !important;
-        opacity: 0.7;
+        color: {THEME["muted"]} !important;
+        opacity: 0.8;
     }}
 
     /* ── Text visibility ──────────────────────────────────────────────── */
@@ -544,16 +552,16 @@ st.markdown(
     }}
     div[data-testid="stMetricValue"] > div {{
         color: {THEME["text"]} !important;
-        font-size: 1.45rem !important;
-        font-weight: 700 !important;
-        letter-spacing: -0.05em !important;
+        font-size: 1.4rem !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.02em !important;
         font-variant-numeric: tabular-nums;
     }}
     div[data-testid="stMetricLabel"] > div {{
         color: {THEME["muted"]} !important;
-        font-size: 0.74rem !important;
+        font-size: 0.7rem !important;
         font-weight: 600 !important;
-        letter-spacing: 0.06em !important;
+        letter-spacing: 0.10em !important;
         text-transform: uppercase !important;
     }}
 
