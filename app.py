@@ -3007,14 +3007,13 @@ regulatory, or decision-support tool.
         f"Klinik I für Innere Medizin, Klinische Immunologie und Rheumatologie, "
         f"Universitätsklinikum Köln; {date.today().year} "
         f"[cited {date.today().isoformat()}]. "
-        f"Data snapshot: {snap_date}. "
+        f"DOI: 10.5281/zenodo.19713049. "
         f"Available from: https://rheum-car-t-trial-monitor.streamlit.app"
     )
     st.code(citation, language="text")
     st.caption(
-        "Vancouver-style citation for an unpublished online resource. "
-        "If you tag releases on GitHub and link the repository to Zenodo, "
-        "each release will receive a permanent DOI that can be cited directly."
+        "Vancouver-style citation. "
+        "DOI: [10.5281/zenodo.19713049](https://doi.org/10.5281/zenodo.19713049)"
     )
 
     st.markdown("---")

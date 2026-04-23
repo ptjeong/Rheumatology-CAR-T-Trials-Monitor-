@@ -1,6 +1,7 @@
 # CAR-T Rheumatology Trials Monitor
 
-**Live app: [rheum-car-t-trial-monitor.streamlit.app](https://rheum-car-t-trial-monitor.streamlit.app)**
+**Live app: [rheum-car-t-trial-monitor.streamlit.app](https://rheum-car-t-trial-monitor.streamlit.app)**  
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19713049.svg)](https://doi.org/10.5281/zenodo.19713049)
 
 An interactive dashboard that tracks CAR-T and related cell-therapy clinical
 trials for rheumatologic and immune-mediated diseases, sourced from the public
@@ -150,11 +151,12 @@ If you use this dashboard in scientific work, please cite:
 > Data snapshot: `<date>`. Source: ClinicalTrials.gov API v2.
 
 The live app surfaces an auto-populated citation block under the **About** tab.
-Available from: https://rheum-car-t-trial-monitor.streamlit.app
 
-Tagging a GitHub release and linking the repository to
-[Zenodo](https://zenodo.org/account/settings/github/) will produce a permanent
-DOI for each release.
+> Jeong P. CAR-T Rheumatology Trials Monitor [Internet].
+> Klinik I für Innere Medizin, Klinische Immunologie und Rheumatologie,
+> Universitätsklinikum Köln; 2026.
+> DOI: 10.5281/zenodo.19713049.
+> Available from: https://rheum-car-t-trial-monitor.streamlit.app
 
 ---
 
