@@ -198,10 +198,10 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
         return ["Other immune-mediated"], "Single disease", "Other immune-mediated"
 
     if any(term in full_text for term in _BROAD_BASKET_TERMS):
-        return ["Unclassified"], "Basket/Multidisease", "Unclassified"
+        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
 
     if any(p in full_text for p in _BROAD_AUTOIMMUNE_PHRASES):
-        return ["Unclassified"], "Basket/Multidisease", "Unclassified"
+        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
 
     for entity, syns in DISEASE_ENTITIES.items():
         specific_syns = [_normalize_text(s) for s in syns if len(str(s)) > 3]
@@ -209,7 +209,7 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
             return [entity], "Single disease", entity
 
     if _contains_any(full_text, GENERIC_AUTOIMMUNE_TERMS):
-        return ["Unclassified"], "Basket/Multidisease", "Unclassified"
+        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
 
     return ["Unclassified"], "Single disease", "Unclassified"
 

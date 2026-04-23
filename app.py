@@ -113,7 +113,7 @@ def _modality(row) -> str:
         "γδ" in _txt or "gamma delta" in _txt or "gamma-delta" in _txt
         or "-gdt" in _txt or " gdt " in _txt
     )
-    has_nk = "car-nk" in _txt or "car nk" in _txt
+    has_nk = "car-nk" in _txt or "car nk" in _txt or "lucar-dks1" in _txt
     if t == "CAR-NK" or has_nk:
         return "CAR-NK"
     if t == "CAAR-T":
