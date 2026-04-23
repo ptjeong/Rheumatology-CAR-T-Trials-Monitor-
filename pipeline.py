@@ -18,9 +18,42 @@ from config import (
     ALLOGENEIC_MARKERS,
     AUTOL_MARKERS,
     GENERIC_AUTOIMMUNE_TERMS,
+    NAMED_PRODUCT_TARGETS,
+    NAMED_PRODUCT_TYPES,
 )
 
 BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
+
+# ---------------------------------------------------------------------------
+# LLM override cache  (populated by:  python validate.py)
+# ---------------------------------------------------------------------------
+
+_OVERRIDES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_overrides.json")
+_LLM_OVERRIDES: dict[str, dict] = {}
+
+
+def _load_overrides() -> None:
+    global _LLM_OVERRIDES
+    if not os.path.exists(_OVERRIDES_PATH):
+        _LLM_OVERRIDES = {}
+        return
+    with open(_OVERRIDES_PATH) as f:
+        entries = json.load(f)
+    _LLM_OVERRIDES = {
+        e["nct_id"]: e
+        for e in entries
+        if e.get("confidence") in ("high", "medium")
+        and e.get("disease_entity") not in ("Exclude", None)
+    }
+
+
+def reload_overrides() -> int:
+    """Reload LLM overrides from disk. Returns number of active overrides."""
+    _load_overrides()
+    return len(_LLM_OVERRIDES)
+
+
+_load_overrides()
 
 
 def _safe_text(value) -> str:
@@ -78,16 +111,34 @@ def _match_terms(text: str, term_map: dict[str, list[str]]) -> list[str]:
     return matches
 
 
+def _lookup_named_product(text: str, product_dict: dict[str, list[str]]) -> str | None:
+    """Return the first category whose any product name appears as a substring in text."""
+    for category, names in product_dict.items():
+        if any(_normalize_text(name) in text for name in names):
+            return category
+    return None
+
+
 _DISEASE_TERMS = {
     "SLE": ["systemic lupus erythematosus", "lupus nephritis", "sle"],
-    "SSc": ["systemic sclerosis", "systemic scleroderma", "scleroderma", "ssc"],
+    "SSc": [
+        "systemic sclerosis", "systemic scleroderma", "scleroderma", "ssc",
+        "diffuse cutaneous systemic sclerosis",
+    ],
+    "Sjogren": [
+        "sjogren syndrome", "sjogren s syndrome", "sjogren disease", "sjd",
+        "primary sjogren",
+    ],
+    "CTD_other": [
+        "connective tissue disease", "mixed connective tissue disease", "mctd",
+        "undifferentiated connective tissue disease", "uctd",
+    ],
     "IIM": [
         "idiopathic inflammatory myopathies", "idiopathic inflammatory myopathy",
         "juvenile idiopathic inflammatory myopathy", "dermatomyositis", "polymyositis",
         "immune mediated necrotizing myopathy", "antisynthetase syndrome",
         "anti synthetase syndrome", "myositis", "iim",
     ],
-    "Sjogren": ["sjogren syndrome", "sjogren s syndrome", "sjogren disease", "sjd"],
     "AAV": [
         "anca associated vasculitis", "gpa", "granulomatosis with polyangiitis",
         "granulomatous polyangiitis", "mpa", "microscopic polyangiitis",
@@ -95,19 +146,12 @@ _DISEASE_TERMS = {
     "RA": ["rheumatoid arthritis", "ra"],
     "IgG4-RD": ["igg4 related disease", "igg4 rd"],
     "Behcet": ["behcet disease", "behcet s disease"],
-    "T1D": ["type 1 diabetes", "stage 3 type 1 diabetes", "t1d"],
     "cGVHD": ["chronic graft versus host disease", "chronic graft versus host", "cgvhd"],
-    "Neurologic_autoimmune": [
-        "neurological autoimmune diseases", "neurologic autoimmune diseases",
-        "neurologic immune disorders", "neurological immune disorders",
-    ],
 }
 
-_AUTOIMMUNE_OTHER_TERMS = [
-    "hemophagocytic lymphohistiocytosis", "hlh",
-    "hidradenitis suppurativa",
-    "cppd", "calcium pyrophosphate deposition",
-]
+_SYSTEMIC_DISEASES = {
+    "SLE", "SSc", "Sjogren", "IIM", "AAV", "RA", "IgG4-RD", "Behcet", "cGVHD",
+}
 
 _BROAD_BASKET_TERMS = [
     "b cell mediated autoimmune disease", "b cell mediated autoimmune diseases",
@@ -129,6 +173,13 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
     trial_design:     "Single disease" | "Basket/Multidisease"
     primary_entity:   single label for charts/display (DiseaseEntity column)
     """
+    nct = str(row.get("NCTId", "")).strip()
+    if nct and nct in _LLM_OVERRIDES:
+        ov = _LLM_OVERRIDES[nct]
+        entity = ov.get("disease_entity", "Unclassified")
+        design = "Basket/Multidisease" if entity == "Basket/Multidisease" else "Single disease"
+        return [entity], design, entity
+
     conditions_raw = _safe_text(row.get("Conditions"))
     full_text = _row_text(row)
 
@@ -138,21 +189,19 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
     all_matched = sorted(set(matched_conditions + matched_full))
 
     if all_matched:
-        trial_design = "Basket/Multidisease" if len(all_matched) >= 2 else "Single disease"
-        primary = all_matched[0] if len(all_matched) == 1 else "Basket/Multidisease"
-        return all_matched, trial_design, primary
-
-    if _contains_any(full_text, _AUTOIMMUNE_OTHER_TERMS):
-        return ["Autoimmune_other"], "Single disease", "Autoimmune_other"
+        n_systemic = sum(1 for m in all_matched if m in _SYSTEMIC_DISEASES)
+        if n_systemic >= 2:
+            return all_matched, "Basket/Multidisease", "Basket/Multidisease"
+        return all_matched, "Single disease", all_matched[0]
 
     if _contains_any(full_text, OTHER_IMMUNE_MEDIATED_TERMS):
         return ["Other immune-mediated"], "Single disease", "Other immune-mediated"
 
     if any(term in full_text for term in _BROAD_BASKET_TERMS):
-        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
+        return ["Unclassified"], "Basket/Multidisease", "Unclassified"
 
     if any(p in full_text for p in _BROAD_AUTOIMMUNE_PHRASES):
-        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
+        return ["Unclassified"], "Basket/Multidisease", "Unclassified"
 
     for entity, syns in DISEASE_ENTITIES.items():
         specific_syns = [_normalize_text(s) for s in syns if len(str(s)) > 3]
@@ -160,7 +209,7 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
             return [entity], "Single disease", entity
 
     if _contains_any(full_text, GENERIC_AUTOIMMUNE_TERMS):
-        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
+        return ["Unclassified"], "Basket/Multidisease", "Unclassified"
 
     return ["Unclassified"], "Single disease", "Unclassified"
 
@@ -192,9 +241,11 @@ def _assign_target(row: dict) -> str:
     has_car_treg = _contains_any(text, CAR_TREG_TERMS) or ("treg" in text and "car" in text)
 
     has_cd19 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD19"]) or ("cd19" in text)
-    has_bcma = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BCMA"]) or ("bcma" in text) or ("b cell maturation antigen" in text)
+    has_bcma = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BCMA"]) or ("bcma" in text)
     has_baff = "baff" in text
-    has_cd20 = "cd20" in text
+    # "cd19/20" notation (e.g. "universal CD19/20 CAR-T") — slash is preserved by normalizer
+    has_cd20 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD20"]) or ("cd20" in text) or ("cd19/20" in text)
+    has_cd70 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD70"]) or ("cd70" in text)
     has_cd6 = "cd6" in text
     has_cd7 = "cd7" in text
 
@@ -211,8 +262,12 @@ def _assign_target(row: dict) -> str:
         if has_cd6:
             return "CD6"
         return "CAR-Treg"
+    if has_bcma and has_cd70:
+        return "BCMA/CD70 dual"
     if has_cd19 and has_bcma:
         return "CD19/BCMA dual"
+    if has_cd19 and has_cd20:
+        return "CD19/CD20 dual"
     if has_cd19 and has_baff:
         return "CD19/BAFF dual"
     if has_cd19:
@@ -221,10 +276,19 @@ def _assign_target(row: dict) -> str:
         return "BCMA"
     if has_cd20:
         return "CD20"
+    if has_cd70:
+        return "CD70"
+    if has_baff:
+        return "BAFF"
     if has_cd6:
         return "CD6"
     if has_cd7:
         return "CD7"
+    # Named product fallback: resolves target for well-known products that omit the
+    # antigen name from accessible study text (title / brief summary / interventions).
+    named_target = _lookup_named_product(text, NAMED_PRODUCT_TARGETS)
+    if named_target:
+        return named_target
     if _contains_any(text, CAR_CORE_TERMS):
         return "CAR-T_unspecified"
     return "Other_or_unknown"
@@ -232,22 +296,39 @@ def _assign_target(row: dict) -> str:
 
 def _assign_product_type(row: dict) -> str:
     text = _row_text(row)
+    title = _normalize_text(_safe_text(row.get("BriefTitle")))
+
+    # In vivo: title is the highest-precision signal; supplement with specific full-text terms
+    if "in vivo" in title:
+        return "In vivo"
+    in_vivo_terms = [
+        "in vivo car", "in-vivo car",
+        "in vivo programming", "in vivo generated", "in vivo transduction",
+        "vivovec", "lentiviral nanoparticle",
+        "circular rna",  # LNP/mRNA-encoded in vivo CAR delivery
+    ]
+    if any(term in text for term in in_vivo_terms):
+        return "In vivo"
 
     if "autoleucel" in text or "autologous" in text:
         return "Autologous"
 
     strong_allo_terms = [
-        "ucart",
-        "ucar",
-        "universal car t",
-        "off the shelf",
-        "allogeneic",
-        "healthy donor",
-        "donor derived",
-        "donor sourced",
+        "ucart", "ucar",
+        "universal car t", "universal car-t",   # "Universal CAR-T cells"
+        "universal cd19", "universal bcma",      # "Universal CD19/20 CAR-T" etc.
+        "universal cd70", "universal anti",       # "Universal anti-CD70 CAR-T"
+        "u car t", "u car-t",                    # "anti-CD19/BCMA U CAR T cells"
+        "off the shelf", "allogeneic",
+        "healthy donor", "donor derived", "donor sourced",
     ]
     if any(term in text for term in strong_allo_terms):
         return "Allogeneic/Off-the-shelf"
+
+    # Named product fallback: resolves type for well-known products that lack generic markers.
+    named_type = _lookup_named_product(text, NAMED_PRODUCT_TYPES)
+    if named_type:
+        return named_type
 
     if _contains_any(text, ALLOGENEIC_MARKERS):
         return "Allogeneic/Off-the-shelf"
@@ -367,6 +448,7 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
     df["DiseaseEntities"] = disease_results.apply(lambda x: "|".join(x[0]))
     df["TrialDesign"] = disease_results.apply(lambda x: x[1])
     df["DiseaseEntity"] = disease_results.apply(lambda x: x[2])
+    df["LLMOverride"] = df["NCTId"].isin(_LLM_OVERRIDES)
 
     hard_mask = df["NCTId"].apply(_is_hard_excluded)
     n_hard_excluded = int(hard_mask.sum())
@@ -384,6 +466,7 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
     df["StartDate"] = pd.to_datetime(df["StartDate"], errors="coerce")
     df["StartYear"] = df["StartDate"].dt.year
     df["LastUpdatePostDate"] = pd.to_datetime(df["LastUpdatePostDate"], errors="coerce")
+    df["EnrollmentCount"] = pd.to_numeric(df["EnrollmentCount"], errors="coerce")
     df["SnapshotDate"] = datetime.utcnow().date().isoformat()
 
     prisma = {
@@ -479,11 +562,13 @@ def load_snapshot(
     df = pd.read_csv(os.path.join(out_dir, "trials.csv"))
     df["StartDate"] = pd.to_datetime(df["StartDate"], errors="coerce")
     df["LastUpdatePostDate"] = pd.to_datetime(df["LastUpdatePostDate"], errors="coerce")
-    # Back-compat: snapshots created before DiseaseEntities/TrialDesign were added
+    # Back-compat: snapshots created before DiseaseEntities/TrialDesign/LLMOverride were added
     if "DiseaseEntities" not in df.columns:
         df["DiseaseEntities"] = df["DiseaseEntity"].fillna("Unclassified")
     if "TrialDesign" not in df.columns:
         df["TrialDesign"] = "Single disease"
+    if "LLMOverride" not in df.columns:
+        df["LLMOverride"] = df["NCTId"].isin(_LLM_OVERRIDES)
 
     df_sites_path = os.path.join(out_dir, "sites.csv")
     if os.path.exists(df_sites_path):

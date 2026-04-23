@@ -1,9 +1,11 @@
+import os
 import re
+import subprocess
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from pipeline import (
     build_all_from_api,
@@ -28,6 +30,7 @@ from config import (
 
 st.set_page_config(
     page_title="CAR-T Rheumatology Trials Monitor",
+    page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -43,6 +46,18 @@ STATUS_OPTIONS = [
     "WITHDRAWN",
     "UNKNOWN",
 ]
+
+STATUS_DISPLAY = {
+    "RECRUITING":              "Recruiting",
+    "NOT_YET_RECRUITING":      "Not yet recruiting",
+    "ACTIVE_NOT_RECRUITING":   "Active, not recruiting",
+    "ENROLLING_BY_INVITATION": "By invitation",
+    "COMPLETED":               "Completed",
+    "TERMINATED":              "Terminated",
+    "SUSPENDED":               "Suspended",
+    "WITHDRAWN":               "Withdrawn",
+    "UNKNOWN":                 "Unknown",
+}
 
 OPEN_SITE_STATUSES = {
     "RECRUITING",
@@ -73,187 +88,507 @@ PHASE_LABELS = {
     "Unknown": "Unknown",
 }
 
+# ---------------------------------------------------------------------------
+# Cell-therapy modality — module-level so sidebar filter and pub-figures
+# tab both use the same constants and function.
+# ---------------------------------------------------------------------------
+_MODALITY_ORDER = [
+    "Auto CAR-T", "Allo CAR-T", "CAR-T (unclear)",
+    "CAR-γδ T", "CAR-NK", "CAR-Treg", "CAAR-T", "In vivo CAR",
+]
+
+_MODALITY_COLORS: dict[str, str] = {}   # filled after NEJM constants are defined
+
+
+def _modality(row) -> str:
+    t = str(row.get("TargetCategory", ""))
+    p = str(row.get("ProductType", ""))
+    # γδ T detection from title / summary text
+    _txt = " ".join([
+        str(row.get("BriefTitle", "")),
+        str(row.get("BriefSummary", "")),
+        str(row.get("Interventions", "")),
+    ]).lower()
+    has_gd_t = (
+        "γδ" in _txt or "gamma delta" in _txt or "gamma-delta" in _txt
+        or "-gdt" in _txt or " gdt " in _txt
+    )
+    has_nk = "car-nk" in _txt or "car nk" in _txt
+    if t == "CAR-NK" or has_nk:
+        return "CAR-NK"
+    if t == "CAAR-T":
+        return "CAAR-T"
+    if t in ("CAR-Treg", "CD6"):
+        return "CAR-Treg"
+    if has_gd_t:
+        return "CAR-γδ T"
+    if p == "In vivo":
+        return "In vivo CAR"
+    if p == "Autologous":
+        return "Auto CAR-T"
+    if p == "Allogeneic/Off-the-shelf":
+        return "Allo CAR-T"
+    return "CAR-T (unclear)"
+
+
 THEME = {
-    "bg": "#0b0f14",
-    "panel": "#11161d",
-    "panel_2": "#151c24",
-    "panel_3": "#1a232d",
-    "text": "#ecf1f7",
-    "muted": "#9aa6b2",
-    "faint": "#6f7b87",
-    "border": "rgba(255,255,255,0.08)",
-    "primary": "#21b3a3",
-    "primary_2": "#123b39",
-    "accent": "#d38a5a",
-    "grid": "rgba(255,255,255,0.08)",
-    "shadow": "0 12px 32px rgba(0,0,0,0.28)",
+    "bg":      "#fafafa",            # near-white
+    "surface": "#ffffff",            # white card
+    "surf2":   "#f1f5f9",            # slate-100
+    "surf3":   "#e2e8f0",            # slate-200
+    "text":    "#0f172a",            # slate-900
+    "muted":   "#64748b",            # slate-500
+    "faint":   "#94a3b8",            # slate-400
+    "border":  "#e2e8f0",            # slate-200
+    "primary": "#1d4ed8",            # blue-700 — scientific primary
+    "teal":    "#0891b2",            # cyan-600
+    "amber":   "#b45309",            # amber-700
+    "shadow":  "0 1px 2px rgba(0,0,0,0.04), 0 2px 6px rgba(0,0,0,0.05)",
+    "grid":    "#f1f5f9",            # slate-100
 }
 
-px.defaults.template = "plotly_dark"
+px.defaults.template = "plotly_white"
 
 st.markdown(
     f"""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+    /* ── Reset / base ─────────────────────────────────────────────────── */
     html, body, [class*="css"] {{
-        color: {THEME["text"]};
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }}
 
     .stApp {{
-        background:
-            radial-gradient(circle at top left, rgba(33,179,163,0.08), transparent 30%),
-            radial-gradient(circle at top right, rgba(211,138,90,0.06), transparent 28%),
-            linear-gradient(180deg, #0b0f14 0%, #0d1218 100%);
+        background: {THEME["bg"]};
         color: {THEME["text"]};
     }}
 
     .block-container {{
-        max-width: 1450px;
-        padding-top: 1.6rem;
-        padding-bottom: 2.2rem;
+        max-width: 1480px;
+        padding-top: 1.4rem;
+        padding-bottom: 2.4rem;
     }}
 
-    h1, h2, h3 {{
+    h1 {{
         color: {THEME["text"]};
-        letter-spacing: -0.02em;
+        font-weight: 800;
+        letter-spacing: -0.06em;
+    }}
+    h2 {{
+        color: {THEME["text"]};
+        font-weight: 700;
+        letter-spacing: -0.04em;
+    }}
+    h3 {{
+        color: {THEME["text"]};
+        font-weight: 600;
+        letter-spacing: -0.03em;
     }}
 
+    /* ── Scrollbar ────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar {{ width: 5px; height: 5px; }}
+    ::-webkit-scrollbar-track {{ background: transparent; }}
+    ::-webkit-scrollbar-thumb {{
+        background: {THEME["surf3"]};
+        border-radius: 3px;
+    }}
+    ::-webkit-scrollbar-thumb:hover {{ background: {THEME["faint"]}; }}
+
+    /* ── Hero ─────────────────────────────────────────────────────────── */
     .hero {{
-        position: relative;
-        overflow: hidden;
-        padding: 1.8rem 2rem;
+        padding: 2.4rem 2.6rem 2.2rem;
         border: 1px solid {THEME["border"]};
-        border-radius: 24px;
-        background: linear-gradient(180deg, rgba(21,28,36,0.96) 0%, rgba(17,22,29,0.96) 100%);
-        box-shadow: {THEME["shadow"]};
+        border-radius: 12px;
+        background: {THEME["surface"]};
         margin-bottom: 1.2rem;
+        box-shadow: {THEME["shadow"]};
     }}
 
-    .hero:before {{
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(120deg, rgba(33,179,163,0.08), transparent 35%, rgba(211,138,90,0.06) 100%);
-        pointer-events: none;
+    .hero-eyebrow {{
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.67rem;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: {THEME["primary"]};
+        margin-bottom: 0.7rem;
+    }}
+
+    .hero-eyebrow::before {{
+        content: '';
+        display: inline-block;
+        width: 14px;
+        height: 1.5px;
+        background: {THEME["primary"]};
+        border-radius: 1px;
+        flex-shrink: 0;
     }}
 
     .hero-title {{
-        position: relative;
-        z-index: 1;
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.4rem;
+        font-size: 2.05rem;
+        font-weight: 800;
+        letter-spacing: -0.06em;
+        line-height: 1.1;
         color: {THEME["text"]};
+        margin-bottom: 0.65rem;
     }}
 
     .hero-sub {{
-        position: relative;
-        z-index: 1;
-        font-size: 1rem;
-        line-height: 1.65;
+        font-size: 0.89rem;
+        line-height: 1.72;
         color: {THEME["muted"]};
-        max-width: 900px;
+        max-width: 780px;
+        font-weight: 400;
+        letter-spacing: -0.01em;
     }}
 
+    /* ── Cards ────────────────────────────────────────────────────────── */
     .section-card {{
-        background: linear-gradient(180deg, rgba(21,28,36,0.95) 0%, rgba(17,22,29,0.96) 100%);
+        background: {THEME["surface"]};
         border: 1px solid {THEME["border"]};
-        border-radius: 20px;
-        padding: 1.1rem 1.1rem 0.9rem 1.1rem;
+        border-radius: 10px;
+        padding: 1.25rem 1.3rem 1.1rem;
         box-shadow: {THEME["shadow"]};
-        margin-bottom: 1rem;
+        margin-bottom: 0.9rem;
+    }}
+
+    .section-card h3 {{
+        font-size: 0.875rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        color: {THEME["text"]};
+        margin-top: 0;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.55rem;
+        border-bottom: 1px solid {THEME["border"]};
     }}
 
     .metric-card {{
-        background: linear-gradient(180deg, rgba(21,28,36,0.96) 0%, rgba(17,22,29,0.96) 100%);
+        background: {THEME["surface"]};
         border: 1px solid {THEME["border"]};
-        border-radius: 18px;
-        padding: 1rem 1rem 0.85rem 1rem;
+        border-top: 2px solid {THEME["primary"]};
+        border-radius: 10px;
+        padding: 1.15rem 1.2rem 1rem;
         box-shadow: {THEME["shadow"]};
+        transition: box-shadow 0.15s ease;
+    }}
+
+    .metric-card:hover {{
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08),
+                    0 0 0 1px rgba(29,78,216,0.14);
     }}
 
     .metric-label {{
-        font-size: 0.82rem;
+        font-size: 0.67rem;
+        font-weight: 600;
         color: {THEME["muted"]};
-        margin-bottom: 0.45rem;
+        letter-spacing: 0.10em;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        margin-bottom: 0.55rem;
     }}
 
     .metric-value {{
-        font-size: 1.95rem;
+        font-size: 2.1rem;
         font-weight: 700;
+        letter-spacing: -0.05em;
         color: {THEME["text"]};
-        line-height: 1.05;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
     }}
 
     .metric-foot {{
-        margin-top: 0.4rem;
-        font-size: 0.82rem;
+        margin-top: 0.5rem;
+        font-size: 0.73rem;
         color: {THEME["faint"]};
+        font-weight: 400;
+        line-height: 1.4;
     }}
 
     .small-note {{
         color: {THEME["muted"]};
-        font-size: 0.92rem;
-        margin-top: 0.35rem;
-        margin-bottom: 0.5rem;
+        font-size: 0.84rem;
+        line-height: 1.6;
+        margin-top: 0.3rem;
+        margin-bottom: 0.55rem;
+        letter-spacing: -0.01em;
     }}
 
+    /* ── Sidebar ──────────────────────────────────────────────────────── */
     div[data-testid="stSidebar"] {{
-        background: linear-gradient(180deg, #0f141b 0%, #10161e 100%);
+        background: {THEME["surface"]};
         border-right: 1px solid {THEME["border"]};
     }}
 
-    div[data-testid="stSidebar"] h1,
-    div[data-testid="stSidebar"] h2,
-    div[data-testid="stSidebar"] h3,
-    div[data-testid="stSidebar"] label,
-    div[data-testid="stSidebar"] p,
-    div[data-testid="stSidebar"] span {{
-        color: {THEME["text"]};
+    /* Violet top accent strip */
+    [data-testid="stSidebar"] > div:first-child {{
+        border-top: 2px solid {THEME["primary"]};
     }}
 
+    /* Section label — thread-thin, all-caps */
+    div[data-testid="stSidebar"] h1,
+    div[data-testid="stSidebar"] h2,
+    div[data-testid="stSidebar"] h3 {{
+        font-size: 0.59rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.14em !important;
+        text-transform: uppercase !important;
+        color: {THEME["faint"]} !important;
+        margin-top: 1.3rem !important;
+        margin-bottom: 0.1rem !important;
+        padding-top: 0.9rem !important;
+        padding-bottom: 0.1rem !important;
+        border-top: 1px solid {THEME["border"]} !important;
+        border-bottom: none !important;
+    }}
+
+    /* Widget labels */
+    div[data-testid="stSidebar"] label {{
+        font-size: 0.73rem !important;
+        font-weight: 500 !important;
+        color: {THEME["muted"]} !important;
+        letter-spacing: -0.01em !important;
+    }}
+    div[data-testid="stSidebar"] p {{
+        color: {THEME["text"]};
+        font-size: 0.75rem;
+    }}
+
+    /* Multiselect / select inputs — zinc-50 bg, compact */
+    div[data-testid="stSidebar"] div[data-baseweb="select"] > div {{
+        background: {THEME["surf2"]} !important;
+        border: 1px solid {THEME["border"]} !important;
+        border-radius: 6px !important;
+        min-height: 28px !important;
+        font-size: 0.75rem !important;
+    }}
+    div[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {{
+        border-color: {THEME["primary"]} !important;
+        box-shadow: 0 0 0 2px rgba(29,78,216,0.12) !important;
+    }}
+
+    /* Radio options — hover highlight */
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] label {{
+        border-radius: 5px !important;
+        padding: 0.28rem 0.45rem !important;
+        transition: background 0.1s !important;
+        margin-bottom: 0.06rem !important;
+    }}
+    div[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {{
+        background: {THEME["surf2"]} !important;
+    }}
+
+    /* ── Buttons ──────────────────────────────────────────────────────── */
     .stButton > button,
     .stDownloadButton > button {{
-        background: linear-gradient(180deg, #1ab09f 0%, #149282 100%);
-        color: white;
-        border: 0;
-        border-radius: 999px;
-        padding: 0.62rem 1rem;
-        font-weight: 600;
-        box-shadow: 0 8px 20px rgba(33,179,163,0.18);
+        background: {THEME["surface"]};
+        color: {THEME["text"]};
+        border: 1px solid {THEME["border"]};
+        border-radius: 7px;
+        padding: 0.45rem 1rem;
+        font-size: 0.84rem;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
     }}
 
     .stButton > button:hover,
     .stDownloadButton > button:hover {{
-        background: linear-gradient(180deg, #1fc0ae 0%, #169b8a 100%);
-        color: white;
+        background: {THEME["surf2"]};
+        border-color: {THEME["surf3"]};
+        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+        color: {THEME["text"]};
     }}
 
-    div[data-testid="stTabs"] button {{
+    /* ── Tabs — pill style ────────────────────────────────────────────── */
+    div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
+        background: {THEME["surf2"]};
+        border: 1px solid {THEME["border"]};
+        border-radius: 9px;
+        padding: 3px;
+        gap: 2px;
+    }}
+
+    div[data-testid="stTabs"] [data-baseweb="tab"] {{
+        border-radius: 6px;
+        padding: 6px 16px;
+        font-size: 0.865rem;
+        font-weight: 500;
+        letter-spacing: -0.01em;
         color: {THEME["muted"]};
+        background: transparent;
+        border: none !important;
+        transition: background 0.12s, color 0.12s;
+    }}
+
+    div[data-testid="stTabs"] [data-baseweb="tab"]:hover {{
+        background: {THEME["surface"]};
+        color: {THEME["text"]};
     }}
 
     div[data-testid="stTabs"] button[aria-selected="true"] {{
-        color: {THEME["text"]};
+        background: {THEME["surface"]} !important;
+        color: {THEME["text"]} !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }}
 
+    div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] [data-baseweb="tab-border"] {{
+        display: none !important;
+    }}
+
+    /* ── Data table ───────────────────────────────────────────────────── */
     div[data-testid="stDataFrame"] {{
         border: 1px solid {THEME["border"]};
-        border-radius: 16px;
+        border-radius: 8px;
         overflow: hidden;
-        background: {THEME["panel"]};
+        background: {THEME["surface"]};
     }}
 
+    /* ── Form controls ────────────────────────────────────────────────── */
     div[data-baseweb="select"] > div,
     div[data-baseweb="input"] > div {{
-        background-color: {THEME["panel_3"]};
+        background-color: {THEME["surface"]};
+        border-color: {THEME["border"]} !important;
+        color: {THEME["text"]};
+        border-radius: 7px;
+    }}
+
+    .stTextInput input,
+    .stNumberInput input {{
+        background: {THEME["surface"]};
         border-color: {THEME["border"]};
+        border-radius: 7px;
         color: {THEME["text"]};
     }}
 
-    .stTextInput input, .stSelectbox div, .stMultiSelect div {{
+    /* ── Expander ─────────────────────────────────────────────────────── */
+    div[data-testid="stExpander"] {{
+        background: {THEME["surface"]};
+        border: 1px solid {THEME["border"]};
+        border-radius: 8px;
+        box-shadow: none;
+    }}
+
+    /* ── Multiselect tags — violet chips ─────────────────────────────── */
+    div[data-baseweb="tag"] {{
+        background-color: rgba(29,78,216,0.08) !important;
+        border: 1px solid rgba(29,78,216,0.20) !important;
+        border-radius: 5px !important;
+    }}
+    div[data-baseweb="tag"] span {{
+        color: {THEME["primary"]} !important;
+        font-weight: 500;
+    }}
+    div[data-baseweb="tag"] [role="button"] {{
+        color: {THEME["primary"]} !important;
+        opacity: 0.7;
+    }}
+
+    /* ── Text visibility ──────────────────────────────────────────────── */
+    div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stMarkdownContainer"] li,
+    div[data-testid="stMarkdownContainer"] span {{
         color: {THEME["text"]};
+    }}
+    div[data-testid="stCaptionContainer"] p,
+    .stCaption {{
+        color: {THEME["muted"]} !important;
+    }}
+    div[data-testid="stAlert"] p {{
+        color: {THEME["text"]};
+    }}
+    div[data-testid="stRadio"] label span,
+    div[data-testid="stCheckbox"] label span {{
+        color: {THEME["text"]} !important;
+    }}
+    div[data-testid="stSidebar"] span,
+    div[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {{
+        color: {THEME["text"]} !important;
+    }}
+    div[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
+        color: {THEME["muted"]} !important;
+    }}
+
+    /* ── Sidebar background ───────────────────────────────────────────── */
+    [data-testid="stSidebarContent"] {{
+        background-color: {THEME["surface"]} !important;
+    }}
+
+    /* ── Strip ALL auto-background containers ─────────────────────────── */
+    div[data-testid="stVerticalBlock"],
+    div[data-testid="stHorizontalBlock"],
+    div[data-testid="stColumn"] > div,
+    div[data-testid="block-container"] > div,
+    div[data-testid="element-container"] {{
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+    }}
+
+    /* ── st.metric() — clean, no white card ──────────────────────────── */
+    div[data-testid="stMetric"] {{
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0.4rem 0 !important;
+        border-radius: 0 !important;
+    }}
+    div[data-testid="stMetricValue"] > div {{
+        color: {THEME["text"]} !important;
+        font-size: 1.45rem !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.05em !important;
+        font-variant-numeric: tabular-nums;
+    }}
+    div[data-testid="stMetricLabel"] > div {{
+        color: {THEME["muted"]} !important;
+        font-size: 0.74rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.06em !important;
+        text-transform: uppercase !important;
+    }}
+
+    /* ── st.info / warning / success ─────────────────────────────────── */
+    div[data-testid="stAlert"] {{
+        background: rgba(29,78,216,0.04) !important;
+        border: 1px solid rgba(29,78,216,0.14) !important;
+        border-left: 3px solid {THEME["primary"]} !important;
+        border-radius: 8px !important;
+        box-shadow: none !important;
+    }}
+    div[data-testid="stAlert"] p {{
+        color: {THEME["text"]} !important;
+    }}
+
+    /* ── Section spacing — replaces removed section-card divs ────────── */
+    div[data-testid="stVerticalBlock"] h3 {{
+        margin-top: 0.5rem !important;
+        padding-top: 1.1rem !important;
+        padding-bottom: 0.55rem !important;
+        border-top: 1px solid {THEME["border"]} !important;
+        letter-spacing: -0.03em !important;
+    }}
+
+    /* ── Preserve explicit white surfaces ─────────────────────────────── */
+    .metric-card {{
+        background: {THEME["surface"]} !important;
+    }}
+    div[data-testid="stDataFrame"],
+    div[data-testid="stDataFrame"] > div {{
+        background-color: {THEME["surface"]} !important;
+    }}
+    div[data-testid="stExpander"] {{
+        background-color: {THEME["surface"]} !important;
+        border: 1px solid {THEME["border"]} !important;
+        border-radius: 8px !important;
+        box-shadow: none !important;
     }}
     </style>
     """,
@@ -285,26 +620,28 @@ def metric_card(label: str, value, foot: str = ""):
     )
 
 
-def make_bar(df_plot, x, y, height=360, color="#21b3a3"):
+def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     fig = px.bar(
-        df_plot,
-        x=x,
-        y=y,
-        height=height,
-        color_discrete_sequence=[color],
-        template="plotly_dark",
+        df_plot, x=x, y=y, height=height,
+        color_discrete_sequence=[color], template="plotly_white",
     )
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=10, r=10, t=10, b=10),
-        font=dict(color=THEME["text"]),
+        margin=dict(l=8, r=8, t=8, b=8),
+        font=dict(family="Inter, sans-serif", size=12, color=THEME["text"]),
         xaxis_title=None,
         yaxis_title=None,
         showlegend=False,
+        bargap=0.35,
     )
-    fig.update_xaxes(showgrid=False, color=THEME["muted"])
-    fig.update_yaxes(gridcolor=THEME["grid"], color=THEME["muted"])
+    fig.update_traces(marker_line_width=0, opacity=0.90)
+    fig.update_xaxes(showgrid=False, color=THEME["muted"], tickfont_size=11)
+    fig.update_yaxes(
+        gridcolor=THEME["grid"], gridwidth=1, color=THEME["muted"],
+        tickfont_size=11, zeroline=False,
+    )
+    fig.update_layout(bargap=0.4)
     return fig
 
 
@@ -374,11 +711,12 @@ def add_phase_columns(frame: pd.DataFrame) -> pd.DataFrame:
 st.markdown(
     """
     <div class="hero">
-        <div class="hero-title">CAR-T and Related Cell Therapies in Rheumatologic Systemic Diseases</div>
+        <div class="hero-eyebrow">ClinicalTrials.gov &middot; Live pipeline</div>
+        <div class="hero-title">CAR-T &amp; Cell Therapies<br>in Rheumatologic Diseases</div>
         <div class="hero-sub">
-            A monitoring dashboard for ClinicalTrials.gov studies with disease mapping,
-            target classification, clickable NCT links, and a dedicated geography view for global
-            and Germany-specific activity.
+            Systematic landscape analysis of CAR-T, CAR-NK, CAAR-T, and CAR-Treg trials in
+            systemic autoimmune diseases — disease mapping, target classification,
+            product-type annotation, and Germany-specific site tracking.
         </div>
     </div>
     """,
@@ -411,8 +749,30 @@ else:
         STATUS_OPTIONS,
         default=["RECRUITING", "NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING"],
     )
-    with st.spinner("Fetching and processing ClinicalTrials.gov data..."):
-        df, df_sites, prisma_counts = load_live(statuses=tuple(selected_statuses))
+    try:
+        with st.spinner("Fetching and processing ClinicalTrials.gov data..."):
+            df, df_sites, prisma_counts = load_live(statuses=tuple(selected_statuses))
+    except Exception as api_err:
+        st.sidebar.error(
+            "ClinicalTrials.gov API is currently unreachable. "
+            "Falling back to the most recent snapshot if available."
+        )
+        st.sidebar.caption(f"Error: {type(api_err).__name__}: {str(api_err)[:120]}")
+        if available_snapshots:
+            fallback = available_snapshots[0]
+            with st.spinner(f"Loading snapshot {fallback}..."):
+                df, df_sites, prisma_counts = load_frozen(fallback)
+            st.sidebar.info(
+                f"Loaded frozen snapshot **{fallback}** (fallback). "
+                "Switch the source toggle above to 'Frozen snapshot' for intentional offline use."
+            )
+        else:
+            st.error(
+                "Cannot load data: the ClinicalTrials.gov API is unreachable and no local "
+                "snapshots exist. Please try again later or check the API status at "
+                "https://clinicaltrials.gov/."
+            )
+            st.stop()
 
     if st.sidebar.button("Save snapshot"):
         statuses_list = selected_statuses if selected_statuses else None
@@ -425,6 +785,9 @@ df = add_phase_columns(df)
 if df.empty:
     st.error("No studies were returned. Try broadening the status filters.")
     st.stop()
+
+# Compute modality column on full df before any filtering
+df["Modality"] = df.apply(_modality, axis=1)
 
 st.sidebar.header("Filters")
 
@@ -484,6 +847,14 @@ product_sel = st.sidebar.multiselect(
     default=product_options,
 )
 
+# Cell therapy modality (multi-select)
+modality_options = [m for m in _MODALITY_ORDER if m in set(df["Modality"])]
+modality_sel = st.sidebar.multiselect(
+    "Cell therapy modality",
+    options=modality_options,
+    default=modality_options,
+)
+
 # Country (multi-select)
 all_countries = set()
 for cs in df["Countries"].dropna():
@@ -497,6 +868,57 @@ country_sel = st.sidebar.multiselect(
     options=country_options,
     default=country_options,
 )
+
+
+# ---------------------------------------------------------------------------
+# CSV provenance helper — adds a '#'-prefixed metadata header to exports.
+# Readable via pandas: pd.read_csv(path, comment='#').
+# ---------------------------------------------------------------------------
+def _csv_with_provenance(
+    df_export: pd.DataFrame,
+    title: str,
+    include_filters: bool = True,
+) -> str:
+    snap = (
+        df["SnapshotDate"].iloc[0]
+        if "SnapshotDate" in df.columns and not df.empty
+        else date.today().isoformat()
+    )
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    lines: list[str] = [
+        f"# {title}",
+        f"# Exported (UTC): {now_utc}",
+    ]
+    if data_source == "Frozen snapshot":
+        lines.append(f"# Data source: ClinicalTrials.gov API v2 — frozen snapshot {snap}")
+    else:
+        lines.append(f"# Data source: ClinicalTrials.gov API v2 — live fetch (snapshot date {snap})")
+    lines.append(f"# Source URL: {BASE_URL}")
+
+    if include_filters:
+        def _fmt(sel, opts) -> str:
+            if not sel or set(sel) == set(opts):
+                return "all"
+            return "; ".join(str(s) for s in sel)
+        lines += [
+            f"# Filter — disease entity: {_fmt(disease_sel, disease_options)}",
+            f"# Filter — trial design: {_fmt(design_sel, design_options)}",
+            f"# Filter — phase: {_fmt(phase_sel, phase_options)}",
+            f"# Filter — target category: {_fmt(target_sel, target_options)}",
+            f"# Filter — overall status: {_fmt(status_sel, status_options)}",
+            f"# Filter — product type: {_fmt(product_sel, product_options)}",
+            f"# Filter — cell therapy modality: {_fmt(modality_sel, modality_options)}",
+            f"# Filter — country: {_fmt(country_sel, country_options)}",
+        ]
+
+    lines += [
+        f"# Rows: {len(df_export)}",
+        "# Read with: pd.read_csv(path, comment='#')",
+        "",
+    ]
+    return "\n".join(lines) + df_export.to_csv(index=False)
+
 
 # Data quality / missing classifications
 with st.sidebar.expander("Data quality / missing classifications", expanded=False):
@@ -518,9 +940,17 @@ with st.sidebar.expander("Data quality / missing classifications", expanded=Fals
 
     quality_df = pd.DataFrame(rows)
     st.dataframe(quality_df, use_container_width=True, hide_index=True)
-    st.caption(
-        "Ambiguous labels counted: other_or_unknown, CAR_T_unspecified, unclassified, autoimmune_other (if present)."
-    )
+    n_llm = int(df["LLMOverride"].sum()) if "LLMOverride" in df.columns else 0
+    if n_llm:
+        st.caption(
+            f"LLM-assisted: **{n_llm}** trial(s) reclassified via `llm_overrides.json`. "
+            "Run `python validate.py` to expand coverage."
+        )
+    else:
+        st.caption(
+            "No LLM overrides active. Run `python validate.py` to classify ambiguous trials "
+            "and write `llm_overrides.json`."
+        )
 
 # Apply filters
 mask = pd.Series(True, index=df.index)
@@ -546,6 +976,9 @@ if status_sel:
 
 if product_sel:
     mask &= df["ProductType"].isin(product_sel)
+
+if modality_sel:
+    mask &= df["Modality"].isin(modality_sel)
 
 if country_sel:
     country_pattern = "|".join([re.escape(c) for c in country_sel])
@@ -626,16 +1059,23 @@ if not df_sites.empty:
 total_trials = len(df_filt)
 recruiting_trials = int(df_filt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())
 german_trials_count = germany_study_view["NCTId"].nunique() if not germany_study_view.empty else 0
-top_target = df_filt["TargetCategory"].value_counts().idxmax() if not df_filt["TargetCategory"].dropna().empty else "—"
+_PLATFORM_LABELS = {"CAR-NK", "CAR-Treg", "CAAR-T", "CAR-γδ T"}
+_tc_for_top = df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"].dropna()
+top_target = _tc_for_top.value_counts().idxmax() if not _tc_for_top.empty else "—"
+_enroll_known = pd.to_numeric(df_filt["EnrollmentCount"], errors="coerce").dropna()
+total_enrolled = int(_enroll_known.sum()) if not _enroll_known.empty else 0
+median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
     metric_card("Filtered trials", total_trials, "Trials matching current filters")
 with m2:
     metric_card("Open / recruiting", recruiting_trials, "Recruiting or not yet recruiting")
 with m3:
-    metric_card("German-linked trials", german_trials_count, "Unique filtered studies with at least one open German site")
+    metric_card("Total enrolled", f"{total_enrolled:,}", f"Across {len(_enroll_known)} trials with reported enrollment")
 with m4:
+    metric_card("Median enrollment", median_enrolled, "Patients per trial (reported trials only)")
+with m5:
     metric_card("Top target", top_target, "Most common target category")
 
 st.markdown(
@@ -647,13 +1087,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_overview, tab_geo, tab_data, tab_pub, tab_methods = st.tabs(
-    ["Overview", "Geography / Map", "Data", "Publication Figures", "Methods & Appendix"]
+tab_overview, tab_geo, tab_data, tab_pub, tab_methods, tab_about = st.tabs(
+    ["Overview", "Geography / Map", "Data", "Publication Figures", "Methods & Appendix", "About"]
 )
 
 with tab_overview:
     if prisma_counts:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("Study selection (PRISMA flow)")
         prisma_rows = [
             {"Step": "Records identified via ClinicalTrials.gov API", "n": prisma_counts.get("n_fetched", "—"), "Note": ""},
@@ -674,12 +1113,10 @@ with tab_overview:
                 "Note": st.column_config.TextColumn("Note", width="medium"),
             },
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    left, right = st.columns([1.05, 1])
+    left, right = st.columns([1, 1])
 
     with left:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("Trials by disease entity")
         st.caption("Basket/multi-disease trials are counted once per disease they enrol.")
         _disease_vals = split_pipe_values(df_filt["DiseaseEntities"])
@@ -690,12 +1127,10 @@ with tab_overview:
             .reset_index(name="Count")
         ) if _disease_vals else pd.DataFrame(columns=["DiseaseEntity", "Count"])
         if not counts_disease.empty:
-            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color="#21b3a3"), use_container_width=True)
+            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color="#1d4ed8"), use_container_width=True)
         else:
             st.info("No trials for the current filter selection.")
-        st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("Trials by phase")
         counts_phase = (
             df_filt.groupby("PhaseOrdered", observed=False)
@@ -712,30 +1147,26 @@ with tab_overview:
         )
         counts_phase = counts_phase.sort_values("Phase")
         if not counts_phase.empty:
-            fig_phase = make_bar(counts_phase, "Phase", "Count", color="#d38a5a")
+            fig_phase = make_bar(counts_phase, "Phase", "Count", color=THEME["primary"])
             fig_phase.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
             st.plotly_chart(fig_phase, use_container_width=True)
         else:
             st.info("No trials for the current filter selection.")
-        st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("Trials by target category")
+        st.subheader("Trials by antigen target")
         counts_target = (
-            df_filt["TargetCategory"]
+            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
             .fillna("Unknown")
             .value_counts()
             .rename_axis("TargetCategory")
             .reset_index(name="Count")
         )
         if not counts_target.empty:
-            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color="#6fb7ff"), use_container_width=True)
+            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color=THEME["primary"]), use_container_width=True)
         else:
             st.info("No trials for the current filter selection.")
-        st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("Trials by start year")
         start_years = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
         counts_year = (
@@ -752,9 +1183,9 @@ with tab_overview:
                 y="Count",
                 markers=True,
                 height=360,
-                template="plotly_dark",
+                template="plotly_white",
             )
-            fig_year.update_traces(line_color="#21b3a3", marker_color="#d38a5a", line_width=3)
+            fig_year.update_traces(line_color="#1d4ed8", marker_color="#1d4ed8", line_width=2.5)
             fig_year.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
@@ -773,10 +1204,8 @@ with tab_overview:
             st.plotly_chart(fig_year, use_container_width=True)
         else:
             st.info("No trials with a valid start year for the current filter selection.")
-        st.markdown("</div>", unsafe_allow_html=True)
 
 with tab_geo:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Global studies by country")
 
     countries_long = split_pipe_values(df_filt["Countries"])
@@ -795,15 +1224,14 @@ with tab_geo:
             locationmode="country names",
             color="Count",
             color_continuous_scale=[
-                [0.00, "#1d4e89"],
-                [0.20, "#4f86c6"],
-                [0.40, "#a8c6ea"],
-                [0.58, "#f3d37a"],
-                [0.78, "#e67e22"],
-                [1.00, "#b22222"],
+                [0.00, "#dbeafe"],
+                [0.30, "#93c5fd"],
+                [0.55, "#3b82f6"],
+                [0.75, "#1d4ed8"],
+                [1.00, "#1e3a8a"],
             ],
             projection="natural earth",
-            template="plotly_dark",
+            template="plotly_white",
         )
         fig_world.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
@@ -812,14 +1240,14 @@ with tab_geo:
             font=dict(color=THEME["text"]),
             geo=dict(
                 bgcolor="rgba(0,0,0,0)",
-                lakecolor="rgba(0,0,0,0)",
-                landcolor="#17202a",
+                lakecolor="#ddeeff",
+                landcolor="#e9ecef",
                 showframe=False,
                 showcoastlines=False,
                 showcountries=True,
-                countrycolor="rgba(255,255,255,0.12)",
+                countrycolor="rgba(0,0,0,0.12)",
             ),
-            coloraxis_colorbar_title="Trials",
+            coloraxis_colorbar_title="No. of trials",
         )
         st.plotly_chart(fig_world, use_container_width=True)
 
@@ -830,14 +1258,12 @@ with tab_geo:
         with c2:
             st.markdown("**Top countries**")
             st.plotly_chart(
-                make_bar(country_counts.head(12), "Country", "Count", height=320, color="#21b3a3"),
+                make_bar(country_counts.head(12), "Country", "Count", height=320, color=THEME["primary"]),
                 use_container_width=True,
             )
     else:
         st.info("No country information available for the current filter selection.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Germany by city")
 
     if germany_open_sites.empty:
@@ -869,7 +1295,8 @@ with tab_geo:
         with c1:
             st.markdown("**Open sites by city**")
             st.plotly_chart(
-                make_bar(germany_city_counts, "City", "OpenSiteCount", height=380, color="#d38a5a"),
+                make_bar(germany_city_counts, "City", "OpenSiteCount",
+                         height=min(300, max(180, len(germany_city_counts) * 20 + 48)), color=THEME["primary"]),
                 use_container_width=True,
             )
         with c2:
@@ -877,7 +1304,7 @@ with tab_geo:
             city_event = st.dataframe(
                 germany_city_counts,
                 use_container_width=True,
-                height=380,
+                height=min(300, max(180, len(germany_city_counts) * 20 + 48)),
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
@@ -947,10 +1374,8 @@ with tab_geo:
                 )
         else:
             st.caption("Select a city row in the table to open the related trial list below.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 with tab_data:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Trial table")
 
     show_cols = [
@@ -970,6 +1395,7 @@ with tab_data:
 
     table_df = df_filt.sort_values(["PhaseOrdered", "DiseaseEntity", "NCTId"], ascending=[True, True, True]).copy()
     table_df["Phase"] = table_df["PhaseLabel"]
+    table_df["OverallStatus"] = table_df["OverallStatus"].map(STATUS_DISPLAY).fillna(table_df["OverallStatus"])
 
     st.dataframe(
         table_df[show_cols],
@@ -991,15 +1417,14 @@ with tab_data:
             "LeadSponsor": st.column_config.TextColumn("Lead sponsor", width="medium"),
         },
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Studies active in Germany")
 
     if germany_study_view.empty:
         st.info("No open or recruiting German study sites found in the current result set.")
     else:
         germany_export_view = germany_study_view.copy()
+        germany_export_view["OverallStatus"] = germany_export_view["OverallStatus"].map(STATUS_DISPLAY).fillna(germany_export_view["OverallStatus"])
         germany_export_view = germany_export_view.sort_values(["PhaseOrdered", "DiseaseEntity", "NCTId"], na_position="last")
         st.dataframe(
             germany_export_view[
@@ -1034,50 +1459,12 @@ with tab_data:
                 "GermanSiteStatuses": st.column_config.TextColumn("German site status", width="medium"),
             },
         )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    # Identify trials with unclassified / other buckets for disease or target
-    unclassified_mask = (
-        df_filt["DiseaseEntity"].astype(str).str.lower().isin(["autoimmune_other", "unclassified", "other_or_unknown"])
-        | df_filt["TargetCategory"].astype(str).str.lower().isin(["other_or_unknown", "unclassified", "unknown"])
-    )
-    df_unclassified = df_filt[unclassified_mask].copy()
-
-    # Prepare a plain-text prompt/command to help generate a supplementary curation checklist
-    unclassified_text = ""\
-
-    if not df_unclassified.empty:
-        lines = []
-        lines.append(
-            "INSTRUCTION / COMMAND: Based on the following clinical trials, generate a supplementary curation "
-            "checklist to improve DiseaseEntity and TargetCategory classification. For each trial, "
-            "propose refined labels and a short justification that can be integrated back into the ETL pipeline."
-        )
-        lines.append(
-            "Output format suggestion (CSV columns): "
-            "NCTId, ExistingDiseaseEntity, ExistingTargetCategory, "
-            "ProposedDiseaseEntity, ProposedTargetCategory, Rationale"
-        )
-        lines.append(
-            "Focus especially on replacing autoimmune_other / other_or_unknown / unclassified "
-            "with more specific entities or targets where justified."
-        )
-        lines.append("")
-        lines.append("Trial rows (NCTId | DiseaseEntity | TargetCategory | BriefTitle):")
-        for _, row in df_unclassified.iterrows():
-            lines.append(
-                f"- {row.get('NCTId', '')} | "
-                f"{row.get('DiseaseEntity', '')} | "
-                f"{row.get('TargetCategory', '')} | "
-                f"{row.get('BriefTitle', '')}"
-            )
-        unclassified_text = "\n".join(lines)
-
-    d1, d2, d3 = st.columns(3)
+    d1, d2 = st.columns(2)
     with d1:
         st.download_button(
             label="Download filtered trial data as CSV",
-            data=df_filt.to_csv(index=False),
+            data=_csv_with_provenance(df_filt, "Filtered trial list"),
             file_name="car_t_rheumatology_trials_filtered.csv",
             mime="text/csv",
         )
@@ -1085,20 +1472,90 @@ with tab_data:
         if not df_sites.empty:
             st.download_button(
                 label="Download site-level data as CSV",
-                data=df_sites.to_csv(index=False),
+                data=_csv_with_provenance(df_sites, "Site-level data"),
                 file_name="car_t_rheumatology_sites.csv",
                 mime="text/csv",
             )
-    with d3:
-        st.download_button(
-            label="Unclassified trials prompt (.txt)",
-            data=unclassified_text if unclassified_text else "No unclassified trials in current filter.",
-            file_name="unclassified_trials_prompt.txt",
-            mime="text/plain",
-            disabled=df_unclassified.empty,
-        )
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    # ── Curation loop ──────────────────────────────────────────────────────────
+    st.subheader("Curation loop — unclear / unclassified trials")
+    st.markdown(
+        '<p class="small-note">Download the structured CSV, paste it into Claude Code, '
+        "and the assistant will propose and apply patches to config.py / pipeline.py automatically.</p>",
+        unsafe_allow_html=True,
+    )
+
+    unclear_disease_mask = df_filt["DiseaseEntity"].astype(str).str.lower().isin(
+        ["unclassified", "autoimmune_other", "other_or_unknown"]
+    )
+    unclear_target_mask = df_filt["TargetCategory"].astype(str).str.lower().isin(
+        ["other_or_unknown", "car-t_unspecified", "unclassified", "unknown"]
+    )
+    unclear_product_mask = df_filt["ProductType"].astype(str).str.lower() == "unclear"
+
+    df_unclear = df_filt[unclear_disease_mask | unclear_target_mask | unclear_product_mask].copy()
+
+    if not df_unclear.empty:
+        def _unclear_fields(row):
+            flags = []
+            if str(row.get("DiseaseEntity", "")).lower() in {"unclassified", "autoimmune_other", "other_or_unknown"}:
+                flags.append("Disease")
+            if str(row.get("TargetCategory", "")).lower() in {"other_or_unknown", "car-t_unspecified", "unclassified", "unknown"}:
+                flags.append("Target")
+            if str(row.get("ProductType", "")).lower() == "unclear":
+                flags.append("Product")
+            return "|".join(flags)
+
+        df_unclear["UnclearFields"] = df_unclear.apply(_unclear_fields, axis=1)
+
+        export_cols = [
+            "NCTId", "BriefTitle", "Conditions", "Interventions",
+            "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields",
+            "BriefSummary",
+        ]
+        df_export = df_unclear[[c for c in export_cols if c in df_unclear.columns]].copy()
+        # Truncate BriefSummary to 300 chars to keep CSV readable
+        if "BriefSummary" in df_export.columns:
+            df_export["BriefSummary"] = df_export["BriefSummary"].astype(str).str[:300]
+
+        import io as _io
+        header_lines = [
+            "# CURATION_LOOP_V1",
+            "# INSTRUCTION: You are Claude Code assisting with a CAR-T rheumatology trial pipeline.",
+            "# For each row below, read BriefTitle / Conditions / Interventions / BriefSummary.",
+            "# Propose the correct DiseaseEntity, TargetCategory, and ProductType.",
+            "# Then automatically patch config.py and/or pipeline.py to capture these cases.",
+            "# Allowed DiseaseEntity values: SLE, SSc, Sjogren, CTD_other, IIM, AAV, RA, IgG4-RD, Behcet,",
+            "#   Other immune-mediated, Unclassified",
+            "# Allowed TargetCategory values: CD19, BCMA, CD19/BCMA dual, CD19/BAFF dual,",
+            "#   CD20, CD6, CD7, CAR-NK, CAAR-T, CAR-Treg, CAR-T_unspecified, Other_or_unknown",
+            "# Allowed ProductType values: Autologous, Allogeneic/Off-the-shelf, In vivo, Unclear",
+            "# UnclearFields column shows which field(s) triggered inclusion (Disease|Target|Product).",
+            "#",
+        ]
+        buf = _io.StringIO()
+        for line in header_lines:
+            buf.write(line + "\n")
+        df_export.to_csv(buf, index=False)
+        curation_csv = buf.getvalue()
+
+        st.dataframe(
+            df_export[["NCTId", "BriefTitle", "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields"]],
+            use_container_width=True,
+            height=280,
+        )
+        st.caption(f"{len(df_export)} trial(s) flagged for curation")
+
+        st.download_button(
+            label=f"Download curation CSV ({len(df_export)} trials)",
+            data=curation_csv,
+            file_name="curation_loop.csv",
+            mime="text/csv",
+        )
+    else:
+        st.success("No unclear / unclassified trials in the current filter.")
+
+
     st.subheader("Validation sample export")
     st.markdown(
         '<p class="small-note">Stratified random sample for manual classification review. '
@@ -1168,9 +1625,7 @@ with tab_data:
         )
     else:
         st.info("No trials in the current filter selection.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Inter-rater agreement (Cohen's κ)")
     st.markdown(
         '<p class="small-note">Upload the completed validation CSV (both reviewers filled in) '
@@ -1283,27 +1738,111 @@ with tab_data:
                             file_name="car_t_validation_disagreements.csv",
                             mime="text/csv",
                         )
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # TAB: Publication Figures
 # ---------------------------------------------------------------------------
 
-PUB_LAYOUT = dict(
+# Unified visualization palette — coordinated, scientific-grade
+NEJM = ["#1d4ed8", "#dc2626", "#d97706", "#059669", "#4f46e5", "#0891b2", "#0d9488", "#64748b"]
+NEJM_BLUE    = "#1d4ed8"   # blue-700 (primary)
+NEJM_RED     = "#dc2626"   # red-600
+NEJM_AMBER   = "#d97706"   # amber-600
+NEJM_GREEN   = "#059669"   # emerald-600
+NEJM_PURPLE  = "#4f46e5"   # indigo-600
+
+_MODALITY_COLORS.update({
+    "Auto CAR-T":      NEJM_BLUE,
+    "Allo CAR-T":      "#0891b2",   # cyan-600
+    "CAR-T (unclear)": "#a1a1aa",   # zinc-400
+    "CAR-γδ T":        "#0d9488",   # teal-600
+    "CAR-NK":          NEJM_GREEN,
+    "CAR-Treg":        NEJM_PURPLE,
+    "CAAR-T":          NEJM_AMBER,
+    "In vivo CAR":     NEJM_RED,
+})
+
+_AX_COLOR  = "#1a1a1a"   # axis lines + ticks — near-black, publication weight
+_GRID_CLR  = "#c8c8c8"   # grid lines — visible but not competing with data
+_TICK_SZ   = 11           # tick label font size
+_TITLE_SZ  = 14           # figure title font size
+_LAB_SZ    = 12           # axis label font size
+
+PUB_FONT = dict(family="Arial, Helvetica, sans-serif", size=_TICK_SZ, color=_AX_COLOR)
+
+# Base: only the keys shared by ALL publication figures (no axes, no margin)
+PUB_BASE = dict(
     template="plotly_white",
     paper_bgcolor="white",
     plot_bgcolor="white",
-    font=dict(family="Arial, sans-serif", size=13, color="#1a1a1a"),
-    margin=dict(l=70, r=30, t=50, b=70),
+    font=PUB_FONT,
 )
-PUB_EXPORT = {"toImageButtonOptions": {"format": "png", "width": 1400, "height": 800, "scale": 2}}
+
+def _pub_title(text: str, pad_b: int = 10) -> dict:
+    return dict(text=text, x=0, pad=dict(b=pad_b),
+                font=dict(size=_TITLE_SZ, color="#000000", family="Arial, Helvetica, sans-serif"))
+
+_V_XAXIS = dict(
+    showline=True, linewidth=1.5, linecolor=_AX_COLOR, mirror=False,
+    showgrid=False, ticks="outside", ticklen=6, tickwidth=1.2,
+    title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+    tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+)
+_V_YAXIS = dict(
+    showline=True, linewidth=1.5, linecolor=_AX_COLOR, mirror=False,
+    showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+    ticks="outside", ticklen=6, tickwidth=1.2,
+    title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+    tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+    zeroline=False,
+)
+
+# Full layout for standard vertical bar / line charts
+PUB_LAYOUT = dict(
+    **PUB_BASE,
+    margin=dict(l=72, r=36, t=64, b=72),
+    xaxis=_V_XAXIS,
+    yaxis=_V_YAXIS,
+)
+
+# Shared axis settings for horizontal bar charts
+_H_XAXIS = dict(
+    showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+    showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+    ticks="outside", ticklen=6, tickwidth=1.2,
+    tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+    title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+    zeroline=False,
+)
+_H_YAXIS = dict(
+    showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+    showgrid=False,
+    ticks="outside", ticklen=4, tickwidth=1.2,
+    tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+)
+PUB_EXPORT = {"toImageButtonOptions": {"format": "png", "width": 1600, "height": 900, "scale": 2}}
 
 
-def pub_bar(df_plot, x, y, color="#2a6099", title="", xlab="", ylab="Count", height=420):
-    fig = px.bar(df_plot, x=x, y=y, height=height, color_discrete_sequence=[color], template="plotly_white")
-    fig.update_layout(**PUB_LAYOUT, title=dict(text=title, font_size=15, x=0), xaxis_title=xlab, yaxis_title=ylab, showlegend=False)
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(gridcolor="#e5e5e5")
+def pub_bar(df_plot, x, y, color=NEJM_BLUE, title="", xlab="", ylab="Number of trials", height=420):
+    fig = px.bar(
+        df_plot, x=x, y=y, height=height,
+        color_discrete_sequence=[color], template="plotly_white",
+        text=y,
+    )
+    fig.update_traces(
+        marker_line_width=0, opacity=1, width=0.65,
+        texttemplate="%{text}", textposition="outside",
+        textfont=dict(size=10, color=_AX_COLOR),
+        cliponaxis=False,
+    )
+    fig.update_layout(
+        **PUB_LAYOUT,
+        title=_pub_title(title),
+        xaxis_title=xlab,
+        yaxis_title=ylab,
+        showlegend=False,
+        uniformtext_minsize=9, uniformtext_mode="hide",
+    )
     return fig
 
 
@@ -1324,7 +1863,6 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 1 — Temporal trends
     # ------------------------------------------------------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Figure 1 — Temporal trends")
 
     years_raw = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
@@ -1337,14 +1875,32 @@ with tab_pub:
         fig1 = px.line(
             fig1_data, x="StartYear", y="Trials", markers=True, height=420, template="plotly_white",
         )
-        fig1.update_traces(line_color="#2a6099", marker_color="#d95f02", line_width=2.5, marker_size=8)
+        fig1.update_traces(
+            line_color=NEJM_BLUE, line_width=2.5,
+            marker=dict(color=NEJM_BLUE, size=8, line=dict(color="white", width=1.5)),
+        )
         fig1.update_layout(
             **PUB_LAYOUT,
-            title=dict(text="CAR-T and Related Cell Therapies in Autoimmune Diseases: Trials by Start Year", font_size=14, x=0),
-            xaxis_title="Start year", yaxis_title="Number of trials",
+            title=_pub_title("CAR-T and Related Cell Therapies in Autoimmune Diseases — Trials by Start Year"),
+            xaxis_title="Start year",
+            yaxis_title="Number of trials",
         )
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
-        fig1.update_yaxes(gridcolor="#e5e5e5")
+        fig1.update_yaxes(rangemode="tozero")
+        # Mark the current (incomplete) year so readers don't misread a dip as a trend
+        _current_year = pd.Timestamp.now().year
+        if int(fig1_data["StartYear"].max()) >= _current_year:
+            fig1.add_vrect(
+                x0=_current_year - 0.5, x1=_current_year + 0.5,
+                fillcolor="rgba(0,0,0,0.04)", line_width=0,
+            )
+            fig1.add_annotation(
+                x=_current_year, y=1, yref="paper",
+                text=f"{_current_year} (partial year)",
+                showarrow=False,
+                font=dict(size=10, color=THEME["muted"]),
+                yanchor="bottom", xanchor="center",
+            )
         st.plotly_chart(fig1, use_container_width=True, config=PUB_EXPORT)
 
         # Key statistics
@@ -1362,16 +1918,15 @@ with tab_pub:
         c3.metric("Peak year", f"{peak_year} (n={peak_n})")
         c4.metric("CAGR (first → last year)", cagr_str)
 
-        st.download_button("Fig 1 data (CSV)", fig1_data.to_csv(index=False),
+        st.download_button("Fig 1 data (CSV)",
+                           _csv_with_provenance(fig1_data, "Fig 1 — Temporal trends"),
                            "fig1_temporal_trends.csv", "text/csv")
     else:
         st.info("No start year data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # Fig 2 — Phase distribution
     # ------------------------------------------------------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Figure 2 — Phase distribution")
 
     phase_counts = (
@@ -1385,7 +1940,7 @@ with tab_pub:
     phase_counts = phase_counts.sort_values("Phase")
 
     if not phase_counts.empty:
-        fig2 = pub_bar(phase_counts, "Phase", "Trials", color="#2a6099",
+        fig2 = pub_bar(phase_counts, "Phase", "Trials", color=NEJM_BLUE,
                        title="Distribution of Clinical Trial Phases", xlab="Phase")
         fig2.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
         st.plotly_chart(fig2, use_container_width=True, config=PUB_EXPORT)
@@ -1400,52 +1955,73 @@ with tab_pub:
 
         fig2_csv = phase_counts[["Phase", "Trials"]].copy()
         fig2_csv["% of total"] = (fig2_csv["Trials"] / total_ph * 100).round(1)
-        st.download_button("Fig 2 data (CSV)", fig2_csv.to_csv(index=False),
+        st.download_button("Fig 2 data (CSV)",
+                           _csv_with_provenance(fig2_csv, "Fig 2 — Phase distribution"),
                            "fig2_phase_distribution.csv", "text/csv")
     else:
         st.info("No phase data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # Fig 3 — Target landscape
     # ------------------------------------------------------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Figure 3 — Target landscape")
 
+    # CAR-NK / CAR-Treg / CAAR-T / CAR-γδ T are cell therapy platforms, not antigen targets —
+    # they belong in the modality figure (Fig 6). Exclude them here.
     target_counts = (
-        df_filt["TargetCategory"].fillna("Unknown").value_counts()
+        df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+        .fillna("Unknown").value_counts()
         .rename_axis("Target").reset_index(name="Trials")
     )
 
     if not target_counts.empty:
-        fig3 = pub_bar(target_counts, "Target", "Trials", color="#7b2d8b",
-                       title="CAR-T Target Categories in Autoimmune Disease Trials", xlab="Target category")
+        target_sorted = target_counts.sort_values("Trials", ascending=True)
+        fig3 = px.bar(
+            target_sorted, x="Trials", y="Target", orientation="h", height=max(340, len(target_sorted) * 36 + 100),
+            color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
+            text="Trials",
+        )
+        fig3.update_traces(
+            marker_line_width=0, opacity=1,
+            texttemplate="%{text}", textposition="outside",
+            textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
+        )
+        fig3.update_layout(
+            **PUB_BASE,
+            title=_pub_title("Antigen Target Distribution — CAR Cell Therapy Autoimmune Trials"),
+            xaxis_title="Number of trials",
+            yaxis_title=None,
+            showlegend=False,
+            margin=dict(l=160, r=56, t=64, b=56),
+            yaxis=_H_YAXIS,
+            xaxis=_H_XAXIS,
+            uniformtext_minsize=9, uniformtext_mode="hide",
+        )
         st.plotly_chart(fig3, use_container_width=True, config=PUB_EXPORT)
 
         total_tg = target_counts["Trials"].sum()
         cd19_n = int(target_counts.loc[target_counts["Target"] == "CD19", "Trials"].sum())
         bcma_n = int(target_counts.loc[target_counts["Target"] == "BCMA", "Trials"].sum())
         dual_n = int(target_counts.loc[target_counts["Target"].str.contains("dual", case=False, na=False), "Trials"].sum())
-        car_nk_n = int(target_counts.loc[target_counts["Target"] == "CAR-NK", "Trials"].sum())
+        unspec_n = int(target_counts.loc[target_counts["Target"] == "CAR-T_unspecified", "Trials"].sum())
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("CD19-targeted", f"{cd19_n} ({100*cd19_n/total_tg:.0f}%)")
         c2.metric("BCMA-targeted", f"{bcma_n} ({100*bcma_n/total_tg:.0f}%)")
         c3.metric("Dual-target", f"{dual_n} ({100*dual_n/total_tg:.0f}%)")
-        c4.metric("CAR-NK", f"{car_nk_n} ({100*car_nk_n/total_tg:.0f}%)")
+        c4.metric("Target unspecified", f"{unspec_n} ({100*unspec_n/total_tg:.0f}%)")
 
         fig3_csv = target_counts.copy()
         fig3_csv["% of total"] = (fig3_csv["Trials"] / total_tg * 100).round(1)
-        st.download_button("Fig 3 data (CSV)", fig3_csv.to_csv(index=False),
+        st.download_button("Fig 3 data (CSV)",
+                           _csv_with_provenance(fig3_csv, "Fig 3 — Target landscape"),
                            "fig3_target_landscape.csv", "text/csv")
     else:
         st.info("No target data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # Fig 4 — Disease distribution
     # ------------------------------------------------------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Figure 4 — Disease distribution")
 
     _dis_vals = split_pipe_values(df_filt["DiseaseEntities"])
@@ -1455,9 +2031,33 @@ with tab_pub:
     ) if _dis_vals else pd.DataFrame(columns=["Disease", "Trials"])
 
     if not disease_counts.empty:
-        fig4 = pub_bar(disease_counts, "Disease", "Trials", color="#d95f02",
-                       title="Disease Entity Distribution in CAR-T Autoimmune Trials\n(basket trials counted per disease enrolled)",
-                       xlab="Disease entity")
+        disease_sorted = disease_counts.sort_values("Trials", ascending=True)
+        fig4 = px.bar(
+            disease_sorted, x="Trials", y="Disease", orientation="h", height=max(380, len(disease_sorted) * 36 + 100),
+            color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
+            text="Trials",
+        )
+        fig4.update_traces(
+            marker_line_width=0, opacity=1,
+            texttemplate="%{text}", textposition="outside",
+            textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
+        )
+        fig4.update_layout(
+            **PUB_BASE,
+            title=_pub_title("Disease Entity Distribution — CAR Cell Therapy Trials"),
+            xaxis_title="Number of trials",
+            yaxis_title=None,
+            showlegend=False,
+            margin=dict(l=160, r=56, t=64, b=56),
+            yaxis=_H_YAXIS,
+            xaxis=_H_XAXIS,
+            uniformtext_minsize=9, uniformtext_mode="hide",
+        )
+        fig4.add_annotation(
+            text="Basket trials counted once per enrolled disease",
+            xref="paper", yref="paper", x=0, y=-0.08,
+            showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
+        )
         st.plotly_chart(fig4, use_container_width=True, config=PUB_EXPORT)
 
         total_dis = disease_counts["Trials"].sum()
@@ -1468,16 +2068,15 @@ with tab_pub:
 
         fig4_csv = disease_counts.copy()
         fig4_csv["% of total"] = (fig4_csv["Trials"] / total_dis * 100).round(1)
-        st.download_button("Fig 4 data (CSV)", fig4_csv.to_csv(index=False),
+        st.download_button("Fig 4 data (CSV)",
+                           _csv_with_provenance(fig4_csv, "Fig 4 — Disease distribution"),
                            "fig4_disease_distribution.csv", "text/csv")
     else:
         st.info("No disease data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # Fig 5 — Geographic distribution
     # ------------------------------------------------------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Figure 5 — Geographic distribution")
 
     geo_vals = split_pipe_values(df_filt["Countries"])
@@ -1490,27 +2089,48 @@ with tab_pub:
         fig5_map = px.choropleth(
             geo_counts, locations="Country", locationmode="country names",
             color="Trials",
-            color_continuous_scale=[[0, "#deebf7"], [0.4, "#9ecae1"], [0.7, "#3182bd"], [1, "#08306b"]],
+            color_continuous_scale=[[0, "#dce9f5"], [0.3, "#5aafd6"], [0.65, "#1c6faf"], [1, "#08306b"]],
             projection="natural earth", template="plotly_white",
         )
         fig5_map.update_layout(
             paper_bgcolor="white", plot_bgcolor="white",
-            font=dict(family="Arial, sans-serif", size=12, color="#1a1a1a"),
-            margin=dict(l=0, r=0, t=30, b=0),
-            title=dict(text="Global Distribution of Trial Sites", font_size=14, x=0),
+            font=PUB_FONT,
+            margin=dict(l=0, r=0, t=48, b=0),
+            title=_pub_title("Global Distribution of CAR Cell Therapy Trial Sites"),
             geo=dict(
-                bgcolor="white", lakecolor="#d0e8f5", landcolor="#f0f0f0",
-                showframe=True, framecolor="#cccccc",
-                showcoastlines=True, coastlinecolor="#cccccc",
-                showcountries=True, countrycolor="#dddddd",
+                bgcolor="white", lakecolor="#ddeeff", landcolor="#eeeeee",
+                showframe=False,
+                showcoastlines=True, coastlinecolor="#999999", coastlinewidth=0.6,
+                showcountries=True, countrycolor="#cccccc", countrywidth=0.4,
             ),
-            coloraxis_colorbar_title="Trials",
+            coloraxis_colorbar=dict(
+                title=dict(text="Trials", font=dict(size=11, color=_AX_COLOR)),
+                tickfont=dict(size=10, color=_AX_COLOR),
+                thickness=14, len=0.55, outlinewidth=0.5, outlinecolor="#aaaaaa",
+            ),
         )
         st.plotly_chart(fig5_map, use_container_width=True, config=PUB_EXPORT)
 
-        top10 = geo_counts.head(10)
-        fig5_bar = pub_bar(top10, "Country", "Trials", color="#2a6099",
-                           title="Top 10 Countries by Trial Count", xlab="Country", height=380)
+        top10 = geo_counts.head(10).sort_values("Trials", ascending=True)
+        fig5_bar = px.bar(
+            top10, x="Trials", y="Country", orientation="h", height=380,
+            color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
+            text="Trials",
+        )
+        fig5_bar.update_traces(
+            marker_line_width=0, opacity=1,
+            texttemplate="%{text}", textposition="outside",
+            textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
+        )
+        fig5_bar.update_layout(
+            **PUB_BASE,
+            title=_pub_title("Top 10 Countries by Number of Trial Sites"),
+            xaxis_title="Number of trials", yaxis_title=None, showlegend=False,
+            margin=dict(l=100, r=56, t=64, b=56),
+            yaxis=_H_YAXIS,
+            xaxis=_H_XAXIS,
+            uniformtext_minsize=9, uniformtext_mode="hide",
+        )
         st.plotly_chart(fig5_bar, use_container_width=True, config=PUB_EXPORT)
 
         total_geo = geo_counts["Trials"].sum()
@@ -1521,16 +2141,15 @@ with tab_pub:
 
         fig5_csv = geo_counts.copy()
         fig5_csv["% of total"] = (fig5_csv["Trials"] / total_geo * 100).round(1)
-        st.download_button("Fig 5 data (CSV)", fig5_csv.to_csv(index=False),
+        st.download_button("Fig 5 data (CSV)",
+                           _csv_with_provenance(fig5_csv, "Fig 5 — Geographic distribution"),
                            "fig5_geographic_distribution.csv", "text/csv")
     else:
         st.info("No country data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # Fig 6 — Innovation signals (product type + modality over time)
     # ------------------------------------------------------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Figure 6 — Innovation signals")
 
     # 6a: Autologous vs allogeneic by start year
@@ -1546,63 +2165,449 @@ with tab_pub:
             product_year, x="StartYear", y="Trials", color="ProductType",
             barmode="stack", height=420, template="plotly_white",
             color_discrete_map={
-                "Autologous": "#2a6099",
-                "Allogeneic/Off-the-shelf": "#d95f02",
-                "Unclear": "#999999",
+                "Autologous":              NEJM_BLUE,
+                "Allogeneic/Off-the-shelf": NEJM_RED,
+                "In vivo":                 NEJM_GREEN,
+                "Unclear":                 "#888888",
             },
+            category_orders={"ProductType": ["Autologous", "Allogeneic/Off-the-shelf", "In vivo", "Unclear"]},
             labels={"StartYear": "Start year", "Trials": "Number of trials", "ProductType": "Product type"},
         )
+        fig6a.update_traces(marker_line_width=0, opacity=1)
         fig6a.update_layout(
-            **PUB_LAYOUT,
-            title=dict(text="Autologous vs. Allogeneic CAR Cell Therapies by Start Year", font_size=14, x=0),
-            xaxis=dict(tickmode="linear", dtick=1, tickformat="d"),
+            **PUB_BASE,
+            title=_pub_title("CAR Cell Therapy Product Type by Start Year"),
+            margin=dict(l=64, r=36, t=64, b=110),
+            xaxis=dict(
+                tickmode="linear", dtick=1, tickformat="d", showgrid=False,
+                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                ticks="outside", ticklen=6, tickwidth=1.2,
+                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+                title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+            ),
+            yaxis=dict(
+                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+                ticks="outside", ticklen=6, tickwidth=1.2,
+                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+                title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+                zeroline=False,
+            ),
+            legend=dict(
+                orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
+                borderwidth=0,
+            ),
         )
-        fig6a.update_xaxes(showgrid=False)
-        fig6a.update_yaxes(gridcolor="#e5e5e5")
         st.plotly_chart(fig6a, use_container_width=True, config=PUB_EXPORT)
 
-        # 6b: Therapy modality (derive from TargetCategory)
-        def _modality(target: str) -> str:
-            t = str(target)
-            if t == "CAR-NK":
-                return "CAR-NK"
-            if t == "CAAR-T":
-                return "CAAR-T"
-            if t in ("CAR-Treg", "CD6"):
-                return "CAR-Treg"
-            return "CAR-T"
-
-        df_innov["Modality"] = df_innov["TargetCategory"].apply(_modality)
+        # 6b: Therapy modality — eight categories (CAR-T split by autologous/allogeneic + γδ T)
+        # _MODALITY_ORDER, _MODALITY_COLORS, _modality() are module-level; Modality column pre-computed
+        df_innov["Modality"] = df_innov.apply(_modality, axis=1)
         modality_counts = (
             df_innov["Modality"].value_counts()
             .rename_axis("Modality").reset_index(name="Trials")
+            .sort_values("Trials", ascending=True)
         )
-        fig6b = pub_bar(
-            modality_counts, "Modality", "Trials", color="#2a6099",
-            title="Cell Therapy Modality Distribution", xlab="Modality", height=380,
+        # Colour each bar by its modality
+        modality_counts["Color"] = modality_counts["Modality"].map(_MODALITY_COLORS)
+        fig6b = px.bar(
+            modality_counts, x="Trials", y="Modality", orientation="h",
+            height=max(300, len(modality_counts) * 52 + 100),
+            color="Modality", color_discrete_map=_MODALITY_COLORS,
+            template="plotly_white", text="Trials",
+        )
+        fig6b.update_traces(
+            marker_line_width=0, opacity=1,
+            texttemplate="%{text}", textposition="outside",
+            textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
+        )
+        fig6b.update_layout(
+            **PUB_BASE,
+            title=_pub_title("Cell Therapy Modality Distribution"),
+            xaxis_title="Number of trials", yaxis_title=None, showlegend=False,
+            margin=dict(l=110, r=56, t=64, b=56),
+            yaxis=_H_YAXIS,
+            xaxis=_H_XAXIS,
+            uniformtext_minsize=9, uniformtext_mode="hide",
         )
         st.plotly_chart(fig6b, use_container_width=True, config=PUB_EXPORT)
 
+        # 6c: Modality over time (stacked area gives better temporal story)
+        mod_year = (
+            df_innov.groupby(["StartYear", "Modality"]).size()
+            .reset_index(name="Trials")
+        )
+        # keep only modalities that actually appear
+        present_mods = [m for m in _MODALITY_ORDER if m in mod_year["Modality"].unique()]
+        fig6c = px.bar(
+            mod_year[mod_year["Modality"].isin(present_mods)],
+            x="StartYear", y="Trials", color="Modality",
+            barmode="stack", height=400, template="plotly_white",
+            color_discrete_map=_MODALITY_COLORS,
+            category_orders={"Modality": _MODALITY_ORDER},
+            labels={"StartYear": "Start year", "Trials": "Number of trials"},
+        )
+        fig6c.update_traces(marker_line_width=0, opacity=1)
+        fig6c.update_layout(
+            **PUB_BASE,
+            title=_pub_title("Cell Therapy Modality Mix by Start Year"),
+            margin=dict(l=64, r=36, t=64, b=110),
+            xaxis=dict(
+                tickmode="linear", dtick=1, tickformat="d", showgrid=False,
+                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                ticks="outside", ticklen=6, tickwidth=1.2,
+                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+            ),
+            yaxis=dict(
+                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+                ticks="outside", ticklen=6, tickwidth=1.2,
+                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+                zeroline=False,
+            ),
+            legend=dict(
+                orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
+                borderwidth=0,
+            ),
+            xaxis_title="Start year",
+            yaxis_title="Number of trials",
+        )
+        st.plotly_chart(fig6c, use_container_width=True, config=PUB_EXPORT)
+
         # Summary stats
         total_prod = len(df_innov)
-        auto_n = int((df_innov["ProductType"] == "Autologous").sum())
-        allo_n = int((df_innov["ProductType"] == "Allogeneic/Off-the-shelf").sum())
+        auto_n  = int((df_innov["ProductType"] == "Autologous").sum())
+        allo_n  = int((df_innov["ProductType"] == "Allogeneic/Off-the-shelf").sum())
+        invivo_n = int((df_innov["Modality"] == "In vivo CAR").sum())
         carnk_n = int((df_innov["Modality"] == "CAR-NK").sum())
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Autologous", f"{auto_n} ({100*auto_n/total_prod:.0f}%)")
-        c2.metric("Allogeneic/Off-the-shelf", f"{allo_n} ({100*allo_n/total_prod:.0f}%)")
-        c3.metric("CAR-NK modality", f"{carnk_n} ({100*carnk_n/total_prod:.0f}%)")
+        treg_n  = int((df_innov["Modality"] == "CAR-Treg").sum())
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Autologous",              f"{auto_n} ({100*auto_n/total_prod:.0f}%)")
+        c2.metric("Allogeneic/Off-the-shelf",f"{allo_n} ({100*allo_n/total_prod:.0f}%)")
+        c3.metric("CAR-NK",                  f"{carnk_n} ({100*carnk_n/total_prod:.0f}%)")
+        c4.metric("CAR-Treg",                f"{treg_n} ({100*treg_n/total_prod:.0f}%)")
+        c5.metric("In vivo CAR",             f"{invivo_n} ({100*invivo_n/total_prod:.0f}%)")
 
         fig6_csv = pd.merge(
             product_year.rename(columns={"ProductType": "Category", "Trials": "n_product"}),
             df_innov.groupby(["StartYear", "Modality"]).size().reset_index(name="n_modality"),
             left_on="StartYear", right_on="StartYear", how="outer",
         )
-        st.download_button("Fig 6 data (CSV)", product_year.to_csv(index=False),
+        st.download_button("Fig 6 data (CSV)",
+                           _csv_with_provenance(fig6_csv, "Fig 6 — Innovation signals / cell therapy modality"),
                            "fig6_innovation_signals.csv", "text/csv")
     else:
         st.info("No start year data available for innovation analysis.")
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ------------------------------------------------------------------
+    # Fig 7 — Trial enrollment
+    # ------------------------------------------------------------------
+    st.subheader("Figure 7 — Trial enrollment")
+
+    df_enroll = df_filt.copy()
+    df_enroll["EnrollmentCount"] = pd.to_numeric(df_enroll["EnrollmentCount"], errors="coerce")
+    df_enroll_known = df_enroll.dropna(subset=["EnrollmentCount"]).copy()
+    df_enroll_known["EnrollmentCount"] = df_enroll_known["EnrollmentCount"].astype(int)
+
+    if len(df_enroll_known) >= 3:
+        pct_known = 100 * len(df_enroll_known) / len(df_enroll)
+        total_pts = int(df_enroll_known["EnrollmentCount"].sum())
+        med_pts   = int(df_enroll_known["EnrollmentCount"].median())
+        p25 = int(df_enroll_known["EnrollmentCount"].quantile(0.25))
+        p75 = int(df_enroll_known["EnrollmentCount"].quantile(0.75))
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Trials with reported enrollment", f"{len(df_enroll_known)} ({pct_known:.0f}%)")
+        c2.metric("Total enrolled patients", f"{total_pts:,}")
+        c3.metric("Median enrollment", med_pts)
+        c4.metric("IQR", f"{p25}–{p75}")
+
+        # 7a — Enrollment distribution histogram
+        fig7a = px.histogram(
+            df_enroll_known, x="EnrollmentCount", nbins=40, height=400,
+            color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
+            labels={"EnrollmentCount": "Planned enrollment (patients)"},
+        )
+        fig7a.update_traces(marker_line_color="white", marker_line_width=0.4, opacity=0.9)
+        _vline_med = dict(
+            type="line", x0=med_pts, x1=med_pts, y0=0, y1=1,
+            xref="x", yref="paper",
+            line=dict(color=NEJM_RED, width=1.5, dash="dash"),
+        )
+        fig7a.update_layout(
+            **PUB_LAYOUT,
+            title=_pub_title("Distribution of Planned Trial Enrollment"),
+            xaxis_title="Planned enrollment (patients)",
+            yaxis_title="Number of trials",
+            shapes=[_vline_med],
+            annotations=[dict(
+                x=med_pts, y=0.97, xref="x", yref="paper",
+                text=f" Median = {med_pts}", showarrow=False,
+                font=dict(size=10, color=NEJM_RED), xanchor="left",
+            )],
+        )
+        st.plotly_chart(fig7a, use_container_width=True, config=PUB_EXPORT)
+
+        # 7b — Median enrollment by phase
+        _phase_enroll = (
+            df_enroll_known.groupby("PhaseNormalized", observed=False)["EnrollmentCount"]
+            .agg(Median="median", Q1=lambda x: x.quantile(0.25), Q3=lambda x: x.quantile(0.75), N="count")
+            .reset_index()
+            .rename(columns={"PhaseNormalized": "Phase"})
+        )
+        _phase_order_map = {v: k for k, v in PHASE_LABELS.items()}
+        _phase_enroll = _phase_enroll[_phase_enroll["N"] > 0].copy()
+        _phase_enroll["PhaseOrdered"] = _phase_enroll["Phase"].map(_phase_order_map)
+        _phase_enroll = _phase_enroll.sort_values("PhaseOrdered", na_position="last")
+        _phase_enroll["Median"] = _phase_enroll["Median"].astype(int)
+        _phase_enroll["label"] = _phase_enroll.apply(
+            lambda r: f"{r['Median']} (n={r['N']})", axis=1
+        )
+
+        fig7b = px.bar(
+            _phase_enroll, x="Phase", y="Median", height=380,
+            color_discrete_sequence=[NEJM_GREEN], template="plotly_white",
+            text="label",
+        )
+        fig7b.update_traces(
+            marker_line_width=0, opacity=1, width=0.6,
+            textposition="outside", textfont=dict(size=10, color=_AX_COLOR),
+            cliponaxis=False,
+        )
+        fig7b.update_layout(
+            **PUB_LAYOUT,
+            title=_pub_title("Median Planned Enrollment by Trial Phase"),
+            xaxis_title="Phase",
+            yaxis_title="Median planned enrollment (patients)",
+            uniformtext_minsize=9, uniformtext_mode="hide",
+        )
+        st.plotly_chart(fig7b, use_container_width=True, config=PUB_EXPORT)
+
+        # 7c — Total enrolled patients by disease (enrollment-weighted landscape)
+        _dis_enroll_rows = []
+        for _, row in df_enroll_known.iterrows():
+            entities = [e.strip() for e in str(row.get("DiseaseEntities", "")).split("|") if e.strip()]
+            if not entities:
+                entities = [str(row.get("DiseaseEntity", "Unclassified"))]
+            for ent in entities:
+                _dis_enroll_rows.append({"Disease": ent, "Enrollment": row["EnrollmentCount"]})
+        if _dis_enroll_rows:
+            _dis_enroll_df = pd.DataFrame(_dis_enroll_rows)
+            _dis_enroll_agg = (
+                _dis_enroll_df.groupby("Disease")["Enrollment"]
+                .agg(TotalEnrolled="sum", Trials="count")
+                .reset_index()
+                .sort_values("TotalEnrolled", ascending=True)
+            )
+            _dis_enroll_agg["TotalEnrolled"] = _dis_enroll_agg["TotalEnrolled"].astype(int)
+
+            fig7c = px.bar(
+                _dis_enroll_agg, x="TotalEnrolled", y="Disease", orientation="h",
+                height=max(380, len(_dis_enroll_agg) * 34 + 100),
+                color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
+                text="TotalEnrolled",
+            )
+            fig7c.update_traces(
+                marker_line_width=0, opacity=1,
+                texttemplate="%{text:,}", textposition="outside",
+                textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
+            )
+            fig7c.update_layout(
+                **PUB_BASE,
+                title=_pub_title("Total Planned Enrollment by Disease — Enrollment-Weighted Landscape"),
+                xaxis_title="Total planned patients (reported trials)",
+                yaxis_title=None, showlegend=False,
+                margin=dict(l=155, r=72, t=64, b=56),
+                yaxis=_H_YAXIS,
+                xaxis=_H_XAXIS,
+                uniformtext_minsize=9, uniformtext_mode="hide",
+            )
+            fig7c.add_annotation(
+                text="Basket trials counted once per enrolled disease · Trials without reported enrollment excluded",
+                xref="paper", yref="paper", x=0, y=-0.1,
+                showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
+            )
+            st.plotly_chart(fig7c, use_container_width=True, config=PUB_EXPORT)
+
+        # 7d / 7e — China vs Non-China  ·  Academic vs Industry
+        def _geo_group(countries_str) -> str:
+            if not countries_str or pd.isna(countries_str):
+                return "Unknown"
+            return "China" if "China" in str(countries_str).split("|") else "Non-China"
+
+        _ACAD_TOKENS = [
+            "hospital", "university", "universit",   # covers most international variants
+            "medical center", "medical centre", "medical college", "medical school",
+            "children's", "childrens", "school of medicine",
+            "general hospital", "affiliated hospital",
+            "national institute", "research center", "research centre",
+            "pla ", "armed forces", "faculty of", "nhs", "inserm",
+        ]
+        _INDUS_TOKENS = [
+            "therapeutics", "pharma", "pharmaceutical",
+            "biotechnology", "biotech", "bioscience", "biotherapy",
+            "biopharmaceutical", "biopharma", "biologics",
+            " inc", " ltd", " co.,", " llc", " corp", " gmbh",
+        ]
+
+        def _sponsor_type(sponsor) -> str:
+            if not sponsor or pd.isna(sponsor):
+                return "Unknown"
+            s = str(sponsor).lower()
+            if any(t in s for t in _ACAD_TOKENS):
+                return "Academic"
+            if any(t in s for t in _INDUS_TOKENS):
+                return "Industry"
+            # short strings without corporate suffixes are usually PI names
+            if len(s.split()) <= 4 and "." not in s:
+                return "Academic"
+            return "Industry"
+
+        df_enroll_known["GeoGroup"]    = df_enroll_known["Countries"].apply(_geo_group)
+        df_enroll_known["SponsorType"] = df_enroll_known["LeadSponsor"].apply(_sponsor_type)
+
+        def _comparison_stats(df_sub, group_col: str) -> pd.DataFrame:
+            return (
+                df_sub[df_sub[group_col] != "Unknown"]
+                .groupby(group_col)["EnrollmentCount"]
+                .agg(
+                    Median="median",
+                    Q1=lambda x: int(x.quantile(0.25)),
+                    Q3=lambda x: int(x.quantile(0.75)),
+                    N="count",
+                )
+                .reset_index()
+                .rename(columns={group_col: "Group"})
+                .assign(Median=lambda d: d["Median"].astype(int))
+                .assign(Label=lambda d: d.apply(lambda r: f"Median {r['Median']}  (n={r['N']})", axis=1))
+            )
+
+        geo_stats  = _comparison_stats(df_enroll_known, "GeoGroup")
+        spon_stats = _comparison_stats(df_enroll_known, "SponsorType")
+
+        def _make_compare_fig(stats_df: pd.DataFrame, title: str,
+                              color_map: dict, height: int = 340):
+            fig = px.bar(
+                stats_df, x="Group", y="Median", height=height,
+                color="Group", color_discrete_map=color_map,
+                template="plotly_white", text="Label",
+                error_y=stats_df["Q3"] - stats_df["Median"],
+                error_y_minus=stats_df["Median"] - stats_df["Q1"],
+            )
+            fig.update_traces(
+                marker_line_width=0, opacity=1, width=0.5,
+                textposition="outside", textfont=dict(size=10, color=_AX_COLOR),
+                cliponaxis=False,
+                error_y=dict(color=_AX_COLOR, thickness=1.2, width=6),
+            )
+            fig.update_layout(
+                **PUB_LAYOUT,
+                title=_pub_title(title),
+                xaxis_title=None,
+                yaxis_title="Median planned enrollment (patients)",
+                showlegend=False,
+                uniformtext_minsize=9, uniformtext_mode="hide",
+            )
+            fig.add_annotation(
+                text="Error bars = IQR (Q1–Q3)",
+                xref="paper", yref="paper", x=0, y=-0.12,
+                showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
+            )
+            return fig
+
+        col_geo, col_spon = st.columns(2)
+        with col_geo:
+            if not geo_stats.empty:
+                fig7d = _make_compare_fig(
+                    geo_stats, "Median Enrollment: China vs Non-China",
+                    color_map={"China": NEJM_RED, "Non-China": NEJM_BLUE},
+                )
+                st.plotly_chart(fig7d, use_container_width=True, config=PUB_EXPORT)
+
+        with col_spon:
+            if not spon_stats.empty:
+                fig7e = _make_compare_fig(
+                    spon_stats, "Median Enrollment: Academic vs Industry Sponsor",
+                    color_map={"Academic": NEJM_GREEN, "Industry": NEJM_PURPLE},
+                )
+                st.plotly_chart(fig7e, use_container_width=True, config=PUB_EXPORT)
+
+        # 7f: Combined geography × sponsor type
+        cross_stats = (
+            df_enroll_known[
+                (df_enroll_known["GeoGroup"] != "Unknown") &
+                (df_enroll_known["SponsorType"] != "Unknown")
+            ]
+            .groupby(["GeoGroup", "SponsorType"])["EnrollmentCount"]
+            .agg(
+                Median="median",
+                Q1=lambda x: int(x.quantile(0.25)),
+                Q3=lambda x: int(x.quantile(0.75)),
+                N="count",
+            )
+            .reset_index()
+            .assign(Median=lambda d: d["Median"].astype(int))
+            .assign(Label=lambda d: d.apply(lambda r: f"n={r['N']}", axis=1))
+        )
+        if not cross_stats.empty:
+            _err_plus  = cross_stats["Q3"] - cross_stats["Median"]
+            _err_minus = cross_stats["Median"] - cross_stats["Q1"]
+            fig7f = px.bar(
+                cross_stats, x="SponsorType", y="Median",
+                color="GeoGroup", barmode="group", height=400,
+                color_discrete_map={"China": NEJM_RED, "Non-China": NEJM_BLUE},
+                template="plotly_white", text="Label",
+                error_y=_err_plus, error_y_minus=_err_minus,
+                labels={"SponsorType": "Sponsor type", "Median": "Median enrollment (patients)", "GeoGroup": ""},
+            )
+            fig7f.update_traces(
+                marker_line_width=0, opacity=1, width=0.35,
+                textposition="outside", textfont=dict(size=10, color=_AX_COLOR),
+                cliponaxis=False,
+                error_y=dict(color=_AX_COLOR, thickness=1.2, width=6),
+            )
+            fig7f.update_layout(
+                **PUB_LAYOUT,
+                title=_pub_title("Median Enrollment: Geography × Sponsor Type"),
+                xaxis_title=None,
+                yaxis_title="Median planned enrollment (patients)",
+                legend=dict(
+                    orientation="v", yanchor="top", y=0.98, xanchor="right", x=0.99,
+                    font=dict(size=10, color=_AX_COLOR),
+                    bgcolor="rgba(255,255,255,0.85)", bordercolor="rgba(0,0,0,0.08)",
+                    borderwidth=1,
+                ),
+                uniformtext_minsize=9, uniformtext_mode="hide",
+            )
+            fig7f.add_annotation(
+                text="Error bars = IQR (Q1–Q3)",
+                xref="paper", yref="paper", x=0, y=-0.14,
+                showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
+            )
+            st.plotly_chart(fig7f, use_container_width=True, config=PUB_EXPORT)
+
+        # Tabular summary
+        _cmp_summary = pd.DataFrame({
+            "Group": list(geo_stats["Group"]) + list(spon_stats["Group"]),
+            "Category": (["Geography"] * len(geo_stats)) + (["Sponsor type"] * len(spon_stats)),
+            "N (trials)": list(geo_stats["N"]) + list(spon_stats["N"]),
+            "Median enrollment": list(geo_stats["Median"]) + list(spon_stats["Median"]),
+            "IQR Q1": list(geo_stats["Q1"]) + list(spon_stats["Q1"]),
+            "IQR Q3": list(geo_stats["Q3"]) + list(spon_stats["Q3"]),
+        })
+
+        fig7_csv = df_enroll_known[["NCTId", "BriefTitle", "DiseaseEntity", "TargetCategory",
+                                     "ProductType", "Phase", "EnrollmentCount",
+                                     "GeoGroup", "SponsorType"]].copy()
+        fig7_csv = fig7_csv.sort_values("EnrollmentCount", ascending=False)
+        st.download_button("Fig 7 data (CSV)",
+                           _csv_with_provenance(fig7_csv, "Fig 7 — Enrollment characteristics"),
+                           "fig7_enrollment.csv", "text/csv")
+        with st.expander("Comparison summary table"):
+            st.dataframe(_cmp_summary, use_container_width=True, hide_index=True)
+    else:
+        st.info("Insufficient enrollment data available.")
 
 # ---------------------------------------------------------------------------
 # TAB: Methods & Appendix
@@ -1640,26 +2645,28 @@ of 2,000 records were retrieved per query execution.
 
 Inclusion Criteria
 ------------------
-Studies were included if they: (1) described a CAR-based cellular therapy (CAR-T,
-CAR-NK, CAAR-T, or CAR-Treg); and (2) targeted a systemic autoimmune or rheumatic
-disease. No restriction was applied to study phase, sponsor type, or country.
+Studies were included if they: (1) described a CAR-based cellular therapy (CAR-T
+[autologous or allogeneic], CAR-NK, CAAR-T, CAR-Treg, or in vivo CAR); and
+(2) targeted a systemic autoimmune or rheumatic disease. No restriction was applied
+to study phase, sponsor type, or country.
 
 Exclusion Criteria
 ------------------
 Studies were excluded if they met any of the following criteria:
     (1) The NCT identifier appeared on a manually curated exclusion list ({n_hard}
         pre-specified identifiers) compiled upon initial review to remove studies
-        that were retrieved by the search query but were clearly outside scope.
+        retrieved by the search query but clearly outside scope (e.g., studies
+        confirmed as non-CAR-T interventions on manual inspection).
     (2) Text fields (conditions, title, brief summary, interventions) contained
         one or more of {n_indication} predefined oncology or haematologic
         malignancy keywords (e.g., multiple myeloma, leukemia, lymphoma, solid
         tumour, AL amyloidosis, stem cell transplantation).
 Non-oncology immune-mediated diseases outside classical rheumatology (e.g.,
 multiple sclerosis, myasthenia gravis, NMOSD, pemphigus vulgaris, anti-GBM
-disease, antiphospholipid syndrome, AIHA, immune thrombocytopenia, Graves
-disease, membranous nephropathy) were retained and classified as
-"Other immune-mediated" to enable landscape analysis of CAR-T use beyond
-rheumatology while preserving the ability to filter by disease category.
+disease, antiphospholipid syndrome, AIHA, immune thrombocytopenia, aplastic
+anaemia, type 1 diabetes, Graves disease, membranous nephropathy) were retained
+and classified as "Other immune-mediated" to enable landscape analysis of CAR-T
+use beyond rheumatology while preserving the ability to filter by disease category.
 Exclusion was applied after deduplication and before downstream classification.
 
 Study Selection (PRISMA)
@@ -1675,23 +2682,67 @@ Classification
 --------------
 Disease entity. Each study was assigned to one of {len(DISEASE_ENTITIES)} specific
 disease categories ({disease_list}), a "Basket/Multidisease" category (for trials
-enrolling ≥2 distinct systemic autoimmune diseases), or "Autoimmune_other" (for
-studies describing autoimmune conditions not matching a specific entity). Assignment
-used hierarchical rule-based matching of normalised text drawn from the conditions,
-title, brief summary, and interventions fields. Condition-field matches took precedence
-over full-text matches; multi-disease trials were identified when ≥2 systemic entities
-were detected within the conditions field.
+enrolling ≥2 distinct systemic autoimmune diseases), or "Unclassified" (for studies
+describing generic autoimmune conditions without a mappable specific entity).
+Connective tissue diseases are reported at the entity level: systemic sclerosis (SSc),
+Sjögren syndrome, and undifferentiated/mixed CTD (CTD_other) are each distinct
+categories. Assignment used hierarchical rule-based matching of normalised text drawn
+from the conditions, title, brief summary, and interventions fields. Condition-field
+matches took precedence over full-text matches; multi-disease trials were identified
+when ≥2 systemic entities were detected within the conditions field. Generic
+autoimmune phrases (e.g., "autoimmune diseases", "B-cell mediated autoimmune
+disorders", "paediatric B-cell related autoimmune diseases") were mapped to
+"Unclassified" rather than a specific entity.
 
-Target category. The primary cell therapy target was assigned from intervention text
-using a priority-ordered ruleset: CAR-NK constructs were identified first (terms:
-{", ".join(CAR_NK_TERMS)}), followed by CAAR-T ({", ".join(CAAR_T_TERMS)}),
-CAR-Treg ({", ".join(CAR_TREG_TERMS)}), then specific antigen targets (CD19, BCMA,
-dual CD19/BCMA, CD19/BAFF, CD20, CD6, CD7). Studies containing CAR-related terms
-but no identifiable specific target were labelled "CAR-T_unspecified".
+Target category. The primary antigen target was assigned from trial text using a
+priority-ordered ruleset. Cell-therapy platform types were identified first:
+CAR-NK constructs (terms: {", ".join(CAR_NK_TERMS)}), CAAR-T
+({", ".join(CAAR_T_TERMS)}), and CAR-Treg ({", ".join(CAR_TREG_TERMS)}).
+Specific antigen targets were then evaluated in order of specificity: dual
+BCMA/CD70, dual CD19/BCMA, dual CD19/CD20, dual CD19/BAFF (detected by
+co-presence of CD19 and BAFF terms), then single-target CD19, BCMA, CD20,
+CD70, BAFF, CD6, and CD7. Studies containing CAR-related terms but no
+identifiable antigen were labelled "CAR-T_unspecified". A named-product lookup
+table (NAMED_PRODUCT_TARGETS in config.py) was applied as a fallback for
+well-known products that omit antigen names from accessible study text fields.
+Platform labels (CAR-NK, CAR-Treg, CAAR-T) are excluded from antigen-target
+frequency analyses, as these denote cell-therapy modalities rather than
+antigens.
 
 Product type. Studies were classified as "Autologous", "Allogeneic/Off-the-shelf",
-or "Unclear" based on presence of corresponding keywords in normalised text (e.g.,
-autologous, autoleucel; allogeneic, off-the-shelf, ucart, universal CAR-T).
+"In vivo", or "Unclear" based on presence of corresponding keywords in normalised
+text. Autologous markers included: autologous, autoleucel, patient-derived.
+Allogeneic markers included: allogeneic, off-the-shelf, universal CAR-T, UCART,
+healthy donor, donor-derived, umbilical cord blood, cord blood. In vivo markers
+included: in vivo CAR, circular RNA, lentiviral nanoparticle, mRNA-LNP. A named
+product lookup table (NAMED_PRODUCT_TYPES in config.py) was applied as a fallback
+when these generic markers were absent. Both lookup tables are updated iteratively
+via a structured curation loop applied to pipeline output.
+
+Cell therapy modality. Each trial was assigned to one of seven mechanistically
+distinct modality categories based on target category and product type:
+  • Auto CAR-T — conventional autologous alpha-beta CAR-T cells
+  • Allo CAR-T — allogeneic/off-the-shelf CAR-T (including iPSC-derived)
+  • CAR-T (unclear) — CAR-T with product source not determinable from public text
+  • CAR-NK — CAR-modified natural killer cells (autologous or allogeneic)
+  • CAR-Treg — regulatory T-cell CAR constructs
+  • CAAR-T — chimeric autoantibody receptor T cells
+  • In vivo CAR — mRNA-LNP or other non-cellular in vivo CAR delivery systems
+
+Enrollment Analysis
+-------------------
+Planned enrollment counts were extracted from the EnrollmentCount field (type=
+"Anticipated" or "Actual") and coerced to numeric; non-numeric or missing values
+were excluded from enrollment analyses (Figure 7). Geographic classification:
+trials recruiting exclusively in China were labelled "China"; all others
+"Non-China" (based on the Countries field). Sponsor classification: lead sponsors
+were labelled "Academic" if their name contained tokens indicating a hospital,
+university, research institute, or affiliated medical centre; "Industry" if
+containing therapeutics, pharma, biotech, or corporate-suffix tokens (Inc, Ltd,
+GmbH, LLC, Corp). Short strings (≤4 words) without corporate suffixes were treated
+as PI names and classified as "Academic". Cross-tabulation of geography × sponsor
+type (Fig 7f) shows median planned enrollment and IQR (error bars) for each of
+the four strata.
 
 Data Processing
 ---------------
@@ -1699,14 +2750,15 @@ All processing was performed in Python (pandas {pd.__version__}) using a custom
 ETL pipeline. Text normalisation included lowercasing, Unicode normalisation
 (e.g., "sjögren" → "sjogren"), and removal of non-alphanumeric characters. Term
 matching used whole-word boundary matching for short terms (≤3 characters) and
-substring matching for longer terms. Classification rules and term dictionaries are
-versioned in the accompanying config.py file.
+substring matching for longer terms. Classification rules and term dictionaries
+are versioned in the accompanying config.py file and updated via structured
+curation loops applied to random samples of pipeline output.
 
 Dataset Snapshot
 ----------------
-The frozen dataset used for all analyses was generated on {snapshot_date}. CSV files
-containing the trial-level dataset (trials.csv) and site-level dataset (sites.csv)
-are provided as supplementary data. All analyses are reproducible from the frozen
+The frozen dataset used for all analyses was generated on {snapshot_date}. CSV
+exports of the trial-level dataset (trials.csv) and site-level dataset (sites.csv)
+are available via the Data tab. All analyses are reproducible from the frozen
 snapshot using the published code and configuration files.
 """
     return text
@@ -1775,7 +2827,6 @@ with tab_methods:
 
     methods_text = _build_methods_text(prisma_counts, snap_date, n_inc)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Methods section (auto-generated)")
     st.markdown(
         '<p class="small-note">Generated from config.py, pipeline.py, and the current dataset. '
@@ -1789,9 +2840,7 @@ with tab_methods:
         file_name=f"car_t_autoimmune_methods_{snap_date}.txt",
         mime="text/plain",
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Appendix — Classification ontology")
     st.markdown(
         '<p class="small-note">Complete term dictionary used for rule-based classification. '
@@ -1808,13 +2857,15 @@ with tab_methods:
                  })
     st.download_button(
         "Download ontology table (CSV)",
-        data=ontology_df.to_csv(index=False),
+        data=_csv_with_provenance(
+            ontology_df,
+            "Classification ontology — supplementary Table S1",
+            include_filters=False,
+        ),
         file_name=f"car_t_classification_ontology_{snap_date}.csv",
         mime="text/csv",
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Appendix — Hard-excluded NCT IDs")
     st.markdown(
         '<p class="small-note">Manually curated list of NCT IDs excluded regardless of keyword matching '
@@ -1832,8 +2883,247 @@ with tab_methods:
                  })
     st.download_button(
         "Download excluded NCT IDs (CSV)",
-        data=excl_df[["NCTId"]].to_csv(index=False),
+        data=_csv_with_provenance(
+            excl_df[["NCTId"]],
+            "Hard-excluded NCT IDs — supplementary Table S2",
+            include_filters=False,
+        ),
         file_name=f"car_t_excluded_nct_ids_{snap_date}.csv",
         mime="text/csv",
     )
-    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# About / Impressum
+# ---------------------------------------------------------------------------
+
+def _git_version() -> tuple[str, str]:
+    """Return (short_sha, commit_date) for the running checkout, or a fallback."""
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root, stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        commit_date = subprocess.check_output(
+            ["git", "log", "-1", "--format=%cs"],
+            cwd=repo_root, stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return sha or "dev", commit_date or date.today().isoformat()
+    except Exception:
+        return "dev", date.today().isoformat()
+
+
+with tab_about:
+    sha, commit_date = _git_version()
+    snap_date = (
+        df["SnapshotDate"].iloc[0]
+        if "SnapshotDate" in df.columns and not df.empty
+        else date.today().isoformat()
+    )
+
+    st.subheader("About this dashboard")
+    st.markdown(
+        f"""
+**CAR-T Rheumatology Trials Monitor** is an interactive dashboard that tracks
+CAR-T and related cell-therapy clinical trials for rheumatologic and
+immune-mediated diseases, sourced from the public ClinicalTrials.gov registry.
+It is designed as a research and educational resource — not a medical,
+regulatory, or decision-support tool.
+
+- **Data source**: ClinicalTrials.gov API v2 ([{BASE_URL}]({BASE_URL}))
+- **Current data snapshot**: {snap_date}
+- **Software version**: `{sha}` &nbsp;·&nbsp; built {commit_date}
+- **Code license**: MIT (see `LICENSE` in the repository)
+        """
+    )
+
+    st.markdown("---")
+    st.subheader("Contact")
+    st.markdown(
+        f"""
+<div style="
+    border: 1px solid {THEME['border']};
+    border-left: 3px solid {THEME['primary']};
+    border-radius: 8px;
+    padding: 1.1rem 1.3rem;
+    background: {THEME['surface']};
+    max-width: 520px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+">
+    <div style="
+        font-size: 1.02rem;
+        font-weight: 600;
+        color: {THEME['text']};
+        letter-spacing: -0.01em;
+        margin-bottom: 0.35rem;
+    ">Peter Jeong</div>
+    <div style="
+        font-size: 0.88rem;
+        color: {THEME['text']};
+        line-height: 1.45;
+    ">Universitätsklinikum Köln</div>
+    <div style="
+        font-size: 0.82rem;
+        color: {THEME['muted']};
+        line-height: 1.5;
+        margin-bottom: 0.6rem;
+    ">Klinik I für Innere Medizin<br>Klinische Immunologie und Rheumatologie</div>
+    <div style="
+        font-size: 0.80rem;
+        color: {THEME['muted']};
+        line-height: 1.55;
+        padding-top: 0.55rem;
+        border-top: 1px dashed {THEME['border']};
+        margin-bottom: 0.7rem;
+    ">Kerpener Straße 62<br>50937 Köln, Germany</div>
+    <a href="mailto:peter.jeong@uk-koeln.de" style="
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.84rem;
+        font-weight: 500;
+        color: {THEME['primary']};
+        text-decoration: none;
+        padding: 0.35rem 0.7rem;
+        border: 1px solid {THEME['border']};
+        border-radius: 6px;
+        background: {THEME['surf2']};
+        transition: background 0.12s, border-color 0.12s;
+    " onmouseover="this.style.background='{THEME['surf3']}';this.style.borderColor='{THEME['primary']}'"
+       onmouseout="this.style.background='{THEME['surf2']}';this.style.borderColor='{THEME['border']}'">
+        ✉ peter.jeong@uk-koeln.de
+    </a>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+    st.subheader("Suggested citation")
+    citation = (
+        f"Jeong P. CAR-T Rheumatology Trials Monitor "
+        f"(version {sha}) [Internet]. "
+        f"Klinik I für Innere Medizin, Klinische Immunologie und Rheumatologie, "
+        f"Universitätsklinikum Köln; {date.today().year} "
+        f"[cited {date.today().isoformat()}]. "
+        f"Data snapshot: {snap_date}. "
+        f"Source: ClinicalTrials.gov API v2."
+    )
+    st.code(citation, language="text")
+    st.caption(
+        "Vancouver-style citation for an unpublished online resource. "
+        "If you tag releases on GitHub and link the repository to Zenodo, "
+        "each release will receive a permanent DOI that can be cited directly."
+    )
+
+    st.markdown("---")
+    st.subheader("Scientific disclaimer")
+    st.markdown(
+        """
+Trial classifications (disease entity, antigen target, cell-therapy modality,
+product type, geography) are produced by an automated pipeline combining
+keyword matching, curated lookup tables, and — for flagged ambiguous cases —
+large-language-model-assisted review. Despite careful curation, errors,
+omissions, and misclassifications are possible.
+
+For any definitive scientific, clinical, or regulatory purpose, consult the
+original trial records on ClinicalTrials.gov. This dashboard does not provide
+medical advice and must not be used to guide individual patient care.
+        """
+    )
+
+    with st.expander("Impressum · Datenschutz · Haftungsausschluss", expanded=False):
+        st.markdown(
+            f"""
+#### Angaben gemäß § 5 TMG
+
+**Verantwortlich für den Inhalt im Sinne des § 18 Abs. 2 MStV**
+
+Peter Jeong
+Universitätsklinikum Köln
+Klinik I für Innere Medizin — Klinische Immunologie und Rheumatologie
+Kerpener Straße 62
+50937 Köln
+Germany
+
+E-Mail: peter.jeong@uk-koeln.de
+
+---
+
+#### Haftung für Inhalte
+
+Die Inhalte dieses Dashboards wurden mit größtmöglicher Sorgfalt erstellt. Für
+die Richtigkeit, Vollständigkeit und Aktualität der Inhalte kann jedoch keine
+Gewähr übernommen werden. Als Diensteanbieter bin ich gemäß § 7 Abs. 1 TMG für
+eigene Inhalte auf diesen Seiten nach den allgemeinen Gesetzen verantwortlich.
+Nach §§ 8 bis 10 TMG bin ich als Diensteanbieter jedoch nicht verpflichtet,
+übermittelte oder gespeicherte fremde Informationen zu überwachen oder nach
+Umständen zu forschen, die auf eine rechtswidrige Tätigkeit hinweisen.
+
+Die hier bereitgestellten Klassifikationen, Grafiken und aggregierten
+Statistiken dienen ausschließlich wissenschaftlichen und edukativen Zwecken.
+Sie stellen **keine medizinische Beratung** dar und sind nicht zur
+Unterstützung individueller klinischer Entscheidungen geeignet.
+
+#### Haftung für Links
+
+Dieses Dashboard enthält Links zu externen Webseiten Dritter
+(insbesondere ClinicalTrials.gov), auf deren Inhalte ich keinen Einfluss habe.
+Deshalb kann ich für diese fremden Inhalte auch keine Gewähr übernehmen. Für
+die Inhalte der verlinkten Seiten ist stets der jeweilige Anbieter oder
+Betreiber der Seiten verantwortlich.
+
+#### Urheberrecht
+
+Der Quellcode dieser Anwendung steht unter der MIT-Lizenz. Die zugrunde
+liegenden Studiendaten stammen aus dem öffentlichen Register
+ClinicalTrials.gov (U.S. National Library of Medicine) und unterliegen deren
+Nutzungsbedingungen.
+
+---
+
+#### Datenschutz (kurz)
+
+Diese Anwendung erhebt selbst **keine personenbezogenen Daten** von Nutzerinnen
+und Nutzern. Es werden keine Tracking-Cookies, keine Analytics-Dienste und keine
+Drittanbieter-Einbettungen mit Tracking-Funktion verwendet.
+
+**Hosting-Anbieter:** Die Anwendung wird auf **Streamlit Community Cloud**
+betrieben, einem Dienst der Snowflake Inc., 106 East Babcock Street, Suite 3A,
+Bozeman, MT 59715, USA. Beim Aufruf der Anwendung werden technisch
+notwendige Verbindungsdaten (IP-Adresse, Zeitstempel, User-Agent)
+vorübergehend durch den Hosting-Anbieter verarbeitet. Ein Datentransfer in die
+USA findet statt; dieser stützt sich auf das EU-US Data Privacy Framework
+sowie — ergänzend — auf Standardvertragsklauseln. Details in der
+Datenschutzerklärung von Streamlit / Snowflake:
+
+- [streamlit.io/privacy-policy](https://streamlit.io/privacy-policy)
+- [snowflake.com/privacy-notice](https://www.snowflake.com/privacy-notice/)
+
+**Datenquelle:** Die Anwendung ruft Studiendaten über die öffentliche API von
+ClinicalTrials.gov ab ([{BASE_URL}]({BASE_URL})). Die Nutzung dieser
+API-Schnittstelle unterliegt den Bedingungen der U.S. National Library of
+Medicine. Hierbei werden keine nutzerbezogenen Daten übermittelt.
+
+**Rechte der Nutzerinnen und Nutzer:** Sofern im Einzelfall doch
+personenbezogene Daten verarbeitet werden sollten, bestehen die Rechte auf
+Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16 DSGVO), Löschung
+(Art. 17 DSGVO), Einschränkung der Verarbeitung (Art. 18 DSGVO), Widerspruch
+(Art. 21 DSGVO) sowie das Recht auf Beschwerde bei einer Aufsichtsbehörde
+(Art. 77 DSGVO). Zuständige Aufsichtsbehörde: Landesbeauftragte für
+Datenschutz und Informationsfreiheit Nordrhein-Westfalen
+([ldi.nrw.de](https://www.ldi.nrw.de)).
+
+---
+
+#### Versionierung
+
+- **Software-Version (git commit):** `{sha}`
+- **Build-Datum:** {commit_date}
+- **Datensatz-Snapshot:** {snap_date}
+- **Datenquelle:** ClinicalTrials.gov API v2
+
+Stand: {date.today().isoformat()}
+            """
+        )
