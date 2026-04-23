@@ -131,6 +131,8 @@ def _modality(row) -> str:
     return "CAR-T (unclear)"
 
 
+_PLATFORM_LABELS = {"CAR-NK", "CAR-Treg", "CAAR-T", "CAR-γδ T"}
+
 THEME = {
     "bg":      "#fafafa",            # near-white
     "surface": "#ffffff",            # white card
@@ -823,10 +825,13 @@ phase_sel = st.sidebar.multiselect(
     default=phase_options,
 )
 
-# Target category (multi-select)
-target_options = sorted(df["TargetCategory"].dropna().unique().tolist())
+# Target category (multi-select) — antigen targets only; platform labels live in modality filter
+target_options = sorted(
+    t for t in df["TargetCategory"].dropna().unique()
+    if t not in _PLATFORM_LABELS
+)
 target_sel = st.sidebar.multiselect(
-    "Target category",
+    "Antigen target",
     options=target_options,
     default=target_options,
 )
@@ -1059,7 +1064,6 @@ if not df_sites.empty:
 total_trials = len(df_filt)
 recruiting_trials = int(df_filt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())
 german_trials_count = germany_study_view["NCTId"].nunique() if not germany_study_view.empty else 0
-_PLATFORM_LABELS = {"CAR-NK", "CAR-Treg", "CAAR-T", "CAR-γδ T"}
 _tc_for_top = df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"].dropna()
 top_target = _tc_for_top.value_counts().idxmax() if not _tc_for_top.empty else "—"
 _enroll_known = pd.to_numeric(df_filt["EnrollmentCount"], errors="coerce").dropna()
