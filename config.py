@@ -94,40 +94,57 @@ GENERIC_AUTOIMMUNE_TERMS = [
     "systemic autoimmune diseases",
 ]
 
-EXCLUDED_INDICATION_TERMS = [
+OTHER_IMMUNE_MEDIATED_TERMS = [
+    # Neurological autoimmune
     "multiple sclerosis",
-    "myasthenia gravis",
     "neuromyelitis optica",
     "nmosd",
+    "myasthenia gravis",
+    # Dermatological
     "pemphigus vulgaris",
-    "al amyloidosis",
-    "multiple myeloma",
+    "pemphigus",
+    # Renal
     "anti-gbm",
     "anti gbm",
-    "antiphospholipid syndrome",
-    "immune thrombocytopenie",
-    "immune thrombocytopenia",
-    "aiha",
-    "graves disease",
+    "goodpasture",
     "membranous nephropathy",
+    "membranous glomerulonephritis",
+    # Haematological (non-malignant)
+    "autoimmune hemolytic anemia",
+    "aiha",
+    "immune thrombocytopenia",
+    "immune thrombocytopenie",
+    # Endocrine
+    "graves disease",
+    # Thrombotic / coagulation
+    "antiphospholipid syndrome",
+    "antiphospholipid antibody",
+]
+
+EXCLUDED_INDICATION_TERMS = [
+    # Haematologic malignancies
+    "al amyloidosis",
+    "multiple myeloma",
+    "leukemia",
+    "lymphoma",
+    "b-cell malignancies",
+    "b cell malignancies",
+    "hematopoetic",
+    "relapsed refractory b-cell",
+    # Solid oncology
     "tumor",
     "tumors",
     "cancer",
     "cancers",
     "malignancies",
     "malignan",
-    "leukemia",
-    "lymphoma",
     "solid tumor",
     "solid tumors",
     "advanced solid",
-    "b-cell malignancies",
-    "b cell malignancies",
-    "hematopoetic",
+    "advanced cancers",
+    # Transplant oncology context
     "stem cell transplant",
     "stem cell transplantation",
-    "advanced cancers",
-    "relapsed refractory b-cell",
 ]
 
 HARD_EXCLUDED_NCT_IDS = {
