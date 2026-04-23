@@ -982,7 +982,9 @@ if phase_sel:
     mask &= df["PhaseNormalized"].isin(selected_phase_norm)
 
 if target_sel:
-    mask &= df["TargetCategory"].isin(target_sel)
+    # Platform-labeled trials (CAR-NK, CAR-Treg, etc.) are not antigen targets;
+    # they always pass this filter and are separately controlled by the modality filter.
+    mask &= df["TargetCategory"].isin(target_sel) | df["TargetCategory"].isin(_PLATFORM_LABELS)
 
 if status_sel:
     mask &= df["OverallStatus"].isin(status_sel)
@@ -1126,9 +1128,10 @@ with tab_overview:
             },
         )
 
-    left, right = st.columns([1, 1])
+    # Row 1
+    ov_r1c1, ov_r1c2 = st.columns(2)
 
-    with left:
+    with ov_r1c1:
         st.subheader("Trials by disease entity")
         st.caption("Basket/multi-disease trials are counted once per disease they enrol.")
         _disease_vals = split_pipe_values(df_filt["DiseaseEntities"])
@@ -1139,10 +1142,28 @@ with tab_overview:
             .reset_index(name="Count")
         ) if _disease_vals else pd.DataFrame(columns=["DiseaseEntity", "Count"])
         if not counts_disease.empty:
-            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color="#1d4ed8"), use_container_width=True)
+            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color=THEME["primary"], height=380), use_container_width=True)
         else:
             st.info("No trials for the current filter selection.")
 
+    with ov_r1c2:
+        st.subheader("Trials by antigen target")
+        counts_target = (
+            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+            .fillna("Unknown")
+            .value_counts()
+            .rename_axis("TargetCategory")
+            .reset_index(name="Count")
+        )
+        if not counts_target.empty:
+            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color=THEME["primary"], height=380), use_container_width=True)
+        else:
+            st.info("No trials for the current filter selection.")
+
+    # Row 2
+    ov_r2c1, ov_r2c2 = st.columns(2)
+
+    with ov_r2c1:
         st.subheader("Trials by phase")
         counts_phase = (
             df_filt.groupby("PhaseOrdered", observed=False)
@@ -1159,26 +1180,13 @@ with tab_overview:
         )
         counts_phase = counts_phase.sort_values("Phase")
         if not counts_phase.empty:
-            fig_phase = make_bar(counts_phase, "Phase", "Count", color=THEME["primary"])
+            fig_phase = make_bar(counts_phase, "Phase", "Count", color=THEME["primary"], height=320)
             fig_phase.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
             st.plotly_chart(fig_phase, use_container_width=True)
         else:
             st.info("No trials for the current filter selection.")
 
-    with right:
-        st.subheader("Trials by antigen target")
-        counts_target = (
-            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-            .fillna("Unknown")
-            .value_counts()
-            .rename_axis("TargetCategory")
-            .reset_index(name="Count")
-        )
-        if not counts_target.empty:
-            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color=THEME["primary"]), use_container_width=True)
-        else:
-            st.info("No trials for the current filter selection.")
-
+    with ov_r2c2:
         st.subheader("Trials by start year")
         start_years = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
         counts_year = (
@@ -1194,10 +1202,10 @@ with tab_overview:
                 x="StartYear",
                 y="Count",
                 markers=True,
-                height=360,
+                height=320,
                 template="plotly_white",
             )
-            fig_year.update_traces(line_color="#1d4ed8", marker_color="#1d4ed8", line_width=2.5)
+            fig_year.update_traces(line_color=THEME["primary"], marker_color=THEME["primary"], line_width=2.5)
             fig_year.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
