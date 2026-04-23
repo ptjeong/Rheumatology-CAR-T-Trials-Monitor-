@@ -55,20 +55,38 @@ def _contains_any(text: str | None, terms: list[str]) -> bool:
     if not text:
         return False
     normalized = _normalize_text(text)
-    return any(_normalize_text(term) in normalized for term in terms)
+    return any(_term_in_text(normalized, term) for term in terms)
+
+
+def _term_in_text(normalized_text: str, term: str) -> bool:
+    normalized_term = _normalize_text(term)
+    if not normalized_term:
+        return False
+    if len(normalized_term) <= 3:
+        return bool(re.search(rf"(?<![a-z0-9]){re.escape(normalized_term)}(?![a-z0-9])", normalized_text))
+    return normalized_term in normalized_text
 
 
 def _match_terms(text: str, term_map: dict[str, list[str]]) -> list[str]:
     matches = []
     for label, terms in term_map.items():
-        if any(_normalize_text(term) in text for term in terms):
+        if any(_term_in_text(text, term) for term in terms):
             matches.append(label)
     return matches
 
 
 def _assign_disease_entity(row: dict) -> str:
-    conditions_text = _normalize_text(_safe_text(row.get("Conditions")))
+    conditions_raw = _safe_text(row.get("Conditions"))
     full_text = _row_text(row)
+    disease_context_text = _normalize_text(
+        " | ".join(
+            [
+                conditions_raw,
+                _safe_text(row.get("BriefTitle")),
+                _safe_text(row.get("Interventions")),
+            ]
+        )
+    )
 
     disease_terms = {
         "SLE": [
@@ -124,14 +142,22 @@ def _assign_disease_entity(row: dict) -> str:
         ],
     }
 
-    matched_conditions = _match_terms(conditions_text, disease_terms)
-    matched_full = _match_terms(full_text, disease_terms)
+    condition_chunks = [_normalize_text(c) for c in conditions_raw.split("|") if _normalize_text(c)]
+    matched_conditions = sorted({m for chunk in condition_chunks for m in _match_terms(chunk, disease_terms)})
+    matched_full = _match_terms(disease_context_text, disease_terms)
     matched = sorted(set(matched_conditions + matched_full))
 
-    if len(matched) >= 2:
-        systemic_set = {"SLE", "SSc", "IIM", "Sjogren", "RA", "AAV", "IgG4-RD", "Behcet", "T1D", "cGVHD"}
-        if len([m for m in matched if m in systemic_set]) >= 2:
+    systemic_set = {"SLE", "SSc", "IIM", "Sjogren", "RA", "AAV", "IgG4-RD", "Behcet", "T1D", "cGVHD"}
+
+    if len(matched_conditions) >= 2:
+        if len([m for m in matched_conditions if m in systemic_set]) >= 2:
             return "Basket/Multidisease"
+        return matched_conditions[0]
+
+    if len(matched_conditions) == 1:
+        return matched_conditions[0]
+
+    if len(matched) >= 2:
         return matched[0]
     if len(matched) == 1:
         return matched[0]

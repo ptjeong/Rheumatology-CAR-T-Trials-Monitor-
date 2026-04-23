@@ -38,7 +38,6 @@ PHASE_ORDER = [
     "PHASE2|PHASE3",
     "PHASE3",
     "PHASE4",
-    "NA",
     "Unknown",
 ]
 
@@ -50,7 +49,6 @@ PHASE_LABELS = {
     "PHASE2|PHASE3": "Phase II/III",
     "PHASE3": "Phase III",
     "PHASE4": "Phase IV",
-    "NA": "NA",
     "Unknown": "Unknown",
 }
 
@@ -338,8 +336,8 @@ def normalize_phase_value(x):
         "PHASEIII": "PHASE3",
         "PHASE4": "PHASE4",
         "PHASEIV": "PHASE4",
-        "N/A": "NA",
-        "NA": "NA",
+        "N/A": "Unknown",
+        "NA": "Unknown",
     }
     return mapping.get(s_upper, s_upper if s_upper in PHASE_ORDER else "Unknown")
 
@@ -503,6 +501,7 @@ if not df_sites.empty:
     germany_open_sites = germany_sites_all[
         germany_sites_all["SiteStatus"].fillna("").str.upper().isin(OPEN_SITE_STATUSES)
     ].copy()
+    germany_open_sites = germany_open_sites[germany_open_sites["NCTId"].isin(df_filt["NCTId"])].copy()
 
     if not germany_open_sites.empty:
         germany_trials = df_filt[df_filt["NCTId"].isin(germany_open_sites["NCTId"])].copy()
@@ -645,8 +644,9 @@ with tab_overview:
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("Trials by start year")
+        start_years = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
         counts_year = (
-            df_filt.dropna(subset=["StartYear"])["StartYear"]
+            start_years
             .value_counts()
             .sort_index()
             .rename_axis("StartYear")
@@ -670,7 +670,12 @@ with tab_overview:
                 xaxis_title=None,
                 yaxis_title=None,
             )
-            fig_year.update_xaxes(color=THEME["muted"])
+            fig_year.update_xaxes(
+                color=THEME["muted"],
+                tickmode="linear",
+                dtick=1,
+                tickformat="d",
+            )
             fig_year.update_yaxes(gridcolor=THEME["grid"], color=THEME["muted"])
             st.plotly_chart(fig_year, use_container_width=True)
         else:
