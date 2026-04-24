@@ -1060,6 +1060,9 @@ st.markdown(
             cell-therapy modality classification; global site-level geography; and
             publication-ready figures.
         </div>
+        <div class="hero-sub" style="margin-top: 0.55rem;">
+            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — filter state propagates to every chart, table, map, and CSV export in the analysis tabs.
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
