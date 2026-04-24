@@ -2631,7 +2631,10 @@ table (NAMED_PRODUCT_TARGETS in config.py) was applied as a fallback for
 well-known products that omit antigen names from accessible study text fields.
 Platform labels (CAR-NK, CAR-Treg, CAAR-T) are excluded from antigen-target
 frequency analyses, as these denote cell-therapy modalities rather than
-antigens.
+antigens. For the antigen-target landscape chart (Figure 6), the residual
+"CAR-T_unspecified" and "Other_or_unknown" categories are collapsed into a
+single "Undisclosed / unclear" bar; the two categories are preserved
+separately in the accompanying CSV export.
 
 Product type. Studies were classified as "Autologous", "Allogeneic/Off-the-shelf",
 "In vivo", or "Unclear" based on presence of corresponding keywords in normalised
@@ -2643,11 +2646,12 @@ product lookup table (NAMED_PRODUCT_TYPES in config.py) was applied as a fallbac
 when these generic markers were absent. Both lookup tables are updated iteratively
 via a structured curation loop applied to pipeline output.
 
-Cell therapy modality. Each trial was assigned to one of seven mechanistically
+Cell therapy modality. Each trial was assigned to one of eight mechanistically
 distinct modality categories based on target category and product type:
   • Auto CAR-T — conventional autologous alpha-beta CAR-T cells
   • Allo CAR-T — allogeneic/off-the-shelf CAR-T (including iPSC-derived)
   • CAR-T (unclear) — CAR-T with product source not determinable from public text
+  • CAR-γδ T — gamma-delta T-cell CAR constructs
   • CAR-NK — CAR-modified natural killer cells (autologous or allogeneic)
   • CAR-Treg — regulatory T-cell CAR constructs
   • CAAR-T — chimeric autoantibody receptor T cells
@@ -2676,7 +2680,9 @@ ETL pipeline. Text normalisation included lowercasing, Unicode normalisation
 matching used whole-word boundary matching for short terms (≤3 characters) and
 substring matching for longer terms. Classification rules and term dictionaries
 are versioned in the accompanying config.py file and updated via structured
-curation loops applied to random samples of pipeline output.
+curation loops applied to random samples of pipeline output; the curation-loop
+export, stratified validation sample, and inter-rater agreement (Cohen's κ)
+tooling are available at the bottom of this Methods & Appendix tab.
 
 Dataset Snapshot
 ----------------
