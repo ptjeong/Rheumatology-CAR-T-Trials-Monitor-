@@ -240,6 +240,12 @@ THEME = {
     "grid":    "#f1f5f9",            # slate-100
 }
 
+# Shared UI tokens — single source of truth for spacing / sizing / fonts.
+PANEL_HEIGHT = 440           # "Landscape at a glance" panels
+TABLE_HEIGHT_DEFAULT = 360   # default st.dataframe height when not auto-sized
+HAIRLINE = THEME["border"]   # alias for visual separators
+FONT_FAMILY = "Inter, -apple-system, sans-serif"
+
 px.defaults.template = "plotly_white"
 
 st.markdown(
@@ -763,6 +769,57 @@ def metric_card(label: str, value, foot: str = ""):
         """,
         unsafe_allow_html=True,
     )
+
+
+def _landscape_table_cols(dim_key: str, dim_label: str) -> dict:
+    """Shared column_config for the three Deep Dive summary tables
+    (by disease / product type / sponsor type)."""
+    _enroll_help = (
+        "Planned enrollment from CT.gov (self-reported target, not actual accrual)."
+    )
+    return {
+        dim_key: st.column_config.TextColumn(dim_label),
+        "Trials": st.column_config.NumberColumn("Trials", format="%d"),
+        "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
+        "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
+        "TotalEnrolled": st.column_config.NumberColumn(
+            "Total planned enrollment", format="%,d", help=_enroll_help,
+        ),
+        "MedianEnrollment": st.column_config.NumberColumn(
+            "Median enrollment", format="%d", help=_enroll_help,
+        ),
+    }
+
+
+def _trial_detail_cols(extra: dict | None = None) -> dict:
+    """Shared column_config for drilldown 'Trials' detail tables."""
+    cfg = {
+        "NCTId":          st.column_config.TextColumn("NCT ID"),
+        "NCTLink":        st.column_config.LinkColumn("Trial link", display_text="Open trial"),
+        "BriefTitle":     st.column_config.TextColumn("Title", width="large"),
+        "DiseaseEntity":  st.column_config.TextColumn("Disease"),
+        "DiseaseEntities": st.column_config.TextColumn("Disease(s)", width="medium"),
+        "TargetCategory": st.column_config.TextColumn("Target"),
+        "ProductType":    st.column_config.TextColumn("Product"),
+        "ProductName":    st.column_config.TextColumn("Named product", width="small"),
+        "Phase":          st.column_config.TextColumn("Phase"),
+        "OverallStatus":  st.column_config.TextColumn("Status"),
+        "LeadSponsor":    st.column_config.TextColumn("Lead sponsor", width="medium"),
+        "StartYear":      st.column_config.NumberColumn("Start year", format="%d"),
+        "Countries":      st.column_config.TextColumn("Countries", width="medium"),
+    }
+    if extra:
+        cfg.update(extra)
+    return cfg
+
+
+def _mini_count_cols(label: str) -> dict:
+    """Shared column_config for the 2-col mini count tables
+    ('Antigen targets', 'Product types', 'Named products', 'Top sponsors')."""
+    return {
+        label: st.column_config.TextColumn(label, width="medium"),
+        "Trials": st.column_config.NumberColumn("Trials", format="%d", width="small"),
+    }
 
 
 def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
@@ -1414,7 +1471,7 @@ with tab_overview:
     if not df_filt.empty:
         st.subheader("Disease hierarchy at a glance")
         st.markdown(
-            '<p class="small-note" style="color:#555">Click a wedge to zoom in. '
+            f'<p class="small-note" style="color:{THEME["muted"]}">Click a wedge to zoom in. '
             'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
             'Basket / multi-disease trials form their own branch.</p>',
             unsafe_allow_html=True,
@@ -1485,7 +1542,7 @@ with tab_overview:
         _fig_sb.update_layout(
             height=560, margin=dict(l=8, r=8, t=8, b=8),
             paper_bgcolor="white", plot_bgcolor="white",
-            font=dict(family="Inter, -apple-system, sans-serif", size=12, color="#0b1220"),
+            font=dict(family=FONT_FAMILY, size=12, color=THEME["text"]),
             uniformtext=dict(minsize=10, mode="hide"),
         )
         st.plotly_chart(_fig_sb, width='stretch')
@@ -1555,7 +1612,7 @@ with tab_overview:
     if not df_filt.empty:
         st.subheader("Landscape at a glance")
         st.markdown(
-            '<p class="small-note" style="color:#555">All four panels share the disease-family colour key shown below.</p>',
+            f'<p class="small-note" style="color:{THEME["muted"]}">All four panels share the disease-family colour key shown below.</p>',
             unsafe_allow_html=True,
         )
 
@@ -1574,7 +1631,7 @@ with tab_overview:
         _swatch_html += "</div>"
         st.markdown(_swatch_html, unsafe_allow_html=True)
 
-        _PANEL_HEIGHT = 440
+        _PANEL_HEIGHT = PANEL_HEIGHT  # alias local var for block clarity
 
         _ov_a, _ov_b = st.columns(2)
 
@@ -1617,7 +1674,7 @@ with tab_overview:
                     margin=dict(l=140, r=24, t=12, b=56),
                     showlegend=False,
                     yaxis_title=None, xaxis_title="Number of trials",
-                    font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
                 st.plotly_chart(_fig_ov1, width='stretch')
 
@@ -1651,7 +1708,7 @@ with tab_overview:
                     margin=dict(l=140, r=24, t=12, b=56),
                     showlegend=False,
                     yaxis_title=None, xaxis_title="Number of trials",
-                    font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
                 st.plotly_chart(_fig_ov2, width='stretch')
 
@@ -1679,7 +1736,7 @@ with tab_overview:
                 margin=dict(l=64, r=24, t=12, b=56),
                 showlegend=False,
                 xaxis_title="Phase", yaxis_title="Number of trials",
-                font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
             )
             st.plotly_chart(_fig_ov3, width='stretch')
 
@@ -1708,7 +1765,7 @@ with tab_overview:
                     showlegend=False,
                     xaxis=dict(tickmode="linear", dtick=1, tickformat="d"),
                     xaxis_title="Start year", yaxis_title="Number of trials",
-                    font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
                 st.plotly_chart(_fig_ov4, width='stretch')
 
@@ -2255,7 +2312,7 @@ def _cagr(first_count: int, last_count: int, n_years: int) -> float | None:
 
 with tab_deepdive:
     st.markdown(
-        '<p class="small-note" style="color:#555">Segmented landscape views. '
+        f'<p class="small-note" style="color:{THEME["muted"]}">Segmented landscape views. '
         'Pick a dimension, then drill into a single disease or product to see who is running trials, '
         'where, and at what scale.</p>',
         unsafe_allow_html=True,
@@ -2303,16 +2360,10 @@ with tab_deepdive:
             )
             agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
             st.subheader("Landscape by disease")
+            st.caption(f"{len(agg)} diseases · sorted by trial count")
             st.dataframe(
                 agg, width='stretch', hide_index=True,
-                column_config={
-                    "Disease": st.column_config.TextColumn("Disease"),
-                    "Trials": st.column_config.NumberColumn("Trials", format="%d"),
-                    "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
-                    "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
-                    "TotalEnrolled": st.column_config.NumberColumn("Total planned enrollment", format="%,d"),
-                    "MedianEnrollment": st.column_config.NumberColumn("Median enrollment", format="%d"),
-                },
+                column_config=_landscape_table_cols("Disease", "Disease"),
             )
 
             disease_choices = agg["Disease"].tolist()
@@ -2335,10 +2386,12 @@ with tab_deepdive:
                 cA, cB = st.columns(2)
                 with cA:
                     st.markdown("**Antigen targets**")
-                    st.dataframe(_tgt, width='stretch', hide_index=True)
+                    st.dataframe(_tgt, width='stretch', hide_index=True,
+                                 column_config=_mini_count_cols("Target"))
                 with cB:
                     st.markdown("**Product types**")
-                    st.dataframe(_prod, width='stretch', hide_index=True)
+                    st.dataframe(_prod, width='stretch', hide_index=True,
+                                 column_config=_mini_count_cols("Product"))
 
                 _dd_cols = ["NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
                             "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries"]
@@ -2349,14 +2402,10 @@ with tab_deepdive:
                 if "OverallStatus" in detail.columns:
                     detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
                 st.markdown("**Trials**")
+                st.caption(f"{len(detail)} trial{'s' if len(detail) != 1 else ''}")
                 st.dataframe(
                     detail, width='stretch', hide_index=True,
-                    column_config={
-                        "NCTId": st.column_config.TextColumn("NCT ID"),
-                        "NCTLink": st.column_config.LinkColumn("Link", display_text="Open trial"),
-                        "BriefTitle": st.column_config.TextColumn("Title", width="large"),
-                        "StartYear": st.column_config.NumberColumn("Start year", format="%d"),
-                    },
+                    column_config=_trial_detail_cols(),
                 )
 
     elif _dd_view == "By product type":
@@ -2374,16 +2423,10 @@ with tab_deepdive:
         )
         agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
         st.subheader("Landscape by product type")
+        st.caption(f"{len(agg)} product types · sorted by trial count")
         st.dataframe(
             agg, width='stretch', hide_index=True,
-            column_config={
-                "ProductType": st.column_config.TextColumn("Product type"),
-                "Trials": st.column_config.NumberColumn("Trials", format="%d"),
-                "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
-                "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
-                "TotalEnrolled": st.column_config.NumberColumn("Total planned enrollment", format="%,d"),
-                "MedianEnrollment": st.column_config.NumberColumn("Median enrollment", format="%d"),
-            },
+            column_config=_landscape_table_cols("ProductType", "Product type"),
         )
 
         prod_choices = agg["ProductType"].tolist()
@@ -2402,7 +2445,8 @@ with tab_deepdive:
                 _np = sub["ProductName"].dropna().value_counts().rename_axis("Named product").reset_index(name="Trials")
                 if not _np.empty:
                     st.markdown("**Named products**")
-                    st.dataframe(_np, width='stretch', hide_index=True)
+                    st.dataframe(_np, width='stretch', hide_index=True,
+                                 column_config=_mini_count_cols("Named product"))
 
             _detail_cols = ["NCTId", "NCTLink", "BriefTitle", "DiseaseEntities", "DiseaseEntity",
                             "TargetCategory", "ProductName", "Phase", "OverallStatus",
@@ -2414,14 +2458,10 @@ with tab_deepdive:
             if "OverallStatus" in detail.columns:
                 detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
             st.markdown("**Trials**")
+            st.caption(f"{len(detail)} trial{'s' if len(detail) != 1 else ''}")
             st.dataframe(
                 detail, width='stretch', hide_index=True,
-                column_config={
-                    "NCTId": st.column_config.TextColumn("NCT ID"),
-                    "NCTLink": st.column_config.LinkColumn("Link", display_text="Open trial"),
-                    "BriefTitle": st.column_config.TextColumn("Title", width="large"),
-                    "StartYear": st.column_config.NumberColumn("Start year", format="%d"),
-                },
+                column_config=_trial_detail_cols(),
             )
 
     else:  # By sponsor type
@@ -2452,16 +2492,10 @@ with tab_deepdive:
             )
             agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
             st.subheader("Landscape by sponsor type")
+            st.caption(f"{len(agg)} sponsor categories · sorted by trial count")
             st.dataframe(
                 agg, width='stretch', hide_index=True,
-                column_config={
-                    "SponsorType": st.column_config.TextColumn("Sponsor type"),
-                    "Trials": st.column_config.NumberColumn("Trials", format="%d"),
-                    "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
-                    "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
-                    "TotalEnrolled": st.column_config.NumberColumn("Total planned enrollment", format="%,d"),
-                    "MedianEnrollment": st.column_config.NumberColumn("Median enrollment", format="%d"),
-                },
+                column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
             )
 
             sp_choices = agg["SponsorType"].tolist()
@@ -2473,7 +2507,8 @@ with tab_deepdive:
                     .rename_axis("Lead sponsor").reset_index(name="Trials")
                 )
                 st.markdown("**Top sponsors**")
-                st.dataframe(_top_sponsors, width='stretch', hide_index=True)
+                st.dataframe(_top_sponsors, width='stretch', hide_index=True,
+                             column_config=_mini_count_cols("Lead sponsor"))
                 _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
                 _tgt = (
                     sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
@@ -2482,15 +2517,17 @@ with tab_deepdive:
                 cA, cB = st.columns(2)
                 with cA:
                     st.markdown("**Antigen targets**")
-                    st.dataframe(_tgt, width='stretch', hide_index=True)
+                    st.dataframe(_tgt, width='stretch', hide_index=True,
+                                 column_config=_mini_count_cols("Target"))
                 with cB:
                     st.markdown("**Product types**")
-                    st.dataframe(_prod, width='stretch', hide_index=True)
+                    st.dataframe(_prod, width='stretch', hide_index=True,
+                                 column_config=_mini_count_cols("Product"))
 
 
 with tab_pub:
     st.markdown(
-        '<p class="small-note" style="color:#555">Publication-ready figures with white backgrounds. '
+        f'<p class="small-note" style="color:{THEME["muted"]}">Publication-ready figures with white backgrounds. '
         "Use the camera icon (▷ toolbar) on each chart to download a high-resolution PNG. "
         "Each section also provides the underlying data as CSV.</p>",
         unsafe_allow_html=True,
@@ -4130,7 +4167,6 @@ regulatory, or decision-support tool.
     padding: 1.1rem 1.3rem;
     background: {THEME['surface']};
     max-width: 520px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 ">
     <div style="
         font-size: 1.02rem;
