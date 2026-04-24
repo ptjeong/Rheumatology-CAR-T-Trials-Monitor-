@@ -2607,20 +2607,12 @@ with tab_pub:
     )
     _pub_header(
         "1",
-        "Temporal trends by disease entity, with landmark-publication overlay",
+        "Temporal trends by disease entity",
         (
-            f"Annual trial starts by disease entity, {_yr_min}–{_yr_max}. "
-            "Vertical lines mark landmark rheumatology CAR-T publications."
+            f"Annual trial starts by disease entity, {_yr_min}–{_yr_max}."
             if _yr_min is not None
-            else "Annual trial starts by disease entity. "
-                 "Vertical lines mark landmark rheumatology CAR-T publications."
+            else "Annual trial starts by disease entity."
         ),
-    )
-    _show_landmarks = st.checkbox(
-        "Show landmark-publication overlay",
-        value=True,
-        key="fig1_show_landmarks",
-        help="Toggle the vertical dashed lines and legend for landmark rheumatology CAR-T publications.",
     )
 
     # ── Stacking groups: top-N disease entities + 'Other' ──────────────────
@@ -2695,9 +2687,7 @@ with tab_pub:
                 hovertemplate="%{x}: %{y} trials<extra>" + _grp + "</extra>",
             ))
         _fig1_layout = {**PUB_LAYOUT}
-        # Slight extra top padding when the landmark overlay is on so the
-        # era label has room to render without touching the title bar.
-        _fig1_layout["margin"] = dict(l=72, r=36, t=42 if _show_landmarks else 24, b=130)
+        _fig1_layout["margin"] = dict(l=72, r=36, t=24, b=130)
         fig1.update_layout(
             **_fig1_layout,
             xaxis_title="Start year",
@@ -2711,48 +2701,6 @@ with tab_pub:
         fig1.update_xaxes(title_standoff=12)
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
         fig1.update_yaxes(rangemode="tozero")
-
-        # ── Landmark publications (single era callout, not per-year pins) ──
-        # Five consecutive landmark years (2021-2025) rendered as per-year
-        # markers read as uniform gridlines rather than signal. Instead,
-        # mark the single inflection that actually matters — the 2024 Müller
-        # NEJM series that preceded the >5× expansion in trial starts — and
-        # keep the per-year narrative in the caption below the chart.
-        _landmarks = [
-            (2021, "Mougiakakos SLE case (NEJM)"),
-            (2022, "Mackensen 5-patient SLE series (Nat Med)"),
-            (2023, "First SSc & IIM series (Bergmann, Taubmann)"),
-            (2024, "Müller 15-patient multi-disease series (NEJM)"),
-            (2025, "First industry pivotal trials; in vivo CAR-T (NEJM letter)"),
-        ]
-        _ERA_START = 2024  # inflection year: Müller NEJM multi-disease series
-        if _show_landmarks and _yr_min is not None and _yr_max is not None and _yr_max >= _ERA_START:
-            # Cap the era band at the last full year (don't overlap with the
-            # partial-year vrect drawn below).
-            _current_year = pd.Timestamp.now().year
-            _band_x1 = min(_yr_max, _current_year - 1) + 0.5
-            if _band_x1 > _ERA_START - 0.5:
-                fig1.add_vrect(
-                    x0=_ERA_START - 0.5, x1=_band_x1,
-                    fillcolor="rgba(29, 78, 216, 0.06)",  # very light NEJM blue
-                    line_width=0, layer="below",
-                )
-                # Single dashed boundary line at the 2024 inflection
-                fig1.add_shape(
-                    type="line",
-                    x0=_ERA_START - 0.5, x1=_ERA_START - 0.5,
-                    y0=0, y1=1, xref="x", yref="paper",
-                    line=dict(color=THEME["muted"], width=1, dash="dash"),
-                )
-                # Era label at top-center of the band
-                fig1.add_annotation(
-                    x=(_ERA_START - 0.5 + _band_x1) / 2, y=1.02,
-                    xref="x", yref="paper",
-                    text="<b>Multi-disease expansion era</b> (post-Müller 2024)",
-                    showarrow=False,
-                    font=dict(size=10, color=THEME["primary"], family="Arial, Helvetica, sans-serif"),
-                    yanchor="bottom", xanchor="center",
-                )
 
         # Partial-year marker
         _current_year = pd.Timestamp.now().year
@@ -2769,18 +2717,6 @@ with tab_pub:
                 yanchor="bottom", xanchor="center",
             )
         st.plotly_chart(fig1, width='stretch', config=PUB_EXPORT)
-
-        # Landmark legend (compact, under chart) — hidden when overlay is toggled off
-        if _show_landmarks:
-            _landmark_lines = " &nbsp;·&nbsp; ".join(
-                f"<b>{y}</b>&nbsp;{l}" for y, l in _landmarks if _yr_min <= y <= _yr_max
-            )
-            if _landmark_lines:
-                st.markdown(
-                    f'<div class="pub-fig-caption" style="margin-top:-8px">'
-                    f'Landmarks: {_landmark_lines}.</div>',
-                    unsafe_allow_html=True,
-                )
 
         # Key statistics — use yearly totals
         totals_by_year = fig1_long.groupby("StartYear")["Trials"].sum().reset_index()
