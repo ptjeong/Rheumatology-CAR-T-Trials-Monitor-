@@ -171,6 +171,51 @@ def _modality(row) -> str:
 
 _PLATFORM_LABELS = {"CAR-NK", "CAR-Treg", "CAAR-T", "CAR-γδ T"}
 
+# ---------------------------------------------------------------------------
+# Disease families — the rheum analogue of the oncology app's Heme-onc vs
+# Solid-onc top-level grouping. This gives a stable "branch" dimension that
+# collapses related indications (e.g., SLE + SSc + Sjögren → CTD) for use in
+# stacked charts and the disease-hierarchy sunburst.
+# ---------------------------------------------------------------------------
+_DISEASE_FAMILY_MAP = {
+    "SLE":       "Connective tissue",
+    "SSc":       "Connective tissue",
+    "Sjogren":   "Connective tissue",
+    "IIM":       "Connective tissue",
+    "CTD_other": "Connective tissue",
+    "IgG4-RD":   "Connective tissue",
+    "RA":        "Inflammatory arthritis",
+    "AAV":       "Vasculitis",
+    "Behcet":    "Vasculitis",
+}
+_FAMILY_ORDER = [
+    "Connective tissue",
+    "Inflammatory arthritis",
+    "Vasculitis",
+    "Basket/Multidisease",
+    "Other / Unclassified",
+]
+# NEJM-style palette: navy = CTD (the dominant family); other families in
+# complementary muted hues. Kept in-file so Deep Dive charts share one scheme.
+_FAMILY_COLORS = {
+    "Connective tissue":       "#0b3d91",   # navy
+    "Inflammatory arthritis":  "#b45309",   # amber-700
+    "Vasculitis":              "#0f766e",   # teal-700
+    "Basket/Multidisease":     "#7c3aed",   # violet-600
+    "Other / Unclassified":    "#94a3b8",   # slate-400
+}
+
+
+def _disease_family(entity: str, trial_design: str | None = None) -> str:
+    """Map a disease entity to its family. Basket trials always resolve to
+    'Basket/Multidisease' regardless of their primary-disease assignment —
+    matches how the sunburst presents them as a distinct branch."""
+    if trial_design == "Basket/Multidisease":
+        return "Basket/Multidisease"
+    if not entity or entity in ("Unclassified", ""):
+        return "Other / Unclassified"
+    return _DISEASE_FAMILY_MAP.get(str(entity), "Other / Unclassified")
+
 THEME = {
     "bg":      "#ffffff",            # pure white canvas
     "surface": "#ffffff",            # surface = canvas (flat, no card contrast)
@@ -877,18 +922,24 @@ if df.empty:
 
 # Compute modality column on full df before any filtering
 df["Modality"] = df.apply(_modality, axis=1)
+df["DiseaseFamily"] = df.apply(
+    lambda r: _disease_family(r.get("DiseaseEntity"), r.get("TrialDesign")),
+    axis=1,
+)
 
 st.sidebar.header("Filters")
 
 _FILTER_KEYS = (
     "flt_disease", "flt_design", "flt_phase", "flt_target",
     "flt_status", "flt_product", "flt_modality", "flt_country",
+    "flt_age", "flt_sponsor", "flt_confidence",
 )
 # Short URL parameter names (keep the URL readable).
 _FILTER_QPARAM = {
     "flt_disease": "d", "flt_design": "dd", "flt_phase": "ph",
     "flt_target": "t", "flt_status": "s", "flt_product": "p",
     "flt_modality": "m", "flt_country": "c",
+    "flt_age": "ag", "flt_sponsor": "sp", "flt_confidence": "cf",
 }
 
 
@@ -1028,8 +1079,63 @@ country_sel = st.sidebar.multiselect(
     key="flt_country",
 )
 
+# Age group (Pediatric / Adult / Both / Unknown)
+_AGE_ORDER = ["Adult", "Both", "Pediatric", "Unknown"]
+if "AgeGroup" in df.columns:
+    age_options = [a for a in _AGE_ORDER if a in set(df["AgeGroup"].dropna().astype(str))]
+else:
+    age_options = []
+if age_options:
+    _seed_filter_from_query("flt_age", age_options)
+    age_sel = st.sidebar.multiselect(
+        "Age group",
+        options=age_options,
+        default=age_options,
+        key="flt_age",
+    )
+else:
+    age_sel = []
+
+# Sponsor type (Industry / Academic / Government / Other)
+_SPONSOR_ORDER = ["Industry", "Academic", "Government", "Other"]
+if "SponsorType" in df.columns:
+    sponsor_options = [s for s in _SPONSOR_ORDER if s in set(df["SponsorType"].dropna().astype(str))]
+else:
+    sponsor_options = []
+if sponsor_options:
+    _seed_filter_from_query("flt_sponsor", sponsor_options)
+    sponsor_sel = st.sidebar.multiselect(
+        "Sponsor type",
+        options=sponsor_options,
+        default=sponsor_options,
+        key="flt_sponsor",
+    )
+else:
+    sponsor_sel = []
+
+# Classification confidence (high / medium / low)
+_CONFIDENCE_ORDER = ["high", "medium", "low"]
+if "ClassificationConfidence" in df.columns:
+    confidence_options = [
+        c for c in _CONFIDENCE_ORDER
+        if c in set(df["ClassificationConfidence"].dropna().astype(str))
+    ]
+else:
+    confidence_options = []
+if confidence_options:
+    _seed_filter_from_query("flt_confidence", confidence_options)
+    confidence_sel = st.sidebar.multiselect(
+        "Classification confidence",
+        options=confidence_options,
+        default=confidence_options,
+        help="high = explicit markers, medium = one fallback, low = Unclassified or unclear+default.",
+        key="flt_confidence",
+    )
+else:
+    confidence_sel = []
+
 # Sync current filter state to URL so the view is shareable
-_sync_filters_to_query({
+_sync_opt_map = {
     "flt_disease": disease_options,
     "flt_design": design_options,
     "flt_phase": phase_options,
@@ -1038,7 +1144,14 @@ _sync_filters_to_query({
     "flt_product": product_options,
     "flt_modality": modality_options,
     "flt_country": country_options,
-})
+}
+if age_options:
+    _sync_opt_map["flt_age"] = age_options
+if sponsor_options:
+    _sync_opt_map["flt_sponsor"] = sponsor_options
+if confidence_options:
+    _sync_opt_map["flt_confidence"] = confidence_options
+_sync_filters_to_query(_sync_opt_map)
 
 
 # ---------------------------------------------------------------------------
@@ -1082,6 +1195,12 @@ def _csv_with_provenance(
             f"# Filter — cell therapy modality: {_fmt(modality_sel, modality_options)}",
             f"# Filter — country: {_fmt(country_sel, country_options)}",
         ]
+        if age_options:
+            lines.append(f"# Filter — age group: {_fmt(age_sel, age_options)}")
+        if sponsor_options:
+            lines.append(f"# Filter — sponsor type: {_fmt(sponsor_sel, sponsor_options)}")
+        if confidence_options:
+            lines.append(f"# Filter — classification confidence: {_fmt(confidence_sel, confidence_options)}")
 
     lines += [
         f"# Rows: {len(df_export)}",
@@ -1156,6 +1275,15 @@ if modality_sel:
 if country_sel:
     country_pattern = "|".join([re.escape(c) for c in country_sel])
     mask &= df["Countries"].fillna("").str.contains(country_pattern, case=False, na=False, regex=True)
+
+if age_sel and "AgeGroup" in df.columns:
+    mask &= df["AgeGroup"].astype(str).isin(age_sel)
+
+if sponsor_sel and "SponsorType" in df.columns:
+    mask &= df["SponsorType"].astype(str).isin(sponsor_sel)
+
+if confidence_sel and "ClassificationConfidence" in df.columns:
+    mask &= df["ClassificationConfidence"].astype(str).isin(confidence_sel)
 
 _df_filt = df[mask].copy()
 df_filt = add_phase_columns(_df_filt)
@@ -1259,33 +1387,89 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_overview, tab_geo, tab_data, tab_pub, tab_methods, tab_about = st.tabs(
-    ["Overview", "Geography / Map", "Data", "Publication Figures", "Methods & Appendix", "About"]
+tab_overview, tab_geo, tab_data, tab_deepdive, tab_pub, tab_methods, tab_about = st.tabs(
+    ["Overview", "Geography / Map", "Data", "Deep Dive", "Publication Figures", "Methods & Appendix", "About"]
 )
 
 with tab_overview:
-    if prisma_counts:
-        st.subheader("Study selection (PRISMA flow)")
-        prisma_rows = [
-            {"Step": "Records identified via ClinicalTrials.gov API", "n": prisma_counts.get("n_fetched", "—"), "Note": ""},
-            {"Step": "Duplicate records removed", "n": prisma_counts.get("n_duplicates_removed", "—"), "Note": "Same NCT ID"},
-            {"Step": "Records screened", "n": prisma_counts.get("n_after_dedup", "—"), "Note": ""},
-            {"Step": "Excluded: pre-specified NCT IDs", "n": prisma_counts.get("n_hard_excluded", "—"), "Note": "Manually curated exclusion list"},
-            {"Step": "Excluded: LLM-curation flagged", "n": prisma_counts.get("n_llm_excluded", 0), "Note": "LLM validation (high/medium confidence, exclude=true)"},
-            {"Step": "Excluded: oncology / haematologic malignancy indications", "n": prisma_counts.get("n_indication_excluded", "—"), "Note": "Keyword-based exclusion"},
-            {"Step": "Studies included in analysis", "n": prisma_counts.get("n_included", "—"), "Note": "Final dataset"},
-        ]
-        prisma_df = pd.DataFrame(prisma_rows)
-        st.dataframe(
-            prisma_df,
-            width='stretch',
-            hide_index=True,
-            column_config={
-                "Step": st.column_config.TextColumn("Step", width="large"),
-                "n": st.column_config.NumberColumn("n", width="small"),
-                "Note": st.column_config.TextColumn("Note", width="medium"),
-            },
+    # -----------------------------------------------------------------
+    # Hero — disease hierarchy sunburst (the signature visual).
+    # Inner ring: disease family (the rheum analogue of Heme-onc / Solid-onc).
+    # Middle ring: disease entity. Outer ring: antigen target.
+    # Basket trials form their own branch to avoid double-counting.
+    # -----------------------------------------------------------------
+    if not df_filt.empty:
+        st.subheader("Disease hierarchy at a glance")
+        st.markdown(
+            '<p class="small-note" style="color:#555">Click a wedge to zoom in. '
+            'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
+            'Basket / multi-disease trials form their own branch.</p>',
+            unsafe_allow_html=True,
         )
+
+        _UNCLEAR_BUCKET_OV = "Undisclosed / unclear"
+
+        def _ov_disease_l2(row) -> str:
+            if row.get("TrialDesign") == "Basket/Multidisease":
+                return "Basket/Multidisease"
+            ent = row.get("DiseaseEntity") or "Unclassified"
+            return str(ent)
+
+        def _ov_target_l3(row) -> str:
+            t = str(row.get("TargetCategory") or "Unknown")
+            if t in ("CAR-T_unspecified", "Other_or_unknown", "Unknown"):
+                return _UNCLEAR_BUCKET_OV
+            return t
+
+        _sb = df_filt.copy()
+        _sb["_L1"] = _sb["DiseaseFamily"]
+        _sb["_L2"] = _sb.apply(_ov_disease_l2, axis=1)
+        _sb["_L3"] = _sb.apply(_ov_target_l3, axis=1)
+        _sb_counts = _sb.groupby(["_L1", "_L2", "_L3"]).size().reset_index(name="Trials")
+
+        import plotly.graph_objects as go
+        _ids, _labels, _parents, _values, _colors = [], [], [], [], []
+        for _fam, _fd in _sb_counts.groupby("_L1"):
+            _ids.append(_fam); _labels.append(_fam); _parents.append("")
+            _values.append(int(_fd["Trials"].sum()))
+            _colors.append(_FAMILY_COLORS.get(_fam, "#64748b"))
+            for _dis, _dd in _fd.groupby("_L2"):
+                _dis_id = f"{_fam}/{_dis}"
+                _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
+                _values.append(int(_dd["Trials"].sum()))
+                _colors.append(_FAMILY_COLORS.get(_fam, "#64748b"))
+                for _, _row in _dd.iterrows():
+                    _tg_id = f"{_fam}/{_dis}/{_row['_L3']}"
+                    _ids.append(_tg_id); _labels.append(_row["_L3"]); _parents.append(_dis_id)
+                    _values.append(int(_row["Trials"]))
+                    _colors.append(_FAMILY_COLORS.get(_fam, "#64748b"))
+
+        _fig_sb = go.Figure(go.Sunburst(
+            ids=_ids, labels=_labels, parents=_parents, values=_values,
+            branchvalues="total",
+            marker=dict(colors=_colors, line=dict(color="white", width=1)),
+            hovertemplate="<b>%{label}</b><br>%{value} trials<br>%{percentRoot:.0%} of filtered total<extra></extra>",
+            insidetextorientation="radial",
+        ))
+        _fig_sb.update_layout(
+            height=560, margin=dict(l=8, r=8, t=8, b=8),
+            paper_bgcolor="white", plot_bgcolor="white",
+            font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+        )
+        st.plotly_chart(_fig_sb, width='stretch')
+
+        # Family headline row
+        _fam_counts = _sb["_L1"].value_counts().rename_axis("Family").reset_index(name="Trials")
+        _fam_counts = _fam_counts.set_index("Family").reindex(_FAMILY_ORDER).dropna().reset_index()
+        _fam_counts["Trials"] = _fam_counts["Trials"].astype(int)
+        if not _fam_counts.empty:
+            _fc_cols = st.columns(min(len(_fam_counts), 5))
+            _fc_total = int(_fam_counts["Trials"].sum())
+            for _col, (_, _r) in zip(_fc_cols, _fam_counts.iterrows()):
+                _pct = 100 * _r["Trials"] / _fc_total if _fc_total else 0
+                _col.metric(_r["Family"], f"{int(_r['Trials'])} ({_pct:.0f}%)")
+
+        st.markdown("---")
 
     # ── Snapshot diff vs previous snapshot ─────────────────────────────────
     try:
@@ -1332,102 +1516,185 @@ with tab_overview:
                 except Exception as e:
                     st.caption(f"Snapshot diff unavailable: {type(e).__name__}: {e}")
 
-    # Row 1
-    ov_r1c1, ov_r1c2 = st.columns(2)
-
-    with ov_r1c1:
-        st.subheader("Trials by disease entity")
-        st.caption("Basket/multi-disease trials are counted once per disease they enrol.")
-        _disease_vals = split_pipe_values(df_filt["DiseaseEntities"])
-        counts_disease = (
-            pd.DataFrame({"DiseaseEntity": _disease_vals})["DiseaseEntity"]
-            .value_counts()
-            .rename_axis("DiseaseEntity")
-            .reset_index(name="Count")
-        ) if _disease_vals else pd.DataFrame(columns=["DiseaseEntity", "Count"])
-        if not counts_disease.empty:
-            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color=THEME["primary"], height=380), width='stretch')
-        else:
-            st.info("No trials for the current filter selection.")
-
-    with ov_r1c2:
-        st.subheader("Trials by antigen target")
-        counts_target = (
-            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-            .fillna("Unknown")
-            .value_counts()
-            .rename_axis("TargetCategory")
-            .reset_index(name="Count")
+    # -----------------------------------------------------------------
+    # Landscape at a glance — four panels, all coloured by disease family
+    # so a reader can cross-reference the sunburst above at a glance.
+    # -----------------------------------------------------------------
+    if not df_filt.empty:
+        st.subheader("Landscape at a glance")
+        st.markdown(
+            '<p class="small-note" style="color:#555">All four panels share the disease-family colour key shown above.</p>',
+            unsafe_allow_html=True,
         )
-        if not counts_target.empty:
-            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color=THEME["primary"], height=380), width='stretch')
-        else:
-            st.info("No trials for the current filter selection.")
 
-    # Row 2
-    ov_r2c1, ov_r2c2 = st.columns(2)
+        _ov_a, _ov_b = st.columns(2)
 
-    with ov_r2c1:
-        st.subheader("Trials by phase")
-        counts_phase = (
-            df_filt.groupby("PhaseOrdered", observed=False)
-            .size()
-            .reset_index(name="Count")
-        )
-        counts_phase["PhaseNormalized"] = counts_phase["PhaseOrdered"].astype(str)
-        counts_phase["Phase"] = counts_phase["PhaseNormalized"].map(PHASE_LABELS)
-        counts_phase = counts_phase[counts_phase["Count"] > 0].copy()
-        counts_phase["Phase"] = pd.Categorical(
-            counts_phase["Phase"],
-            categories=[PHASE_LABELS[p] for p in PHASE_ORDER],
-            ordered=True,
-        )
-        counts_phase = counts_phase.sort_values("Phase")
-        if not counts_phase.empty:
-            fig_phase = make_bar(counts_phase, "Phase", "Count", color=THEME["primary"], height=320)
-            fig_phase.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
-            st.plotly_chart(fig_phase, width='stretch')
-        else:
-            st.info("No trials for the current filter selection.")
+        # Panel 1: Trials by disease (stacked by family) — basket trials collapsed to one row
+        _ov_exp_rows = []
+        for _, _r in df_filt.iterrows():
+            _ents = [e.strip() for e in str(_r.get("DiseaseEntities", "")).split("|") if e.strip()]
+            if not _ents:
+                _ents = [str(_r.get("DiseaseEntity", "Unclassified"))]
+            for _e in _ents:
+                _rr = _r.to_dict(); _rr["_Disease"] = _e
+                _ov_exp_rows.append(_rr)
+        _dd_ov = pd.DataFrame(_ov_exp_rows) if _ov_exp_rows else pd.DataFrame()
+        if not _dd_ov.empty:
+            _dd_ov["_DisplayDisease"] = _dd_ov.apply(
+                lambda r: "Basket/Multidisease" if r.get("TrialDesign") == "Basket/Multidisease" else r["_Disease"],
+                axis=1,
+            )
+            _dd_ov["_Family"] = _dd_ov.apply(
+                lambda r: _disease_family(r["_Disease"], r.get("TrialDesign")), axis=1
+            )
+            _dd_dedup = _dd_ov.drop_duplicates(subset=["NCTId"])
+            _ent_counts = (
+                _dd_dedup.groupby(["_DisplayDisease", "_Family"]).size()
+                .reset_index(name="Trials").sort_values("Trials", ascending=True)
+            )
+            with _ov_a:
+                st.markdown("**Trials by disease**")
+                _fig_ov1 = px.bar(
+                    _ent_counts, x="Trials", y="_DisplayDisease", color="_Family",
+                    orientation="h",
+                    color_discrete_map=_FAMILY_COLORS,
+                    category_orders={"_Family": _FAMILY_ORDER},
+                    labels={"_DisplayDisease": "Disease", "_Family": "Family"},
+                    template="plotly_white",
+                    height=max(320, len(_ent_counts) * 32 + 80),
+                )
+                _fig_ov1.update_traces(marker_line_width=0, opacity=1)
+                _fig_ov1.update_layout(
+                    margin=dict(l=130, r=24, t=12, b=40),
+                    legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
+                                font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                    yaxis_title=None, xaxis_title="Number of trials",
+                    font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                )
+                st.plotly_chart(_fig_ov1, width='stretch')
 
-    with ov_r2c2:
-        st.subheader("Trials by start year")
-        start_years = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
-        counts_year = (
-            start_years
-            .value_counts()
-            .sort_index()
-            .rename_axis("StartYear")
-            .reset_index(name="Count")
+        # Panel 2: Antigen target, colored stack by family
+        _tg_ov = df_filt.copy()
+        _tg_ov["_Target"] = _tg_ov.apply(_ov_target_l3, axis=1)
+        _tg_ov = _tg_ov[~_tg_ov["TargetCategory"].isin(_PLATFORM_LABELS)]
+        _tg_counts = (
+            _tg_ov.groupby(["_Target", "DiseaseFamily"]).size().reset_index(name="Trials")
         )
-        if not counts_year.empty:
-            fig_year = px.line(
-                counts_year,
-                x="StartYear",
-                y="Count",
-                markers=True,
-                height=320,
+        _tg_order_ov = (
+            _tg_counts.groupby("_Target")["Trials"].sum().sort_values(ascending=True).index.tolist()
+        )
+        with _ov_b:
+            st.markdown("**Trials by antigen target**")
+            if _tg_counts.empty:
+                st.info("No antigen-target data.")
+            else:
+                _fig_ov2 = px.bar(
+                    _tg_counts, x="Trials", y="_Target", color="DiseaseFamily",
+                    orientation="h",
+                    color_discrete_map=_FAMILY_COLORS,
+                    category_orders={"_Target": _tg_order_ov, "DiseaseFamily": _FAMILY_ORDER},
+                    labels={"_Target": "Target", "DiseaseFamily": "Family"},
+                    template="plotly_white",
+                    height=max(320, len(_tg_order_ov) * 32 + 80),
+                )
+                _fig_ov2.update_traces(marker_line_width=0, opacity=1)
+                _fig_ov2.update_layout(
+                    barmode="stack",
+                    margin=dict(l=130, r=24, t=12, b=40),
+                    legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
+                                font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                    yaxis_title=None, xaxis_title="Number of trials",
+                    font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                )
+                st.plotly_chart(_fig_ov2, width='stretch')
+
+        _ov_c, _ov_d = st.columns(2)
+
+        # Panel 3: Phase, stacked by family
+        _ph_ov = (
+            df_filt.assign(PhaseLbl=df_filt["PhaseLabel"].fillna("Unknown"))
+            .groupby(["PhaseLbl", "DiseaseFamily"]).size().reset_index(name="Trials")
+        )
+        _phase_display_order = [PHASE_LABELS[p] for p in PHASE_ORDER]
+        with _ov_c:
+            st.markdown("**Trials by phase**")
+            _fig_ov3 = px.bar(
+                _ph_ov, x="PhaseLbl", y="Trials", color="DiseaseFamily",
+                color_discrete_map=_FAMILY_COLORS,
+                category_orders={"PhaseLbl": _phase_display_order, "DiseaseFamily": _FAMILY_ORDER},
                 template="plotly_white",
+                labels={"PhaseLbl": "Phase", "DiseaseFamily": "Family"},
+                height=360,
             )
-            fig_year.update_traces(line_color=THEME["primary"], marker_color=THEME["primary"], line_width=2.5)
-            fig_year.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=10, r=10, t=10, b=10),
-                font=dict(color=THEME["text"]),
-                xaxis_title=None,
-                yaxis_title=None,
+            _fig_ov3.update_traces(marker_line_width=0, opacity=1)
+            _fig_ov3.update_layout(
+                barmode="stack",
+                margin=dict(l=56, r=24, t=12, b=90),
+                legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5,
+                            font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                xaxis_title="Phase", yaxis_title="Number of trials",
+                font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
             )
-            fig_year.update_xaxes(
-                color=THEME["muted"],
-                tickmode="linear",
-                dtick=1,
-                tickformat="d",
+            st.plotly_chart(_fig_ov3, width='stretch')
+
+        # Panel 4: Trials by start year, stacked area by family
+        _yr_ov = df_filt.dropna(subset=["StartYear"]).copy()
+        with _ov_d:
+            st.markdown("**Trials by start year**")
+            if _yr_ov.empty:
+                st.info("No start-year data.")
+            else:
+                _yr_ov["StartYear"] = _yr_ov["StartYear"].astype(int)
+                _yr_counts = (
+                    _yr_ov.groupby(["StartYear", "DiseaseFamily"]).size().reset_index(name="Trials")
+                )
+                _fig_ov4 = px.area(
+                    _yr_counts, x="StartYear", y="Trials", color="DiseaseFamily",
+                    color_discrete_map=_FAMILY_COLORS,
+                    category_orders={"DiseaseFamily": _FAMILY_ORDER},
+                    template="plotly_white",
+                    labels={"StartYear": "Start year", "DiseaseFamily": "Family"},
+                    height=360,
+                )
+                _fig_ov4.update_traces(line=dict(width=0.5), opacity=0.95)
+                _fig_ov4.update_layout(
+                    margin=dict(l=56, r=24, t=12, b=90),
+                    legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5,
+                                font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                    xaxis=dict(tickmode="linear", dtick=1, tickformat="d"),
+                    xaxis_title="Start year", yaxis_title="Number of trials",
+                    font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+                )
+                st.plotly_chart(_fig_ov4, width='stretch')
+
+    # -----------------------------------------------------------------
+    # PRISMA — now a collapsed expander at the bottom. Full narrative
+    # and methodological detail live in the Methods & Appendix tab.
+    # -----------------------------------------------------------------
+    if prisma_counts:
+        with st.expander("Study selection (PRISMA flow)", expanded=False):
+            st.caption("Summary PRISMA-style flow of records from ClinicalTrials.gov API to the final analysis set. "
+                       "Full methods in the **Methods & Appendix** tab.")
+            prisma_rows = [
+                {"Step": "Records identified via ClinicalTrials.gov API", "n": prisma_counts.get("n_fetched", "—"), "Note": ""},
+                {"Step": "Duplicate records removed", "n": prisma_counts.get("n_duplicates_removed", "—"), "Note": "Same NCT ID"},
+                {"Step": "Records screened", "n": prisma_counts.get("n_after_dedup", "—"), "Note": ""},
+                {"Step": "Excluded: pre-specified NCT IDs", "n": prisma_counts.get("n_hard_excluded", "—"), "Note": "Manually curated exclusion list"},
+                {"Step": "Excluded: LLM-curation flagged", "n": prisma_counts.get("n_llm_excluded", 0), "Note": "LLM validation (high/medium confidence, exclude=true)"},
+                {"Step": "Excluded: oncology / haematologic malignancy indications", "n": prisma_counts.get("n_indication_excluded", "—"), "Note": "Keyword-based exclusion"},
+                {"Step": "Studies included in analysis", "n": prisma_counts.get("n_included", "—"), "Note": "Final dataset"},
+            ]
+            prisma_df = pd.DataFrame(prisma_rows)
+            st.dataframe(
+                prisma_df,
+                width='stretch',
+                hide_index=True,
+                column_config={
+                    "Step": st.column_config.TextColumn("Step", width="large"),
+                    "n": st.column_config.NumberColumn("n", width="small"),
+                    "Note": st.column_config.TextColumn("Note", width="medium"),
+                },
             )
-            fig_year.update_yaxes(gridcolor=THEME["grid"], color=THEME["muted"])
-            st.plotly_chart(fig_year, width='stretch')
-        else:
-            st.info("No trials with a valid start year for the current filter selection.")
 
 with tab_geo:
     st.subheader("Global studies by country")
@@ -1618,7 +1885,9 @@ with tab_data:
         "TrialDesign",
         "TargetCategory",
         "ProductType",
-        "Confidence",
+        "ClassificationConfidence",
+        "ProductName",
+        "AgeGroup",
         "Phase",
         "OverallStatus",
         "StartYear",
@@ -1655,10 +1924,12 @@ with tab_data:
             "TrialDesign": st.column_config.TextColumn("Trial design", width="small"),
             "TargetCategory": st.column_config.TextColumn("Target"),
             "ProductType": st.column_config.TextColumn("Product"),
-            "Confidence": st.column_config.TextColumn(
+            "ClassificationConfidence": st.column_config.TextColumn(
                 "Confidence",
-                help="Classification confidence. high = explicit markers or curated override. medium = named-product lookup or smart default. low = insufficient signal — review candidate.",
+                help="high = explicit markers or LLM override. medium = one of {target unclear, default/weak product signal}. low = both unclear, or disease Unclassified.",
             ),
+            "ProductName": st.column_config.TextColumn("Named product", width="small"),
+            "AgeGroup": st.column_config.TextColumn("Age", width="small"),
             "Phase": st.column_config.TextColumn("Phase"),
             "OverallStatus": st.column_config.TextColumn("Status"),
             "StartYear": st.column_config.NumberColumn("Start year", format="%d"),
@@ -1692,7 +1963,9 @@ with tab_data:
                 with c2:
                     st.markdown(f"**Target:** {rec.get('TargetCategory', '')} *(via {rec.get('TargetSource', '—')})*")
                     st.markdown(f"**Product:** {rec.get('ProductType', '')} *(via {rec.get('ProductTypeSource', '—')})*")
-                    st.markdown(f"**Confidence:** {rec.get('Confidence', '—')}")
+                    st.markdown(f"**Confidence:** {rec.get('ClassificationConfidence', '—')}")
+                    if rec.get("ProductName"):
+                        st.markdown(f"**Named product:** {rec.get('ProductName')}")
                     if bool(rec.get("LLMOverride", False)):
                         st.markdown("**LLM override applied**")
                 with c3:
@@ -1702,6 +1975,10 @@ with tab_data:
                     if pd.notna(_enr):
                         st.markdown(f"**Enrollment:** {int(_enr)}")
                     st.markdown(f"**Countries:** {rec.get('Countries', '') or '—'}")
+                    st.markdown(f"**Age group:** {rec.get('AgeGroup', '—')}")
+                if rec.get("PrimaryEndpoints"):
+                    st.markdown("**Primary endpoints:**")
+                    st.write(str(rec["PrimaryEndpoints"]).replace("|", "; "))
 
                 if rec.get("Conditions"):
                     st.markdown("**Conditions:**")
@@ -1913,6 +2190,222 @@ def _cagr(first_count: int, last_count: int, n_years: int) -> float | None:
     if n_years <= 0 or first_count <= 0:
         return None
     return (last_count / first_count) ** (1 / n_years) - 1
+
+
+with tab_deepdive:
+    st.markdown(
+        '<p class="small-note" style="color:#555">Segmented landscape views. '
+        'Pick a dimension, then drill into a single disease or product to see who is running trials, '
+        'where, and at what scale.</p>',
+        unsafe_allow_html=True,
+    )
+
+    _dd_view = st.radio(
+        "Dimension",
+        options=["By disease", "By product type", "By sponsor type"],
+        horizontal=True,
+        key="deepdive_view",
+        label_visibility="collapsed",
+    )
+
+    def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for _, r in df_in.iterrows():
+            ents = [e.strip() for e in str(r.get("DiseaseEntities", "")).split("|") if e.strip()]
+            if not ents:
+                ents = [str(r.get("DiseaseEntity", "Unclassified"))]
+            for e in ents:
+                rr = r.to_dict()
+                rr["_Disease"] = e
+                rows.append(rr)
+        return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+    if df_filt.empty:
+        st.info("No trials match the current filters.")
+    elif _dd_view == "By disease":
+        dd_df = _expand_disease_rows(df_filt)
+        if dd_df.empty:
+            st.info("No disease data available.")
+        else:
+            agg = (
+                dd_df.groupby("_Disease")
+                .agg(
+                    Trials=("NCTId", "nunique"),
+                    Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
+                    Sponsors=("LeadSponsor", "nunique"),
+                    TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
+                    MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
+                )
+                .reset_index()
+                .rename(columns={"_Disease": "Disease"})
+                .sort_values("Trials", ascending=False)
+            )
+            agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
+            st.subheader("Landscape by disease")
+            st.dataframe(
+                agg, width='stretch', hide_index=True,
+                column_config={
+                    "Disease": st.column_config.TextColumn("Disease"),
+                    "Trials": st.column_config.NumberColumn("Trials", format="%d"),
+                    "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
+                    "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
+                    "TotalEnrolled": st.column_config.NumberColumn("Total planned enrollment", format="%,d"),
+                    "MedianEnrollment": st.column_config.NumberColumn("Median enrollment", format="%d"),
+                },
+            )
+
+            disease_choices = agg["Disease"].tolist()
+            pick = st.selectbox("Drill into disease", options=["—"] + disease_choices, key="dd_disease_pick")
+            if pick and pick != "—":
+                sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Trials", len(sub))
+                c2.metric("Open / recruiting",
+                          int(sub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()))
+                _enr = pd.to_numeric(sub["EnrollmentCount"], errors="coerce")
+                c3.metric("Total enrolled", f"{int(_enr.fillna(0).sum()):,}")
+                c4.metric("Median enrollment", int(_enr.median()) if _enr.notna().any() else 0)
+
+                _tgt = (
+                    sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                    .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+                )
+                _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
+                cA, cB = st.columns(2)
+                with cA:
+                    st.markdown("**Antigen targets**")
+                    st.dataframe(_tgt, width='stretch', hide_index=True)
+                with cB:
+                    st.markdown("**Product types**")
+                    st.dataframe(_prod, width='stretch', hide_index=True)
+
+                detail = sub[["NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
+                              "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries"]].copy()
+                detail["Phase"] = sub["PhaseLabel"].values
+                detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
+                st.markdown("**Trials**")
+                st.dataframe(
+                    detail, width='stretch', hide_index=True,
+                    column_config={
+                        "NCTId": st.column_config.TextColumn("NCT ID"),
+                        "NCTLink": st.column_config.LinkColumn("Link", display_text="Open trial"),
+                        "BriefTitle": st.column_config.TextColumn("Title", width="large"),
+                        "StartYear": st.column_config.NumberColumn("Start year", format="%d"),
+                    },
+                )
+
+    elif _dd_view == "By product type":
+        agg = (
+            df_filt.groupby("ProductType")
+            .agg(
+                Trials=("NCTId", "nunique"),
+                Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
+                Sponsors=("LeadSponsor", "nunique"),
+                TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
+                MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
+            )
+            .reset_index()
+            .sort_values("Trials", ascending=False)
+        )
+        agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
+        st.subheader("Landscape by product type")
+        st.dataframe(
+            agg, width='stretch', hide_index=True,
+            column_config={
+                "ProductType": st.column_config.TextColumn("Product type"),
+                "Trials": st.column_config.NumberColumn("Trials", format="%d"),
+                "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
+                "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
+                "TotalEnrolled": st.column_config.NumberColumn("Total planned enrollment", format="%,d"),
+                "MedianEnrollment": st.column_config.NumberColumn("Median enrollment", format="%d"),
+            },
+        )
+
+        prod_choices = agg["ProductType"].tolist()
+        pick = st.selectbox("Drill into product type", options=["—"] + prod_choices, key="dd_product_pick")
+        if pick and pick != "—":
+            sub = df_filt[df_filt["ProductType"] == pick]
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Trials", len(sub))
+            c2.metric("Distinct named products",
+                      int(sub["ProductName"].dropna().nunique()) if "ProductName" in sub.columns else 0)
+            c3.metric("Distinct sponsors", int(sub["LeadSponsor"].dropna().nunique()))
+            c4.metric("Countries",
+                      len({c.strip() for v in sub["Countries"].dropna() for c in str(v).split("|") if c.strip()}))
+
+            if "ProductName" in sub.columns:
+                _np = sub["ProductName"].dropna().value_counts().rename_axis("Named product").reset_index(name="Trials")
+                if not _np.empty:
+                    st.markdown("**Named products**")
+                    st.dataframe(_np, width='stretch', hide_index=True)
+
+            detail = sub[["NCTId", "NCTLink", "BriefTitle", "DiseaseEntities", "TargetCategory",
+                          "ProductName", "Phase", "OverallStatus", "LeadSponsor", "StartYear"]].copy()
+            detail["Phase"] = sub["PhaseLabel"].values
+            detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
+            st.markdown("**Trials**")
+            st.dataframe(
+                detail, width='stretch', hide_index=True,
+                column_config={
+                    "NCTId": st.column_config.TextColumn("NCT ID"),
+                    "NCTLink": st.column_config.LinkColumn("Link", display_text="Open trial"),
+                    "BriefTitle": st.column_config.TextColumn("Title", width="large"),
+                    "StartYear": st.column_config.NumberColumn("Start year", format="%d"),
+                },
+            )
+
+    else:  # By sponsor type
+        if "SponsorType" not in df_filt.columns:
+            st.info("Sponsor type not available in the current snapshot.")
+        else:
+            agg = (
+                df_filt.groupby("SponsorType")
+                .agg(
+                    Trials=("NCTId", "nunique"),
+                    Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
+                    Sponsors=("LeadSponsor", "nunique"),
+                    TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
+                    MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
+                )
+                .reset_index()
+                .sort_values("Trials", ascending=False)
+            )
+            agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
+            st.subheader("Landscape by sponsor type")
+            st.dataframe(
+                agg, width='stretch', hide_index=True,
+                column_config={
+                    "SponsorType": st.column_config.TextColumn("Sponsor type"),
+                    "Trials": st.column_config.NumberColumn("Trials", format="%d"),
+                    "Open": st.column_config.NumberColumn("Open / recruiting", format="%d"),
+                    "Sponsors": st.column_config.NumberColumn("Distinct sponsors", format="%d"),
+                    "TotalEnrolled": st.column_config.NumberColumn("Total planned enrollment", format="%,d"),
+                    "MedianEnrollment": st.column_config.NumberColumn("Median enrollment", format="%d"),
+                },
+            )
+
+            sp_choices = agg["SponsorType"].tolist()
+            pick = st.selectbox("Drill into sponsor type", options=["—"] + sp_choices, key="dd_sponsor_pick")
+            if pick and pick != "—":
+                sub = df_filt[df_filt["SponsorType"] == pick]
+                _top_sponsors = (
+                    sub["LeadSponsor"].dropna().value_counts().head(10)
+                    .rename_axis("Lead sponsor").reset_index(name="Trials")
+                )
+                st.markdown("**Top sponsors**")
+                st.dataframe(_top_sponsors, width='stretch', hide_index=True)
+                _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
+                _tgt = (
+                    sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                    .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+                )
+                cA, cB = st.columns(2)
+                with cA:
+                    st.markdown("**Antigen targets**")
+                    st.dataframe(_tgt, width='stretch', hide_index=True)
+                with cB:
+                    st.markdown("**Product types**")
+                    st.dataframe(_prod, width='stretch', hide_index=True)
 
 
 with tab_pub:
@@ -2234,6 +2727,11 @@ with tab_pub:
         c4.metric("IQR", f"{p25}–{p75}")
 
         # 4a — Enrollment distribution histogram
+        # A handful of very-large industry registries (n>1000) would otherwise
+        # compress the distribution of the typical early-phase rheum CAR-T trial.
+        _ENROLL_CAP = 1000
+        _over_cap = df_enroll_known[df_enroll_known["EnrollmentCount"] > _ENROLL_CAP]
+        df_enroll_plot = df_enroll_known[df_enroll_known["EnrollmentCount"] <= _ENROLL_CAP]
         st.markdown(
             '<div class="pub-fig-sub" style="margin-top: 1rem; '
             'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
@@ -2242,7 +2740,7 @@ with tab_pub:
             unsafe_allow_html=True,
         )
         fig4a = px.histogram(
-            df_enroll_known, x="EnrollmentCount", nbins=40, height=400,
+            df_enroll_plot, x="EnrollmentCount", nbins=40, height=400,
             color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
             labels={"EnrollmentCount": "Planned enrollment (patients)"},
         )
@@ -2264,6 +2762,15 @@ with tab_pub:
             )],
         )
         st.plotly_chart(fig4a, width='stretch', config=PUB_EXPORT)
+        if len(_over_cap) > 0:
+            st.markdown(
+                f'<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
+                f'{len(_over_cap)} trial(s) with planned enrollment &gt; {_ENROLL_CAP:,} '
+                f'excluded from this panel for readability; '
+                f'included in all summary statistics above.'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
         # 4b — Median enrollment by phase
         _phase_enroll = (
@@ -2634,7 +3141,20 @@ with tab_pub:
     )
 
     if not target_counts.empty:
-        target_sorted = target_counts.sort_values("Trials", ascending=True)
+        # Keep top 15 targets; collapse the long tail into a single "Other" bucket
+        # so the chart stays readable even as the landscape grows.
+        _TOP_N = 15
+        if len(target_counts) > _TOP_N:
+            _top = target_counts.nlargest(_TOP_N, "Trials")
+            _tail = target_counts.loc[~target_counts["Target"].isin(_top["Target"])]
+            _tail_row = pd.DataFrame([{
+                "Target": f"Other ({len(_tail)} antigens)",
+                "Trials": int(_tail["Trials"].sum()),
+            }])
+            target_display = pd.concat([_top, _tail_row], ignore_index=True)
+        else:
+            target_display = target_counts.copy()
+        target_sorted = target_display.sort_values("Trials", ascending=True)
         fig6 = px.bar(
             target_sorted, x="Trials", y="Target", orientation="h", height=max(340, len(target_sorted) * 36 + 100),
             color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
@@ -2663,11 +3183,17 @@ with tab_pub:
         dual_n = int(target_counts.loc[target_counts["Target"].str.contains("dual", case=False, na=False), "Trials"].sum())
         unspec_n = int(target_counts.loc[target_counts["Target"] == _UNCLEAR_BUCKET, "Trials"].sum())
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("CD19-targeted", f"{cd19_n} ({100*cd19_n/total_tg:.0f}%)")
-        c2.metric("BCMA-targeted", f"{bcma_n} ({100*bcma_n/total_tg:.0f}%)")
-        c3.metric("Dual-target", f"{dual_n} ({100*dual_n/total_tg:.0f}%)")
-        c4.metric("Undisclosed / unclear", f"{unspec_n} ({100*unspec_n/total_tg:.0f}%)")
+        _tc_sorted = target_counts.sort_values("Trials", ascending=False).reset_index(drop=True)
+        top_row = _tc_sorted.iloc[0]
+        top_name = str(top_row["Target"])
+        top_n = int(top_row["Trials"])
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Top antigen", f"{top_name} ({100*top_n/total_tg:.0f}%)")
+        c2.metric("CD19-targeted", f"{cd19_n} ({100*cd19_n/total_tg:.0f}%)")
+        c3.metric("BCMA-targeted", f"{bcma_n} ({100*bcma_n/total_tg:.0f}%)")
+        c4.metric("Dual-target", f"{dual_n} ({100*dual_n/total_tg:.0f}%)")
+        c5.metric("Undisclosed / unclear", f"{unspec_n} ({100*unspec_n/total_tg:.0f}%)")
 
         # Export the raw (unmerged) counts so CAR-T_unspecified vs Other_or_unknown survives.
         fig6_csv = _raw_target_counts.copy()
@@ -2718,7 +3244,7 @@ with tab_pub:
         fig7a.update_traces(marker_line_width=0, opacity=1)
         fig7a.update_layout(
             **PUB_BASE,
-            margin=dict(l=64, r=36, t=24, b=110),
+            margin=dict(l=64, r=36, t=24, b=130),
             xaxis=dict(
                 tickmode="linear", dtick=1, tickformat="d", showgrid=False,
                 showline=True, linewidth=1.5, linecolor=_AX_COLOR,
@@ -2735,7 +3261,7 @@ with tab_pub:
                 zeroline=False,
             ),
             legend=dict(
-                orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
                 font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
                 borderwidth=0,
             ),
@@ -2805,7 +3331,7 @@ with tab_pub:
         fig7c.update_traces(marker_line_width=0, opacity=1)
         fig7c.update_layout(
             **PUB_BASE,
-            margin=dict(l=64, r=36, t=24, b=110),
+            margin=dict(l=64, r=36, t=24, b=130),
             xaxis=dict(
                 tickmode="linear", dtick=1, tickformat="d", showgrid=False,
                 showline=True, linewidth=1.5, linecolor=_AX_COLOR,
@@ -2820,7 +3346,7 @@ with tab_pub:
                 zeroline=False,
             ),
             legend=dict(
-                orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
                 font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
                 borderwidth=0,
             ),

@@ -105,9 +105,12 @@ def _term_in_text(normalized_text: str, term: str) -> bool:
     normalized_term = _normalize_text(term)
     if not normalized_term:
         return False
-    if len(normalized_term) <= 3:
-        return bool(re.search(rf"(?<![a-z0-9]){re.escape(normalized_term)}(?![a-z0-9])", normalized_text))
-    return normalized_term in normalized_text
+    # Word-boundary match for all lengths — prevents prefix collisions
+    # (e.g. cd19 inside cd190, egfr inside egfrviii, ra inside brain).
+    return bool(re.search(
+        rf"(?<![a-z0-9]){re.escape(normalized_term)}(?![a-z0-9])",
+        normalized_text,
+    ))
 
 
 def _match_terms(text: str, term_map: dict[str, list[str]]) -> list[str]:
@@ -318,13 +321,23 @@ def _assign_target(row: dict) -> tuple[str, str]:
 def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[str, str]:
     """Return (product_type, source).
 
-    source ∈ {"llm_override", "explicit_marker", "named_product",
-              "smart_default", "unclear"}.
+    source ∈ {
+        "llm_override",
+        "explicit_in_vivo_title",      # "in vivo" appears in the BriefTitle
+        "explicit_in_vivo_text",       # explicit in-vivo phrase in body text
+        "explicit_autologous",         # "autoleucel" or "autologous" in text
+        "explicit_allogeneic",         # UCART / "universal CAR" / "allogeneic" / donor
+        "named_product",               # resolved via NAMED_PRODUCT_TYPES
+        "weak_autologous_marker",      # low-specificity autologous hint (AUTOL_MARKERS)
+        "weak_allogeneic_marker",      # low-specificity allogeneic hint (ALLOGENEIC_MARKERS)
+        "default_autologous_no_allo_markers",
+        "no_signal",
+    }
 
-    Smart default: when CAR-T is confirmed (target resolved via explicit marker or
-    named-product lookup) and no product-type signal is found in text, default to
-    Autologous — empirically ~85% accurate in rheum CAR-T (ex-INN drift, allo is
-    almost always labelled).
+    Default rule: when CAR-T is confirmed (target resolved via explicit marker,
+    named product, or CAR-core fallback) and no product-type signal is found in
+    text, default to Autologous — empirically ~85% accurate in rheum CAR-T
+    (allo is almost always labelled; in-vivo always titled).
     """
     nct = _safe_text(row.get("NCTId")).strip()
     ov = _LLM_OVERRIDES.get(nct) if nct else None
@@ -334,9 +347,8 @@ def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[s
     text = _row_text(row)
     title = _normalize_text(_safe_text(row.get("BriefTitle")))
 
-    # In vivo: title is the highest-precision signal; supplement with specific full-text terms
     if "in vivo" in title:
-        return "In vivo", "explicit_marker"
+        return "In vivo", "explicit_in_vivo_title"
     in_vivo_terms = [
         "in vivo car", "in-vivo car",
         "in vivo programming", "in vivo generated", "in vivo transduction",
@@ -344,10 +356,10 @@ def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[s
         "circular rna",
     ]
     if any(term in text for term in in_vivo_terms):
-        return "In vivo", "explicit_marker"
+        return "In vivo", "explicit_in_vivo_text"
 
     if "autoleucel" in text or "autologous" in text:
-        return "Autologous", "explicit_marker"
+        return "Autologous", "explicit_autologous"
 
     strong_allo_terms = [
         "ucart", "ucar",
@@ -359,45 +371,57 @@ def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[s
         "healthy donor", "donor derived", "donor sourced",
     ]
     if any(term in text for term in strong_allo_terms):
-        return "Allogeneic/Off-the-shelf", "explicit_marker"
+        return "Allogeneic/Off-the-shelf", "explicit_allogeneic"
 
     named_type = _lookup_named_product(text, NAMED_PRODUCT_TYPES)
     if named_type:
         return named_type, "named_product"
 
     if _contains_any(text, ALLOGENEIC_MARKERS):
-        return "Allogeneic/Off-the-shelf", "explicit_marker"
+        return "Allogeneic/Off-the-shelf", "weak_allogeneic_marker"
     if _contains_any(text, AUTOL_MARKERS):
-        return "Autologous", "explicit_marker"
+        return "Autologous", "weak_autologous_marker"
 
-    # Smart default: if target was confirmed (not fallback/unknown), presume autologous
-    if target_source in ("explicit_marker", "named_product"):
-        return "Autologous", "smart_default"
+    # Default: CAR-T confirmed via any target channel and no allo/in-vivo signal
+    if target_source in ("explicit_marker", "named_product", "car_core_fallback"):
+        return "Autologous", "default_autologous_no_allo_markers"
 
-    return "Unclear", "unclear"
+    return "Unclear", "no_signal"
+
+
+_WEAK_OR_DEFAULT_PRODUCT_SOURCES = {
+    "default_autologous_no_allo_markers",
+    "weak_autologous_marker",
+    "weak_allogeneic_marker",
+}
 
 
 def _compute_confidence(
     target: str, target_source: str,
     product_type: str, product_source: str,
     disease_entity: str,
+    llm_override: bool = False,
 ) -> str:
-    """Return 'high' | 'medium' | 'low' per classification provenance."""
-    # LLM-overridden fields carry the LLM's stated confidence (defaulted high)
-    strong_sources = {"llm_override", "explicit_marker"}
-    weak_sources = {"car_core_fallback", "smart_default", "named_product"}
+    """Return 'high' | 'medium' | 'low'.
 
-    target_strong = target_source in strong_sources and target not in _TARGET_FALLBACK_LABELS
-    type_strong = product_source in strong_sources and product_type != "Unclear"
-    disease_strong = disease_entity not in ("Unclassified", "Autoimmune_other")
-
-    if target_strong and type_strong and disease_strong:
+    Rules:
+      - LLM override present → high
+      - DiseaseEntity == Unclassified → low
+      - unclear_target AND default_product → low
+      - unclear_target OR default_product → medium
+      - else → high
+    """
+    if llm_override:
         return "high"
-    if (target_source in strong_sources or target_source == "named_product") \
-       and (product_source in strong_sources or product_source in weak_sources) \
-       and product_type != "Unclear" and target not in _TARGET_FALLBACK_LABELS:
+    if disease_entity == "Unclassified":
+        return "low"
+    unclear_target = target in _TARGET_FALLBACK_LABELS
+    default_product = product_source in _WEAK_OR_DEFAULT_PRODUCT_SOURCES
+    if unclear_target and default_product:
+        return "low"
+    if unclear_target or default_product:
         return "medium"
-    return "low"
+    return "high"
 
 
 _ACADEMIC_HINTS = (
@@ -426,18 +450,24 @@ _INDUSTRY_HINTS = (
 
 _CTGOV_CLASS_MAP = {
     "INDUSTRY": "Industry",
-    "NIH": "Academic",
-    "FED": "Academic",
-    "OTHER_GOV": "Academic",
+    "NIH": "Government",
+    "FED": "Government",
+    "OTHER_GOV": "Government",
     "NETWORK": "Academic",
     "INDIV": "Other",
     "OTHER": None,  # fall through to heuristic
     "UNKNOWN": None,
 }
 
+_GOV_HINTS = (
+    "nih", "national institutes of health", "national cancer institute",
+    "department of veterans affairs", "veterans affairs", "dod",
+    "ministry of health", "public health",
+)
+
 
 def _classify_sponsor(lead_sponsor: str | None, lead_sponsor_class: str | None = None) -> str:
-    """Return 'Industry' | 'Academic' | 'Other'.
+    """Return 'Industry' | 'Academic' | 'Government' | 'Other'.
 
     Primary signal: CT.gov `leadSponsor.class` (INDUSTRY/NIH/OTHER_GOV/…).
     Fallback: keyword heuristic against the sponsor name.
@@ -449,11 +479,102 @@ def _classify_sponsor(lead_sponsor: str | None, lead_sponsor_class: str | None =
     if not lead_sponsor:
         return "Other"
     s = lead_sponsor.lower().strip()
+    if any(h in s for h in _GOV_HINTS):
+        return "Government"
     if any(h in s for h in _ACADEMIC_HINTS):
         return "Academic"
     if any(h in s for h in _INDUSTRY_HINTS):
         return "Industry"
     return "Other"
+
+
+# ---------------------------------------------------------------------------
+# AgeGroup / ProductName derivations
+# ---------------------------------------------------------------------------
+
+def _parse_age_years(age_str: str | None) -> float | None:
+    """Parse CT.gov age strings like '18 Years', '6 Months' → years as float."""
+    if not age_str:
+        return None
+    s = str(age_str).strip().lower()
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(year|month|week|day)s?\b", s)
+    if not m:
+        return None
+    val = float(m.group(1))
+    unit = m.group(2)
+    if unit == "year":
+        return val
+    if unit == "month":
+        return val / 12.0
+    if unit == "week":
+        return val / 52.0
+    if unit == "day":
+        return val / 365.0
+    return None
+
+
+def _derive_age_group(std_ages: str | None, min_age: str | None = None, max_age: str | None = None) -> str:
+    """Return 'Pediatric' | 'Adult' | 'Both' | 'Unknown' from StdAges (primary)
+    with MinAge/MaxAge fallback."""
+    tags = set()
+    if std_ages:
+        tags = {t.strip().upper() for t in str(std_ages).split("|") if t.strip()}
+    has_child = bool(tags & {"CHILD"})
+    has_adult = bool(tags & {"ADULT", "OLDER_ADULT"})
+    if has_child and has_adult:
+        return "Both"
+    if has_adult and not has_child:
+        return "Adult"
+    if has_child and not has_adult:
+        return "Pediatric"
+
+    # Fallback: parse min/max
+    lo = _parse_age_years(min_age)
+    hi = _parse_age_years(max_age)
+    if lo is None and hi is None:
+        return "Unknown"
+    lo_v = lo if lo is not None else 0.0
+    hi_v = hi if hi is not None else 200.0
+    if hi_v < 18:
+        return "Pediatric"
+    if lo_v >= 18:
+        return "Adult"
+    return "Both"
+
+
+_NAMED_PRODUCT_ALIASES: list[tuple[str, str]] = []
+
+
+def _rebuild_named_product_alias_index() -> None:
+    """Cache (alias_normalized, canonical_name) sorted by descending length.
+    Longest match wins — prevents 'caba' matching inside 'caba-201'."""
+    global _NAMED_PRODUCT_ALIASES
+    pairs: list[tuple[str, str]] = []
+    try:
+        from config import NAMED_PRODUCTS  # type: ignore
+        for canonical, entry in NAMED_PRODUCTS.items():
+            for alias in entry.get("aliases", []):
+                n = _normalize_text(alias)
+                if n:
+                    pairs.append((n, canonical))
+    except Exception:
+        pairs = []
+    pairs.sort(key=lambda p: len(p[0]), reverse=True)
+    _NAMED_PRODUCT_ALIASES = pairs
+
+
+_rebuild_named_product_alias_index()
+
+
+def _derive_product_name(text: str) -> str | None:
+    """Return canonical NAMED_PRODUCTS key whose longest alias appears in text.
+    Uses word-boundary matching to avoid partial-alias collisions."""
+    if not text:
+        return None
+    for alias, canonical in _NAMED_PRODUCT_ALIASES:
+        if _term_in_text(text, alias):
+            return canonical
+    return None
 
 
 def fetch_raw_trials(max_records: int = 1000, statuses: list[str] | None = None) -> list[dict]:
@@ -501,6 +622,8 @@ def _flatten_study(study: dict) -> dict:
     loc_mod = ps.get("contactsLocationsModule", {})
     arms_mod = ps.get("armsInterventionsModule", {})
     sponsor_mod = ps.get("sponsorCollaboratorsModule", {})
+    elig_mod = ps.get("eligibilityModule", {})
+    outcomes_mod = ps.get("outcomesModule", {})
 
     phase_list = design.get("phases") or []
     phase = "|".join(str(p) for p in phase_list if p) if phase_list else (design.get("phase") or "Unknown")
@@ -527,6 +650,13 @@ def _flatten_study(study: dict) -> dict:
         "BriefSummary": desc.get("briefSummary"),
         "LeadSponsor": (sponsor_mod.get("leadSponsor") or {}).get("name"),
         "LeadSponsorClass": (sponsor_mod.get("leadSponsor") or {}).get("class"),
+        "MinAge": elig_mod.get("minimumAge"),
+        "MaxAge": elig_mod.get("maximumAge"),
+        "StdAges": "|".join(elig_mod.get("stdAges") or []) or None,
+        "PrimaryEndpoints": "|".join(
+            o.get("measure", "") for o in (outcomes_mod.get("primaryOutcomes") or [])
+            if o.get("measure")
+        ) or None,
     }
 
 
@@ -592,11 +722,12 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
     df["ProductType"] = type_results.apply(lambda x: x[0])
     df["ProductTypeSource"] = type_results.apply(lambda x: x[1])
 
-    df["Confidence"] = df.apply(
+    df["ClassificationConfidence"] = df.apply(
         lambda r: _compute_confidence(
             r["TargetCategory"], r["TargetSource"],
             r["ProductType"], r["ProductTypeSource"],
             r["DiseaseEntity"],
+            llm_override=bool(r.get("LLMOverride", False)),
         ),
         axis=1,
     )
@@ -604,6 +735,11 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
         lambda r: _classify_sponsor(r.get("LeadSponsor"), r.get("LeadSponsorClass")),
         axis=1,
     )
+    df["AgeGroup"] = df.apply(
+        lambda r: _derive_age_group(r.get("StdAges"), r.get("MinAge"), r.get("MaxAge")),
+        axis=1,
+    )
+    df["ProductName"] = df.apply(lambda r: _derive_product_name(_row_text(r.to_dict())), axis=1)
 
     df["StartDate"] = pd.to_datetime(df["StartDate"], errors="coerce")
     df["StartYear"] = df["StartDate"].dt.year
@@ -716,20 +852,32 @@ def load_snapshot(
         df["TargetSource"] = "legacy_snapshot"
     if "ProductTypeSource" not in df.columns:
         df["ProductTypeSource"] = "legacy_snapshot"
-    if "Confidence" not in df.columns:
-        df["Confidence"] = df.apply(
-            lambda r: _compute_confidence(
-                r.get("TargetCategory", ""), r.get("TargetSource", "legacy_snapshot"),
-                r.get("ProductType", ""), r.get("ProductTypeSource", "legacy_snapshot"),
-                r.get("DiseaseEntity", ""),
-            ),
-            axis=1,
-        )
+    if "ClassificationConfidence" not in df.columns:
+        # Back-compat: also map older "Confidence" column if present
+        if "Confidence" in df.columns:
+            df["ClassificationConfidence"] = df["Confidence"]
+        else:
+            df["ClassificationConfidence"] = df.apply(
+                lambda r: _compute_confidence(
+                    r.get("TargetCategory", ""), r.get("TargetSource", "legacy_snapshot"),
+                    r.get("ProductType", ""), r.get("ProductTypeSource", "legacy_snapshot"),
+                    r.get("DiseaseEntity", ""),
+                    llm_override=bool(r.get("LLMOverride", False)),
+                ),
+                axis=1,
+            )
     if "SponsorType" not in df.columns:
         df["SponsorType"] = df.apply(
             lambda r: _classify_sponsor(r.get("LeadSponsor"), r.get("LeadSponsorClass")),
             axis=1,
         )
+    if "AgeGroup" not in df.columns:
+        df["AgeGroup"] = df.apply(
+            lambda r: _derive_age_group(r.get("StdAges"), r.get("MinAge"), r.get("MaxAge")),
+            axis=1,
+        )
+    if "ProductName" not in df.columns:
+        df["ProductName"] = df.apply(lambda r: _derive_product_name(_row_text(r.to_dict())), axis=1)
 
     df_sites_path = os.path.join(out_dir, "sites.csv")
     if os.path.exists(df_sites_path):
