@@ -246,6 +246,40 @@ TABLE_HEIGHT_DEFAULT = 360   # default st.dataframe height when not auto-sized
 HAIRLINE = THEME["border"]   # alias for visual separators
 FONT_FAMILY = "Inter, -apple-system, sans-serif"
 
+# Canonical CT.gov country name → ISO-3 mapping.  Plotly's `locationmode="country names"`
+# is deprecated, so choropleths are rendered with ISO-3 codes; unknown names are dropped
+# with a warning rather than silently mis-plotted.
+_COUNTRY_TO_ISO3 = {
+    "Argentina": "ARG", "Australia": "AUS", "Austria": "AUT", "Belgium": "BEL",
+    "Brazil": "BRA", "Bulgaria": "BGR", "Canada": "CAN", "Chile": "CHL",
+    "China": "CHN", "Colombia": "COL", "Croatia": "HRV", "Czechia": "CZE",
+    "Czech Republic": "CZE", "Denmark": "DNK", "Egypt": "EGY", "Estonia": "EST",
+    "Finland": "FIN", "France": "FRA", "Georgia": "GEO", "Germany": "DEU",
+    "Greece": "GRC", "Hong Kong": "HKG", "Hungary": "HUN", "Iceland": "ISL",
+    "India": "IND", "Indonesia": "IDN", "Iran, Islamic Republic of": "IRN",
+    "Ireland": "IRL", "Israel": "ISR", "Italy": "ITA", "Japan": "JPN",
+    "Jordan": "JOR", "Korea, Republic of": "KOR", "Latvia": "LVA",
+    "Lebanon": "LBN", "Lithuania": "LTU", "Luxembourg": "LUX", "Malaysia": "MYS",
+    "Mexico": "MEX", "Netherlands": "NLD", "New Zealand": "NZL",
+    "Norway": "NOR", "Pakistan": "PAK", "Peru": "PER", "Philippines": "PHL",
+    "Poland": "POL", "Portugal": "PRT", "Puerto Rico": "PRI", "Romania": "ROU",
+    "Russian Federation": "RUS", "Saudi Arabia": "SAU", "Serbia": "SRB",
+    "Singapore": "SGP", "Slovakia": "SVK", "Slovenia": "SVN",
+    "South Africa": "ZAF", "Spain": "ESP", "Sweden": "SWE", "Switzerland": "CHE",
+    "Taiwan": "TWN", "Thailand": "THA", "Tunisia": "TUN", "Turkey": "TUR",
+    "Türkiye": "TUR", "Ukraine": "UKR", "United Arab Emirates": "ARE",
+    "United Kingdom": "GBR", "United States": "USA", "Uruguay": "URY",
+    "Viet Nam": "VNM", "Vietnam": "VNM",
+}
+
+
+def _attach_iso3(df_country: pd.DataFrame, country_col: str = "Country") -> pd.DataFrame:
+    """Add an Iso3 column; drop rows with no mapping (rare, e.g. 'Unknown')."""
+    out = df_country.copy()
+    out["Iso3"] = out[country_col].map(_COUNTRY_TO_ISO3)
+    return out.dropna(subset=["Iso3"])
+
+
 px.defaults.template = "plotly_white"
 
 st.markdown(
@@ -1811,10 +1845,12 @@ with tab_geo:
             .reset_index(name="Count")
         )
 
+        country_counts = _attach_iso3(country_counts)
         fig_world = px.choropleth(
             country_counts,
-            locations="Country",
-            locationmode="country names",
+            locations="Iso3",
+            locationmode="ISO-3",
+            hover_name="Country",
             color="Count",
             color_continuous_scale=[
                 [0.00, "#dbeafe"],
@@ -2793,8 +2829,10 @@ with tab_pub:
             .value_counts().rename_axis("Country").reset_index(name="Trials")
         )
 
+        geo_counts = _attach_iso3(geo_counts)
         fig3_map = px.choropleth(
-            geo_counts, locations="Country", locationmode="country names",
+            geo_counts, locations="Iso3", locationmode="ISO-3",
+            hover_name="Country",
             color="Trials",
             color_continuous_scale=[[0, "#dce9f5"], [0.3, "#5aafd6"], [0.65, "#1c6faf"], [1, "#08306b"]],
             projection="natural earth", template="plotly_white",
