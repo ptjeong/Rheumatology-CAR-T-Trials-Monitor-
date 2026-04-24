@@ -950,9 +950,10 @@ st.markdown(
         <div class="hero-eyebrow">ClinicalTrials.gov &middot; Live pipeline</div>
         <div class="hero-title">CAR-T &amp; Cell Therapies<br>in Rheumatologic Diseases</div>
         <div class="hero-sub">
-            Systematic landscape analysis of CAR-T, CAR-NK, CAAR-T, and CAR-Treg trials in
-            systemic autoimmune diseases — disease mapping, target classification,
-            product-type annotation, and Germany-specific site tracking.
+            Systematic landscape analysis of CAR-T, CAR-NK, CAAR-T, and CAR-Treg trials
+            in systemic autoimmune diseases — with disease, target-antigen, and
+            cell-therapy modality classification; global site-level geography; and
+            publication-ready figures.
         </div>
     </div>
     """,
