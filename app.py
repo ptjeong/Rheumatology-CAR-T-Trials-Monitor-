@@ -3408,72 +3408,21 @@ with tab_pub:
         st.info("No target data available.")
 
     # ------------------------------------------------------------------
-    # Fig 7 — Innovation signals (product type + modality over time)
+    # Fig 7 — Cell-therapy modality: overall distribution and evolution
     # ------------------------------------------------------------------
-    _pub_header("7", "Innovation signals — product type and cell-therapy modality",
-                "Trial composition over time, by manufacturing approach (autologous / allogeneic / in vivo) and by cell-therapy platform.")
+    _pub_header("7", "Cell-therapy modality — distribution and evolution",
+                "Trials grouped by cell-therapy platform (CAR-T autologous / allogeneic, CAR-NK, CAR-Treg, in vivo CAR, other); cumulative and over time.")
 
-    # 7a: Autologous vs allogeneic by start year
     df_innov = df_filt[df_filt["StartYear"].notna()].copy()
     df_innov["StartYear"] = df_innov["StartYear"].astype(int)
 
     if not df_innov.empty:
-        product_year = (
-            df_innov.groupby(["StartYear", "ProductType"]).size()
-            .reset_index(name="Trials")
-        )
-        st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
-            '<strong style="color: #0b1220;">7a — Product type by start year</strong>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        fig7a = px.bar(
-            product_year, x="StartYear", y="Trials", color="ProductType",
-            barmode="stack", height=420, template="plotly_white",
-            color_discrete_map={
-                "Autologous":              NEJM_BLUE,
-                "Allogeneic/Off-the-shelf": NEJM_RED,
-                "In vivo":                 NEJM_GREEN,
-                "Unclear":                 "#888888",
-            },
-            category_orders={"ProductType": ["Autologous", "Allogeneic/Off-the-shelf", "In vivo", "Unclear"]},
-            labels={"StartYear": "Start year", "Trials": "Number of trials", "ProductType": "Product type"},
-        )
-        fig7a.update_traces(marker_line_width=0, opacity=1)
-        fig7a.update_layout(
-            **PUB_BASE,
-            margin=dict(l=64, r=36, t=24, b=130),
-            xaxis=dict(
-                tickmode="linear", dtick=1, tickformat="d", showgrid=False,
-                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
-                ticks="outside", ticklen=6, tickwidth=1.2,
-                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
-                title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
-            ),
-            yaxis=dict(
-                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
-                showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
-                ticks="outside", ticklen=6, tickwidth=1.2,
-                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
-                title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
-                zeroline=False,
-            ),
-            legend=dict(
-                orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
-                font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
-                borderwidth=0,
-            ),
-        )
-        st.plotly_chart(fig7a, width='stretch', config=PUB_EXPORT)
-
-        # 7b: Therapy modality — eight categories (CAR-T split by autologous/allogeneic + γδ T)
+        # 7a: Therapy modality — cumulative horizontal bar
         # _MODALITY_ORDER, _MODALITY_COLORS, _modality() are module-level; Modality column pre-computed
         df_innov["Modality"] = df_innov.apply(_modality, axis=1)
         st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 1rem; '
-            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">7b — Cell-therapy modality distribution</strong>'
+            '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
+            '<strong style="color: #0b1220;">7a — Cell-therapy modality distribution</strong>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -3484,18 +3433,18 @@ with tab_pub:
         )
         # Colour each bar by its modality
         modality_counts["Color"] = modality_counts["Modality"].map(_MODALITY_COLORS)
-        fig7b = px.bar(
+        fig7a = px.bar(
             modality_counts, x="Trials", y="Modality", orientation="h",
             height=max(300, len(modality_counts) * 52 + 100),
             color="Modality", color_discrete_map=_MODALITY_COLORS,
             template="plotly_white", text="Trials",
         )
-        fig7b.update_traces(
+        fig7a.update_traces(
             marker_line_width=0, opacity=1,
             texttemplate="%{text}", textposition="outside",
             textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
         )
-        fig7b.update_layout(
+        fig7a.update_layout(
             **PUB_BASE,
             xaxis_title="Number of trials", yaxis_title=None, showlegend=False,
             margin=dict(l=110, r=56, t=24, b=56),
@@ -3503,13 +3452,13 @@ with tab_pub:
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
+        st.plotly_chart(fig7a, width='stretch', config=PUB_EXPORT)
 
-        # 7c: Modality over time (stacked area gives better temporal story)
+        # 7b: Modality over time (stacked bar shows composition and inflection points)
         st.markdown(
             '<div class="pub-fig-sub" style="margin-top: 1rem; '
             'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">7c — Modality mix by start year</strong>'
+            '<strong style="color: #0b1220;">7b — Modality mix by start year</strong>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -3519,7 +3468,7 @@ with tab_pub:
         )
         # keep only modalities that actually appear
         present_mods = [m for m in _MODALITY_ORDER if m in mod_year["Modality"].unique()]
-        fig7c = px.bar(
+        fig7b = px.bar(
             mod_year[mod_year["Modality"].isin(present_mods)],
             x="StartYear", y="Trials", color="Modality",
             barmode="stack", height=400, template="plotly_white",
@@ -3527,8 +3476,8 @@ with tab_pub:
             category_orders={"Modality": _MODALITY_ORDER},
             labels={"StartYear": "Start year", "Trials": "Number of trials"},
         )
-        fig7c.update_traces(marker_line_width=0, opacity=1)
-        fig7c.update_layout(
+        fig7b.update_traces(marker_line_width=0, opacity=1)
+        fig7b.update_layout(
             **PUB_BASE,
             margin=dict(l=64, r=36, t=24, b=130),
             xaxis=dict(
@@ -3552,7 +3501,7 @@ with tab_pub:
             xaxis_title="Start year",
             yaxis_title="Number of trials",
         )
-        st.plotly_chart(fig7c, width='stretch', config=PUB_EXPORT)
+        st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
 
         # Summary stats
         total_prod = len(df_innov)
@@ -3568,18 +3517,14 @@ with tab_pub:
         c4.metric("CAR-Treg",                f"{treg_n} ({100*treg_n/total_prod:.0f}%)")
         c5.metric("In vivo CAR",             f"{invivo_n} ({100*invivo_n/total_prod:.0f}%)")
 
-        fig7_csv = pd.merge(
-            product_year.rename(columns={"ProductType": "Category", "Trials": "n_product"}),
-            df_innov.groupby(["StartYear", "Modality"]).size().reset_index(name="n_modality"),
-            left_on="StartYear", right_on="StartYear", how="outer",
-        )
+        fig7_csv = df_innov.groupby(["StartYear", "Modality"]).size().reset_index(name="Trials")
         _pub_caption(
             len(df_filt),
             extra="Panel counts restricted to trials with a known start year."
         )
         st.download_button("Fig 7 data (CSV)",
-                           _csv_with_provenance(fig7_csv, "Fig 7 — Innovation signals / cell therapy modality"),
-                           "fig7_innovation_signals.csv", "text/csv")
+                           _csv_with_provenance(fig7_csv, "Fig 7 — Cell-therapy modality distribution and evolution"),
+                           "fig7_modality.csv", "text/csv")
     else:
         st.info("No start year data available for innovation analysis.")
 
