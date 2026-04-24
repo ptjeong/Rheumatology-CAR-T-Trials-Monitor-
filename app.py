@@ -996,7 +996,7 @@ with st.sidebar.expander("Data quality / missing classifications", expanded=Fals
         )
 
     quality_df = pd.DataFrame(rows)
-    st.dataframe(quality_df, use_container_width=True, hide_index=True)
+    st.dataframe(quality_df, width='stretch', hide_index=True)
     n_llm = int(df["LLMOverride"].sum()) if "LLMOverride" in df.columns else 0
     if n_llm:
         st.caption(
@@ -1163,7 +1163,7 @@ with tab_overview:
         prisma_df = pd.DataFrame(prisma_rows)
         st.dataframe(
             prisma_df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Step": st.column_config.TextColumn("Step", width="large"),
@@ -1186,7 +1186,7 @@ with tab_overview:
             .reset_index(name="Count")
         ) if _disease_vals else pd.DataFrame(columns=["DiseaseEntity", "Count"])
         if not counts_disease.empty:
-            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color=THEME["primary"], height=380), use_container_width=True)
+            st.plotly_chart(make_bar(counts_disease, "DiseaseEntity", "Count", color=THEME["primary"], height=380), width='stretch')
         else:
             st.info("No trials for the current filter selection.")
 
@@ -1200,7 +1200,7 @@ with tab_overview:
             .reset_index(name="Count")
         )
         if not counts_target.empty:
-            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color=THEME["primary"], height=380), use_container_width=True)
+            st.plotly_chart(make_bar(counts_target, "TargetCategory", "Count", color=THEME["primary"], height=380), width='stretch')
         else:
             st.info("No trials for the current filter selection.")
 
@@ -1226,7 +1226,7 @@ with tab_overview:
         if not counts_phase.empty:
             fig_phase = make_bar(counts_phase, "Phase", "Count", color=THEME["primary"], height=320)
             fig_phase.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
-            st.plotly_chart(fig_phase, use_container_width=True)
+            st.plotly_chart(fig_phase, width='stretch')
         else:
             st.info("No trials for the current filter selection.")
 
@@ -1265,7 +1265,7 @@ with tab_overview:
                 tickformat="d",
             )
             fig_year.update_yaxes(gridcolor=THEME["grid"], color=THEME["muted"])
-            st.plotly_chart(fig_year, use_container_width=True)
+            st.plotly_chart(fig_year, width='stretch')
         else:
             st.info("No trials with a valid start year for the current filter selection.")
 
@@ -1313,17 +1313,17 @@ with tab_geo:
             ),
             coloraxis_colorbar_title="No. of trials",
         )
-        st.plotly_chart(fig_world, use_container_width=True)
+        st.plotly_chart(fig_world, width='stretch')
 
         c1, c2 = st.columns([1.15, 0.85])
         with c1:
             st.markdown("**Country counts**")
-            st.dataframe(country_counts, use_container_width=True, height=320, hide_index=True)
+            st.dataframe(country_counts, width='stretch', height=320, hide_index=True)
         with c2:
             st.markdown("**Top countries**")
             st.plotly_chart(
                 make_bar(country_counts.head(12), "Country", "Count", height=320, color=THEME["primary"]),
-                use_container_width=True,
+                width='stretch',
             )
     else:
         st.info("No country information available for the current filter selection.")
@@ -1361,13 +1361,13 @@ with tab_geo:
             st.plotly_chart(
                 make_bar(germany_city_counts, "City", "OpenSiteCount",
                          height=min(300, max(180, len(germany_city_counts) * 20 + 48)), color=THEME["primary"]),
-                use_container_width=True,
+                width='stretch',
             )
         with c2:
             st.markdown("**Germany city table**")
             city_event = st.dataframe(
                 germany_city_counts,
-                use_container_width=True,
+                width='stretch',
                 height=min(300, max(180, len(germany_city_counts) * 20 + 48)),
                 hide_index=True,
                 on_select="rerun",
@@ -1419,7 +1419,7 @@ with tab_geo:
                             "GermanSiteStatuses",
                         ]
                     ],
-                    use_container_width=True,
+                    width='stretch',
                     height=320,
                     hide_index=True,
                     column_config={
@@ -1463,7 +1463,7 @@ with tab_data:
 
     st.dataframe(
         table_df[show_cols],
-        use_container_width=True,
+        width='stretch',
         height=460,
         hide_index=True,
         column_config={
@@ -1506,7 +1506,7 @@ with tab_data:
                     "GermanSiteStatuses",
                 ]
             ],
-            use_container_width=True,
+            width='stretch',
             height=380,
             hide_index=True,
             column_config={
@@ -1738,7 +1738,7 @@ with tab_pub:
                 font=dict(size=10, color=THEME["muted"]),
                 yanchor="bottom", xanchor="center",
             )
-        st.plotly_chart(fig1, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig1, width='stretch', config=PUB_EXPORT)
 
         # Key statistics
         total_t = len(df_filt)
@@ -1782,7 +1782,7 @@ with tab_pub:
         fig2 = pub_bar(phase_counts, "Phase", "Trials", color=NEJM_BLUE,
                        title="Distribution of Clinical Trial Phases", xlab="Phase")
         fig2.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
-        st.plotly_chart(fig2, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig2, width='stretch', config=PUB_EXPORT)
 
         total_ph = phase_counts["Trials"].sum()
         early = phase_counts.loc[phase_counts["Phase"].isin(["Early Phase I", "Phase I"]), "Trials"].sum()
@@ -1836,7 +1836,7 @@ with tab_pub:
                 thickness=14, len=0.55, outlinewidth=0.5, outlinecolor="#aaaaaa",
             ),
         )
-        st.plotly_chart(fig3_map, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig3_map, width='stretch', config=PUB_EXPORT)
 
         top10 = geo_counts.head(10).sort_values("Trials", ascending=True)
         fig3_bar = px.bar(
@@ -1864,7 +1864,7 @@ with tab_pub:
             '</div>',
             unsafe_allow_html=True,
         )
-        st.plotly_chart(fig3_bar, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig3_bar, width='stretch', config=PUB_EXPORT)
 
         total_geo = geo_counts["Trials"].sum()
         top3_geo = geo_counts.head(3)
@@ -1937,7 +1937,7 @@ with tab_pub:
                 font=dict(size=10, color=NEJM_RED), xanchor="left",
             )],
         )
-        st.plotly_chart(fig4a, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig4a, width='stretch', config=PUB_EXPORT)
 
         # 4b — Median enrollment by phase
         _phase_enroll = (
@@ -1978,7 +1978,7 @@ with tab_pub:
             yaxis_title="Median planned enrollment (patients)",
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig4b, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig4b, width='stretch', config=PUB_EXPORT)
 
         # 4c — Total enrolled patients by disease (enrollment-weighted landscape)
         _dis_enroll_rows = []
@@ -2026,7 +2026,7 @@ with tab_pub:
                 xaxis=_H_XAXIS,
                 uniformtext_minsize=9, uniformtext_mode="hide",
             )
-            st.plotly_chart(fig4c, use_container_width=True, config=PUB_EXPORT)
+            st.plotly_chart(fig4c, width='stretch', config=PUB_EXPORT)
             st.markdown(
                 '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
                 'Basket trials counted once per enrolled disease · '
@@ -2199,7 +2199,7 @@ with tab_pub:
             ),
             showlegend=False,
         )
-        st.plotly_chart(fig4d, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig4d, width='stretch', config=PUB_EXPORT)
         st.markdown(
             '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
             'Whiskers = IQR (Q1–Q3).'
@@ -2223,7 +2223,7 @@ with tab_pub:
                            _csv_with_provenance(fig4_csv, "Fig 4 — Enrollment characteristics"),
                            "fig4_enrollment.csv", "text/csv")
         with st.expander("Comparison summary table"):
-            st.dataframe(_cmp_summary, use_container_width=True, hide_index=True)
+            st.dataframe(_cmp_summary, width='stretch', hide_index=True)
     else:
         st.info("Insufficient enrollment data available.")
     # ------------------------------------------------------------------
@@ -2260,7 +2260,7 @@ with tab_pub:
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig5, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig5, width='stretch', config=PUB_EXPORT)
 
         total_dis = disease_counts["Trials"].sum()
         top3 = disease_counts.head(3)
@@ -2329,7 +2329,7 @@ with tab_pub:
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig6, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig6, width='stretch', config=PUB_EXPORT)
 
         total_tg = target_counts["Trials"].sum()
         cd19_n = int(target_counts.loc[target_counts["Target"] == "CD19", "Trials"].sum())
@@ -2414,7 +2414,7 @@ with tab_pub:
                 borderwidth=0,
             ),
         )
-        st.plotly_chart(fig7a, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig7a, width='stretch', config=PUB_EXPORT)
 
         # 7b: Therapy modality — eight categories (CAR-T split by autologous/allogeneic + γδ T)
         # _MODALITY_ORDER, _MODALITY_COLORS, _modality() are module-level; Modality column pre-computed
@@ -2452,7 +2452,7 @@ with tab_pub:
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig7b, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
 
         # 7c: Modality over time (stacked area gives better temporal story)
         st.markdown(
@@ -2501,7 +2501,7 @@ with tab_pub:
             xaxis_title="Start year",
             yaxis_title="Number of trials",
         )
-        st.plotly_chart(fig7c, use_container_width=True, config=PUB_EXPORT)
+        st.plotly_chart(fig7c, width='stretch', config=PUB_EXPORT)
 
         # Summary stats
         total_prod = len(df_innov)
@@ -2778,7 +2778,7 @@ with tab_methods:
         unsafe_allow_html=True,
     )
     ontology_df = _build_ontology_df()
-    st.dataframe(ontology_df, use_container_width=True, hide_index=True,
+    st.dataframe(ontology_df, width='stretch', hide_index=True,
                  column_config={
                      "Category": st.column_config.TextColumn("Category", width="medium"),
                      "Label": st.column_config.TextColumn("Label", width="medium"),
@@ -2806,7 +2806,7 @@ with tab_methods:
     excl_df["ClinicalTrials.gov link"] = excl_df["NCTId"].apply(
         lambda x: f"https://clinicaltrials.gov/study/{x}"
     )
-    st.dataframe(excl_df, use_container_width=True, hide_index=True,
+    st.dataframe(excl_df, width='stretch', hide_index=True,
                  column_config={
                      "NCTId": st.column_config.TextColumn("NCT ID"),
                      "ClinicalTrials.gov link": st.column_config.LinkColumn("Link", display_text="Open"),
@@ -2886,7 +2886,7 @@ with tab_methods:
 
         st.dataframe(
             df_export[["NCTId", "BriefTitle", "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields"]],
-            use_container_width=True,
+            width='stretch',
             height=280,
         )
         st.caption(f"{len(df_export)} trial(s) flagged for curation")
@@ -2958,7 +2958,7 @@ with tab_methods:
         )
         st.dataframe(
             sample_df[["SampleID", "NCTId", "DiseaseEntity", "TargetCategory", "ProductType", "BriefTitle"]],
-            use_container_width=True,
+            width='stretch',
             height=260,
             hide_index=True,
         )
@@ -3051,7 +3051,7 @@ with tab_methods:
                     })
 
                 kappa_summary = pd.DataFrame(kappa_rows)
-                st.dataframe(kappa_summary, use_container_width=True, hide_index=True)
+                st.dataframe(kappa_summary, width='stretch', hide_index=True)
 
                 # Disagreement table for adjudication
                 disagree_masks = []
@@ -3076,7 +3076,7 @@ with tab_methods:
                             "ProductType", "Reviewer1_Product", "Reviewer2_Product",
                             "Notes",
                         ] if c in df_disagree.columns]
-                        st.dataframe(df_disagree[show_dis_cols], use_container_width=True, hide_index=True)
+                        st.dataframe(df_disagree[show_dis_cols], width='stretch', hide_index=True)
                         st.download_button(
                             label="Download disagreement rows CSV",
                             data=df_disagree[show_dis_cols].to_csv(index=False),
