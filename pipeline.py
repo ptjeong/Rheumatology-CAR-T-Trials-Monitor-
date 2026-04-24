@@ -457,7 +457,7 @@ _CTGOV_CLASS_MAP = {
     "FED": "Government",
     "OTHER_GOV": "Government",
     "NETWORK": "Academic",
-    "INDIV": "Other",
+    "INDIV": "Academic",  # investigator-initiated trials run through academic centers
     "OTHER": None,  # fall through to heuristic
     "UNKNOWN": None,
 }

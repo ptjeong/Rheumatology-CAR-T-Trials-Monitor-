@@ -245,6 +245,11 @@ class TestSponsorClassification:
     def test_peoples_hospital_is_academic(self):
         assert _classify_sponsor("Peking Union Medical College Hospital", None) == "Academic"
 
+    def test_indiv_pi_is_academic(self):
+        # CT.gov class INDIV = investigator-initiated; treated as Academic
+        assert _classify_sponsor("Marcela V. Maus, M.D.,Ph.D.", "INDIV") == "Academic"
+        assert _classify_sponsor("David Porter", "INDIV") == "Academic"
+
 
 # ---------------------------------------------------------------------------
 # AgeGroup derivation
