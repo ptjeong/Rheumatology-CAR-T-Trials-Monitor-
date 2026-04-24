@@ -1061,7 +1061,7 @@ st.markdown(
             publication-ready figures.
         </div>
         <div class="hero-sub" style="margin-top: 0.55rem;">
-            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — filter state propagates to every chart, table, map, and CSV export in the analysis tabs.
+            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — every chart, table, map, and CSV export on every tab respects the active filter state.
         </div>
     </div>
     """,
