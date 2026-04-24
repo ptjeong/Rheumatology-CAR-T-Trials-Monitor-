@@ -719,6 +719,7 @@ def _extract_sites(study: dict) -> list[dict]:
 
     sites = []
     for loc in (loc_mod.get("locations") or []):
+        gp = loc.get("geoPoint") or {}
         sites.append(
             {
                 "NCTId": ident.get("nctId"),
@@ -730,6 +731,8 @@ def _extract_sites(study: dict) -> list[dict]:
                 "Zip": loc.get("zip"),
                 "Country": loc.get("country"),
                 "SiteStatus": loc.get("status"),
+                "Latitude": gp.get("lat"),
+                "Longitude": gp.get("lon"),
             }
         )
     return sites
@@ -935,6 +938,10 @@ def load_snapshot(
         df_sites = pd.read_csv(df_sites_path)
     else:
         df_sites = pd.DataFrame()
+    # Back-compat: old snapshots predate site-level lat/lon columns.
+    for _col in ("Latitude", "Longitude"):
+        if not df_sites.empty and _col not in df_sites.columns:
+            df_sites[_col] = pd.NA
 
     prisma_path = os.path.join(out_dir, "prisma.json")
     if os.path.exists(prisma_path):

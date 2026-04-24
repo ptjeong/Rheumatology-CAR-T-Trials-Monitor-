@@ -3,6 +3,7 @@ import re
 import subprocess
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -781,15 +782,110 @@ st.markdown(
 )
 
 
-@st.cache_data(ttl=60 * 60)
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
 def load_live(max_records: int = 2000, statuses: tuple[str, ...] = ()) -> tuple:
     statuses_list = list(statuses) if statuses else None
     return build_all_from_api(max_records=max_records, statuses=statuses_list)
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_frozen(snapshot_date: str) -> tuple:
     return load_snapshot(snapshot_date)
+
+
+def _add_modality_vectorized(frame: pd.DataFrame) -> pd.DataFrame:
+    """Vectorized replacement for row-wise ``df.apply(_modality, axis=1)``.
+
+    Produces identical output via boolean masks + np.select.
+    Falls back to the row-wise implementation for any rows the vectorized
+    logic leaves as ``None`` (should be zero in practice — belt-and-braces).
+    """
+    out = frame.copy()
+
+    target = out.get("TargetCategory", pd.Series([""] * len(out))).fillna("").astype(str)
+    ptype = out.get("ProductType", pd.Series([""] * len(out))).fillna("").astype(str)
+    title = out.get("BriefTitle", pd.Series([""] * len(out))).fillna("").astype(str)
+    summary = out.get("BriefSummary", pd.Series([""] * len(out))).fillna("").astype(str)
+    interv = out.get("Interventions", pd.Series([""] * len(out))).fillna("").astype(str)
+    txt = (title + " " + summary + " " + interv).str.lower()
+    normalized = txt.apply(_normalize_text)
+
+    # Named-product platform overrides (curated registry — highest fidelity)
+    # Build an (index) → modality map for rows that hit a named-platform alias.
+    platform_hit = pd.Series([None] * len(out), index=out.index, dtype="object")
+    for platform, aliases in NAMED_PRODUCT_PLATFORMS.items():
+        mapped = _PLATFORM_TO_MODALITY.get(platform)
+        if mapped is None:
+            continue
+        alias_norms = [_normalize_text(a) for a in aliases]
+        for alias in alias_norms:
+            mask = normalized.str.contains(alias, regex=False, na=False) & platform_hit.isna()
+            if mask.any():
+                platform_hit.loc[mask] = mapped
+
+    # Target-category pseudo-platform shortcuts
+    tgt_nk = target.eq("CAR-NK")
+    tgt_caar = target.eq("CAAR-T")
+    tgt_treg = target.isin(["CAR-Treg", "CD6"])
+
+    # Text fallbacks
+    has_gd = (
+        txt.str.contains("γδ", regex=False, na=False)
+        | txt.str.contains("gamma delta", regex=False, na=False)
+        | txt.str.contains("gamma-delta", regex=False, na=False)
+        | txt.str.contains("-gdt", regex=False, na=False)
+        | txt.str.contains(" gdt ", regex=False, na=False)
+    )
+    has_nk = (
+        txt.str.contains("car-nk", regex=False, na=False)
+        | txt.str.contains("car nk", regex=False, na=False)
+        | txt.str.contains("natural killer", regex=False, na=False)
+    )
+
+    # ProductType final bucket
+    is_invivo = ptype.eq("In vivo")
+    is_auto = ptype.eq("Autologous")
+    is_allo = ptype.eq("Allogeneic/Off-the-shelf")
+
+    conditions = [
+        platform_hit.notna(),
+        tgt_nk,
+        tgt_caar,
+        tgt_treg,
+        has_nk,
+        has_gd,
+        is_invivo,
+        is_auto,
+        is_allo,
+    ]
+    choices = [
+        platform_hit.fillna("CAR-T (unclear)"),
+        pd.Series("CAR-NK", index=out.index),
+        pd.Series("CAAR-T", index=out.index),
+        pd.Series("CAR-Treg", index=out.index),
+        pd.Series("CAR-NK", index=out.index),
+        pd.Series("CAR-γδ T", index=out.index),
+        pd.Series("In vivo CAR", index=out.index),
+        pd.Series("Auto CAR-T", index=out.index),
+        pd.Series("Allo CAR-T", index=out.index),
+    ]
+    out["Modality"] = np.select(conditions, choices, default="CAR-T (unclear)")
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Cached post-processing applied after the source load.
+
+    These are pure transformations (phase normalization + modality assignment)
+    that only need to be recomputed when the raw dataframe changes — not on
+    every widget-driven rerun.
+    """
+    if raw_df.empty:
+        return raw_df
+    out = add_phase_columns(raw_df)
+    out = _add_modality_vectorized(out)
+    return out
 
 
 def metric_card(label: str, value, foot: str = ""):
@@ -1014,14 +1110,13 @@ else:
         st.sidebar.success(f"Saved snapshot: {snap_date}")
         st.cache_data.clear()
 
-df = add_phase_columns(df)
+# Phase normalization + modality assignment are pure transforms. Bundled and
+# cached so they don't re-run on every widget-driven rerun.
+df = _post_process_trials(df)
 
 if df.empty:
     st.error("No studies were returned. Try broadening the status filters.")
     st.stop()
-
-# Compute modality column on full df before any filtering
-df["Modality"] = df.apply(_modality, axis=1)
 df["DiseaseFamily"] = df.apply(
     lambda r: _disease_family(r.get("DiseaseEntity"), r.get("TrialDesign")),
     axis=1,
