@@ -250,6 +250,30 @@ class TestSponsorClassification:
         assert _classify_sponsor("Marcela V. Maus, M.D.,Ph.D.", "INDIV") == "Academic"
         assert _classify_sponsor("David Porter", "INDIV") == "Academic"
 
+    def test_other_class_with_degree_markers_is_academic(self):
+        # CT.gov frequently tags PIs as class OTHER (not INDIV).
+        assert _classify_sponsor("Marcela V. Maus, M.D.,Ph.D.", "OTHER") == "Academic"
+        assert _classify_sponsor("Ting Chang, MD", "OTHER") == "Academic"
+
+    def test_other_class_plain_person_name_is_academic(self):
+        # Plain multi-word alphabetic names with no org keywords are PIs.
+        assert _classify_sponsor("Bruce Cree", "OTHER") == "Academic"
+        assert _classify_sponsor("Polina Stepensky", "OTHER") == "Academic"
+        assert _classify_sponsor("YANRU WANG", "OTHER") == "Academic"
+        assert _classify_sponsor("Daishi Tian", "OTHER") == "Academic"
+
+    def test_gustave_roussy_is_academic(self):
+        # Major cancer research hospital in France.
+        assert _classify_sponsor("Gustave Roussy, Cancer Campus, Grand Paris", "OTHER") == "Academic"
+
+    def test_calibr_scripps_is_academic(self):
+        assert _classify_sponsor("Calibr, a division of Scripps Research", "OTHER") == "Academic"
+
+    def test_company_with_industry_keywords_stays_industry(self):
+        # Regression: two-word company names with industry hint → Industry, not PI.
+        assert _classify_sponsor("Quell Therapeutics", None) == "Industry"
+        assert _classify_sponsor("Cabaletta Bio", None) == "Industry"
+
 
 # ---------------------------------------------------------------------------
 # AgeGroup derivation

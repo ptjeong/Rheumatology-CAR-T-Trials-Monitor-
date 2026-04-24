@@ -435,7 +435,7 @@ _ACADEMIC_HINTS = (
     "mayo clinic", "cleveland clinic", "charite", "charité",
     "chinese academy", "chinese pla", "pla general hospital",
     "people's hospital", "peoples hospital",
-    "cancer center", "cancer centre",
+    "gustave roussy", "scripps", "calibr", "cancer center", "cancer centre",
     "fred hutchinson", "memorial sloan", "dana-farber", "md anderson",
     "children's hospital", "childrens hospital",
     "foundation", "fondazione", "trust", "nhs",
@@ -448,7 +448,43 @@ _INDUSTRY_HINTS = (
     "biotech", "bioscience", "biosciences", "biologics", "therapeutics",
     "bio-tech", "biopharma", "oncology",
     "diagnostics", "genomics", "medicines", "biosimilar",
+    " bio",  # trailing 'Bio' as company suffix: 'Cabaletta Bio', 'Bioray'
 )
+
+
+_PERSON_DEGREE_MARKERS = (
+    "m.d.", " md,", " md ", ", md", " md.", "md,",
+    "ph.d", "phd", " d.o.", ", do",
+    "pharmd", " dsc", " msc", "professor ",
+)
+
+
+def _looks_like_personal_name(name: str) -> bool:
+    """Detect whether a sponsor string refers to an individual investigator.
+
+    CT.gov tags many investigator-initiated trials with lead sponsor class
+    OTHER (not INDIV) when the sponsor is actually a named PI — e.g. 'Bruce
+    Cree', 'Marcela V. Maus, M.D.,Ph.D.', 'Daishi Tian'. This heuristic
+    routes them to Academic rather than the opaque Other bucket.
+    """
+    if not name:
+        return False
+    n = name.lower().strip()
+    if any(m in n for m in _PERSON_DEGREE_MARKERS):
+        return True
+    # If any org keyword is present, it is not a personal name.
+    if any(h in n for h in _ACADEMIC_HINTS):
+        return False
+    if any(h in n for h in _INDUSTRY_HINTS):
+        return False
+    if any(h in n for h in _GOV_HINTS):
+        return False
+    # Short, alphabetic 2–4-token strings look like personal names.
+    tokens = [t.strip(",.'-") for t in name.split() if t.strip(",.'-")]
+    if 2 <= len(tokens) <= 4 and all(t.replace("-", "").isalpha() for t in tokens):
+        if all(len(t) <= 15 for t in tokens):
+            return True
+    return False
 
 
 _CTGOV_CLASS_MAP = {
@@ -498,6 +534,8 @@ def _classify_sponsor(lead_sponsor: str | None, lead_sponsor_class: str | None =
         return "Academic"
     if any(h in name for h in _INDUSTRY_HINTS):
         return "Industry"
+    if _looks_like_personal_name(name):
+        return "Academic"
     return "Other"
 
 
