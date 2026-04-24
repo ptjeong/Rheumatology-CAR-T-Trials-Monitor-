@@ -2034,7 +2034,7 @@ with tab_geo:
                     mode="markers",
                     marker=dict(
                         size=5.5,
-                        color=THEME["accent"],
+                        color="#d97706",  # amber-600 — contrasts with blue choropleth
                         opacity=0.78,
                         line=dict(width=0.3, color="#ffffff"),
                     ),
@@ -2157,7 +2157,7 @@ with tab_geo:
                             mode="markers",
                             marker=dict(
                                 size=7,
-                                color=THEME["accent"],
+                                color="#d97706",  # amber-600 — contrasts with blue choropleth
                                 opacity=0.82,
                                 line=dict(width=0.4, color="#ffffff"),
                             ),
