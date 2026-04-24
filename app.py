@@ -383,6 +383,19 @@ st.markdown(
         font-weight: 400;
     }}
 
+    .hero-sub-filter {{
+        margin-top: 0.55rem;
+        padding: 0.35rem 0.55rem;
+        background: #dbeafe;
+        color: {THEME["text"]};
+        border-radius: 2px;
+        display: inline-block;
+    }}
+    .hero-sub-filter strong {{
+        color: {THEME["text"]};
+        font-weight: 600;
+    }}
+
     /* ── Cards (flat, line-delineated) ────────────────────────────────── */
     .section-card {{
         background: transparent;
@@ -1060,6 +1073,9 @@ st.markdown(
             cell-therapy modality classification; global site-level geography; and
             publication-ready figures.
         </div>
+        <div class="hero-sub hero-sub-filter">
+            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — every chart, table, map, and CSV export on every tab respects the active filter state.
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1638,7 +1654,6 @@ st.markdown(
     f"""
     <div class="small-note">
         {len(df)} total trials after processing. Current view shows {len(df_filt)} filtered trials.
-        Use the sidebar filters to narrow to a subgroup of interest — every chart, table, map, and CSV export on every tab respects the active filter state.
     </div>
     """,
     unsafe_allow_html=True,
