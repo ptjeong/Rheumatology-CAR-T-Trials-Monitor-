@@ -2143,20 +2143,28 @@ with tab_geo:
                 if _country_geo.empty:
                     st.caption("No geocoded sites for this country yet.")
                 else:
-                    # Collapse overlapping dots: one marker per facility (lat/lon),
-                    # sized by unique trial count. sqrt scaling so mega-hubs don't
-                    # visually dominate the long tail of single-trial sites.
+                    # Aggregate to city level: one blob per city, positioned at
+                    # the mean lat/lon of its facilities, sized by unique-trial
+                    # count. sqrt scaling so hub cities don't drown the long tail.
                     _hub = (
-                        _country_geo
-                        .groupby(["Latitude", "Longitude", "Facility", "City"], dropna=False)
-                        .agg(Trials=("NCTId", "nunique"))
+                        _country_geo.assign(
+                            CityKey=_country_geo["City"].fillna("Unknown").astype(str)
+                        )
+                        .groupby("CityKey", dropna=False)
+                        .agg(
+                            Latitude=("Latitude", "mean"),
+                            Longitude=("Longitude", "mean"),
+                            Trials=("NCTId", "nunique"),
+                            Sites=("Facility", "nunique"),
+                        )
                         .reset_index()
+                        .rename(columns={"CityKey": "City"})
                     )
-                    _hub["Size"] = 6 + 4 * np.sqrt(_hub["Trials"].clip(lower=1))
+                    _hub["Size"] = 8 + 6 * np.sqrt(_hub["Trials"].clip(lower=1))
                     _lab = (
-                        _hub["Facility"].fillna("").astype(str)
-                        + " · " + _hub["City"].fillna("").astype(str)
-                        + "<br>" + _hub["Trials"].astype(str) + " trial(s)"
+                        "<b>" + _hub["City"].astype(str) + "</b>"
+                        + "<br>" + _hub["Trials"].astype(str) + " trial(s) · "
+                        + _hub["Sites"].astype(str) + " site(s)"
                     )
                     fig_country_geo = go.Figure(
                         go.Scattergeo(
@@ -2168,8 +2176,8 @@ with tab_geo:
                             marker=dict(
                                 size=_hub["Size"],
                                 color="#d97706",  # amber-600 — contrasts with blue choropleth
-                                opacity=0.78,
-                                line=dict(width=0.4, color="#ffffff"),
+                                opacity=0.72,
+                                line=dict(width=0.5, color="#ffffff"),
                             ),
                         )
                     )
@@ -2192,10 +2200,14 @@ with tab_geo:
                     )
                     st.plotly_chart(fig_country_geo, width='stretch')
                     _max_trials = int(_hub["Trials"].max()) if not _hub.empty else 0
+                    _top_city = (
+                        _hub.sort_values("Trials", ascending=False).iloc[0]["City"]
+                        if not _hub.empty else ""
+                    )
                     if _max_trials > 1:
                         st.caption(
-                            f"Dot size ∝ √(trials at that facility) · "
-                            f"largest hub runs {_max_trials} trials."
+                            f"Dot size ∝ √(trials per city) · "
+                            f"{_top_city} leads with {_max_trials} trials."
                         )
             with c2:
                 st.markdown("**Open sites by city**")
