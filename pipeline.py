@@ -30,12 +30,14 @@ BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
 
 _OVERRIDES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_overrides.json")
 _LLM_OVERRIDES: dict[str, dict] = {}
+_LLM_EXCLUDED_NCT_IDS: set[str] = set()
 
 
 def _load_overrides() -> None:
-    global _LLM_OVERRIDES
+    global _LLM_OVERRIDES, _LLM_EXCLUDED_NCT_IDS
     if not os.path.exists(_OVERRIDES_PATH):
         _LLM_OVERRIDES = {}
+        _LLM_EXCLUDED_NCT_IDS = set()
         return
     with open(_OVERRIDES_PATH) as f:
         entries = json.load(f)
@@ -44,6 +46,11 @@ def _load_overrides() -> None:
         for e in entries
         if e.get("confidence") in ("high", "medium")
         and e.get("disease_entity") not in ("Exclude", None)
+        and not e.get("exclude")
+    }
+    _LLM_EXCLUDED_NCT_IDS = {
+        e["nct_id"] for e in entries
+        if e.get("exclude") and e.get("confidence") in ("high", "medium")
     }
 
 
@@ -219,7 +226,8 @@ def _assign_disease_entity(row: dict) -> str:
 
 
 def _is_hard_excluded(nct_id: str) -> bool:
-    return nct_id.strip() in HARD_EXCLUDED_NCT_IDS
+    n = nct_id.strip()
+    return n in HARD_EXCLUDED_NCT_IDS or n in _LLM_EXCLUDED_NCT_IDS
 
 
 def _is_indication_excluded(row: dict) -> bool:
@@ -233,7 +241,20 @@ def _exclude_by_indication(row: dict) -> bool:
     return _is_indication_excluded(row)
 
 
-def _assign_target(row: dict) -> str:
+_TARGET_FALLBACK_LABELS = {"CAR-T_unspecified", "Other_or_unknown"}
+
+
+def _assign_target(row: dict) -> tuple[str, str]:
+    """Return (target_category, source).
+
+    source ∈ {"llm_override", "explicit_marker", "named_product",
+              "car_core_fallback", "unknown"}.
+    """
+    nct = _safe_text(row.get("NCTId")).strip()
+    ov = _LLM_OVERRIDES.get(nct) if nct else None
+    if ov and ov.get("target_category"):
+        return ov["target_category"], "llm_override"
+
     text = _row_text(row)
 
     has_car_nk = _contains_any(text, CAR_NK_TERMS) or ("car nk" in text)
@@ -251,91 +272,188 @@ def _assign_target(row: dict) -> str:
 
     if has_car_nk:
         if has_cd19 and has_bcma:
-            return "CD19/BCMA dual"
+            return "CD19/BCMA dual", "explicit_marker"
         if has_cd19:
-            return "CD19"
-        return "CAR-NK"
+            return "CD19", "explicit_marker"
+        return "CAR-NK", "explicit_marker"
 
     if has_caar_t:
-        return "CAAR-T"
+        return "CAAR-T", "explicit_marker"
     if has_car_treg:
         if has_cd6:
-            return "CD6"
-        return "CAR-Treg"
+            return "CD6", "explicit_marker"
+        return "CAR-Treg", "explicit_marker"
     if has_bcma and has_cd70:
-        return "BCMA/CD70 dual"
+        return "BCMA/CD70 dual", "explicit_marker"
     if has_cd19 and has_bcma:
-        return "CD19/BCMA dual"
+        return "CD19/BCMA dual", "explicit_marker"
     if has_cd19 and has_cd20:
-        return "CD19/CD20 dual"
+        return "CD19/CD20 dual", "explicit_marker"
     if has_cd19 and has_baff:
-        return "CD19/BAFF dual"
+        return "CD19/BAFF dual", "explicit_marker"
     if has_cd19:
-        return "CD19"
+        return "CD19", "explicit_marker"
     if has_bcma:
-        return "BCMA"
+        return "BCMA", "explicit_marker"
     if has_cd20:
-        return "CD20"
+        return "CD20", "explicit_marker"
     if has_cd70:
-        return "CD70"
+        return "CD70", "explicit_marker"
     if has_baff:
-        return "BAFF"
+        return "BAFF", "explicit_marker"
     if has_cd6:
-        return "CD6"
+        return "CD6", "explicit_marker"
     if has_cd7:
-        return "CD7"
+        return "CD7", "explicit_marker"
     # Named product fallback: resolves target for well-known products that omit the
     # antigen name from accessible study text (title / brief summary / interventions).
     named_target = _lookup_named_product(text, NAMED_PRODUCT_TARGETS)
     if named_target:
-        return named_target
+        return named_target, "named_product"
     if _contains_any(text, CAR_CORE_TERMS):
-        return "CAR-T_unspecified"
-    return "Other_or_unknown"
+        return "CAR-T_unspecified", "car_core_fallback"
+    return "Other_or_unknown", "unknown"
 
 
-def _assign_product_type(row: dict) -> str:
+def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[str, str]:
+    """Return (product_type, source).
+
+    source ∈ {"llm_override", "explicit_marker", "named_product",
+              "smart_default", "unclear"}.
+
+    Smart default: when CAR-T is confirmed (target resolved via explicit marker or
+    named-product lookup) and no product-type signal is found in text, default to
+    Autologous — empirically ~85% accurate in rheum CAR-T (ex-INN drift, allo is
+    almost always labelled).
+    """
+    nct = _safe_text(row.get("NCTId")).strip()
+    ov = _LLM_OVERRIDES.get(nct) if nct else None
+    if ov and ov.get("product_type"):
+        return ov["product_type"], "llm_override"
+
     text = _row_text(row)
     title = _normalize_text(_safe_text(row.get("BriefTitle")))
 
     # In vivo: title is the highest-precision signal; supplement with specific full-text terms
     if "in vivo" in title:
-        return "In vivo"
+        return "In vivo", "explicit_marker"
     in_vivo_terms = [
         "in vivo car", "in-vivo car",
         "in vivo programming", "in vivo generated", "in vivo transduction",
         "vivovec", "lentiviral nanoparticle",
-        "circular rna",  # LNP/mRNA-encoded in vivo CAR delivery
+        "circular rna",
     ]
     if any(term in text for term in in_vivo_terms):
-        return "In vivo"
+        return "In vivo", "explicit_marker"
 
     if "autoleucel" in text or "autologous" in text:
-        return "Autologous"
+        return "Autologous", "explicit_marker"
 
     strong_allo_terms = [
         "ucart", "ucar",
-        "universal car t", "universal car-t",   # "Universal CAR-T cells"
-        "universal cd19", "universal bcma",      # "Universal CD19/20 CAR-T" etc.
-        "universal cd70", "universal anti",       # "Universal anti-CD70 CAR-T"
-        "u car t", "u car-t",                    # "anti-CD19/BCMA U CAR T cells"
+        "universal car t", "universal car-t",
+        "universal cd19", "universal bcma",
+        "universal cd70", "universal anti",
+        "u car t", "u car-t",
         "off the shelf", "allogeneic",
         "healthy donor", "donor derived", "donor sourced",
     ]
     if any(term in text for term in strong_allo_terms):
-        return "Allogeneic/Off-the-shelf"
+        return "Allogeneic/Off-the-shelf", "explicit_marker"
 
-    # Named product fallback: resolves type for well-known products that lack generic markers.
     named_type = _lookup_named_product(text, NAMED_PRODUCT_TYPES)
     if named_type:
-        return named_type
+        return named_type, "named_product"
 
     if _contains_any(text, ALLOGENEIC_MARKERS):
-        return "Allogeneic/Off-the-shelf"
+        return "Allogeneic/Off-the-shelf", "explicit_marker"
     if _contains_any(text, AUTOL_MARKERS):
-        return "Autologous"
+        return "Autologous", "explicit_marker"
 
-    return "Unclear"
+    # Smart default: if target was confirmed (not fallback/unknown), presume autologous
+    if target_source in ("explicit_marker", "named_product"):
+        return "Autologous", "smart_default"
+
+    return "Unclear", "unclear"
+
+
+def _compute_confidence(
+    target: str, target_source: str,
+    product_type: str, product_source: str,
+    disease_entity: str,
+) -> str:
+    """Return 'high' | 'medium' | 'low' per classification provenance."""
+    # LLM-overridden fields carry the LLM's stated confidence (defaulted high)
+    strong_sources = {"llm_override", "explicit_marker"}
+    weak_sources = {"car_core_fallback", "smart_default", "named_product"}
+
+    target_strong = target_source in strong_sources and target not in _TARGET_FALLBACK_LABELS
+    type_strong = product_source in strong_sources and product_type != "Unclear"
+    disease_strong = disease_entity not in ("Unclassified", "Autoimmune_other")
+
+    if target_strong and type_strong and disease_strong:
+        return "high"
+    if (target_source in strong_sources or target_source == "named_product") \
+       and (product_source in strong_sources or product_source in weak_sources) \
+       and product_type != "Unclear" and target not in _TARGET_FALLBACK_LABELS:
+        return "medium"
+    return "low"
+
+
+_ACADEMIC_HINTS = (
+    "university", "universität", "universitat", "universite", "université",
+    "hospital", "klinik", "klinikum", "hôpital", "ospedale",
+    "institute", "institut", "instituto",
+    "school of medicine", "college of medicine", "medical college", "medical center",
+    "medical centre", "centre hospitalier", "center hospitalier",
+    "academic", "faculty", "facultad",
+    "nih", "national institutes of health", "national cancer institute",
+    "mayo clinic", "cleveland clinic", "charite", "charité",
+    "chinese academy", "chinese pla", "pla general hospital",
+    "fred hutchinson", "memorial sloan", "dana-farber", "md anderson",
+    "children's hospital", "childrens hospital",
+    "foundation", "fondazione", "trust", "nhs",
+)
+
+_INDUSTRY_HINTS = (
+    "inc", "inc.", "ltd", "ltd.", "limited", "llc", "corp", "corporation",
+    "gmbh", "ag", "s.a.", "s.p.a", "s.a.s", "sas", "plc", "co., ltd",
+    "pharma", "pharmaceutical", "pharmaceuticals",
+    "biotech", "bioscience", "biosciences", "biologics", "therapeutics",
+    "bio-tech", "biopharma", "oncology",
+)
+
+
+_CTGOV_CLASS_MAP = {
+    "INDUSTRY": "Industry",
+    "NIH": "Academic",
+    "FED": "Academic",
+    "OTHER_GOV": "Academic",
+    "NETWORK": "Academic",
+    "INDIV": "Other",
+    "OTHER": None,  # fall through to heuristic
+    "UNKNOWN": None,
+}
+
+
+def _classify_sponsor(lead_sponsor: str | None, lead_sponsor_class: str | None = None) -> str:
+    """Return 'Industry' | 'Academic' | 'Other'.
+
+    Primary signal: CT.gov `leadSponsor.class` (INDUSTRY/NIH/OTHER_GOV/…).
+    Fallback: keyword heuristic against the sponsor name.
+    """
+    if lead_sponsor_class:
+        mapped = _CTGOV_CLASS_MAP.get(str(lead_sponsor_class).upper().strip())
+        if mapped is not None:
+            return mapped
+    if not lead_sponsor:
+        return "Other"
+    s = lead_sponsor.lower().strip()
+    if any(h in s for h in _ACADEMIC_HINTS):
+        return "Academic"
+    if any(h in s for h in _INDUSTRY_HINTS):
+        return "Industry"
+    return "Other"
 
 
 def fetch_raw_trials(max_records: int = 1000, statuses: list[str] | None = None) -> list[dict]:
@@ -408,6 +526,7 @@ def _flatten_study(study: dict) -> dict:
         "Countries": "|".join(countries) or None,
         "BriefSummary": desc.get("briefSummary"),
         "LeadSponsor": (sponsor_mod.get("leadSponsor") or {}).get("name"),
+        "LeadSponsorClass": (sponsor_mod.get("leadSponsor") or {}).get("class"),
     }
 
 
@@ -450,8 +569,11 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
     df["DiseaseEntity"] = disease_results.apply(lambda x: x[2])
     df["LLMOverride"] = df["NCTId"].isin(_LLM_OVERRIDES)
 
-    hard_mask = df["NCTId"].apply(_is_hard_excluded)
-    n_hard_excluded = int(hard_mask.sum())
+    hard_manual_mask = df["NCTId"].apply(lambda n: n.strip() in HARD_EXCLUDED_NCT_IDS)
+    hard_llm_mask = df["NCTId"].apply(lambda n: n.strip() in _LLM_EXCLUDED_NCT_IDS) & ~hard_manual_mask
+    hard_mask = hard_manual_mask | hard_llm_mask
+    n_hard_excluded = int(hard_manual_mask.sum())
+    n_llm_excluded = int(hard_llm_mask.sum())
 
     df_after_hard = df[~hard_mask].copy()
     indication_mask = df_after_hard.apply(lambda r: _is_indication_excluded(r.to_dict()), axis=1)
@@ -460,8 +582,28 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
     df = df_after_hard[~indication_mask].copy()
     n_included = len(df)
 
-    df["TargetCategory"] = df.apply(lambda r: _assign_target(r.to_dict()), axis=1)
-    df["ProductType"] = df.apply(lambda r: _assign_product_type(r.to_dict()), axis=1)
+    target_results = df.apply(lambda r: _assign_target(r.to_dict()), axis=1)
+    df["TargetCategory"] = target_results.apply(lambda x: x[0])
+    df["TargetSource"] = target_results.apply(lambda x: x[1])
+
+    type_results = df.apply(
+        lambda r: _assign_product_type(r.to_dict(), r["TargetSource"]), axis=1
+    )
+    df["ProductType"] = type_results.apply(lambda x: x[0])
+    df["ProductTypeSource"] = type_results.apply(lambda x: x[1])
+
+    df["Confidence"] = df.apply(
+        lambda r: _compute_confidence(
+            r["TargetCategory"], r["TargetSource"],
+            r["ProductType"], r["ProductTypeSource"],
+            r["DiseaseEntity"],
+        ),
+        axis=1,
+    )
+    df["SponsorType"] = df.apply(
+        lambda r: _classify_sponsor(r.get("LeadSponsor"), r.get("LeadSponsorClass")),
+        axis=1,
+    )
 
     df["StartDate"] = pd.to_datetime(df["StartDate"], errors="coerce")
     df["StartYear"] = df["StartDate"].dt.year
@@ -474,8 +616,9 @@ def _process_trials_from_studies(studies: list[dict]) -> tuple[pd.DataFrame, dic
         "n_duplicates_removed": n_duplicates,
         "n_after_dedup": n_after_dedup,
         "n_hard_excluded": n_hard_excluded,
+        "n_llm_excluded": n_llm_excluded,
         "n_indication_excluded": n_indication_excluded,
-        "n_total_excluded": n_hard_excluded + n_indication_excluded,
+        "n_total_excluded": n_hard_excluded + n_llm_excluded + n_indication_excluded,
         "n_included": n_included,
     }
 
@@ -562,13 +705,31 @@ def load_snapshot(
     df = pd.read_csv(os.path.join(out_dir, "trials.csv"))
     df["StartDate"] = pd.to_datetime(df["StartDate"], errors="coerce")
     df["LastUpdatePostDate"] = pd.to_datetime(df["LastUpdatePostDate"], errors="coerce")
-    # Back-compat: snapshots created before DiseaseEntities/TrialDesign/LLMOverride were added
+    # Back-compat: snapshots created before new columns were added
     if "DiseaseEntities" not in df.columns:
         df["DiseaseEntities"] = df["DiseaseEntity"].fillna("Unclassified")
     if "TrialDesign" not in df.columns:
         df["TrialDesign"] = "Single disease"
     if "LLMOverride" not in df.columns:
         df["LLMOverride"] = df["NCTId"].isin(_LLM_OVERRIDES)
+    if "TargetSource" not in df.columns:
+        df["TargetSource"] = "legacy_snapshot"
+    if "ProductTypeSource" not in df.columns:
+        df["ProductTypeSource"] = "legacy_snapshot"
+    if "Confidence" not in df.columns:
+        df["Confidence"] = df.apply(
+            lambda r: _compute_confidence(
+                r.get("TargetCategory", ""), r.get("TargetSource", "legacy_snapshot"),
+                r.get("ProductType", ""), r.get("ProductTypeSource", "legacy_snapshot"),
+                r.get("DiseaseEntity", ""),
+            ),
+            axis=1,
+        )
+    if "SponsorType" not in df.columns:
+        df["SponsorType"] = df.apply(
+            lambda r: _classify_sponsor(r.get("LeadSponsor"), r.get("LeadSponsorClass")),
+            axis=1,
+        )
 
     df_sites_path = os.path.join(out_dir, "sites.csv")
     if os.path.exists(df_sites_path):
@@ -584,6 +745,78 @@ def load_snapshot(
         prisma = {}
 
     return df, df_sites, prisma
+
+
+def snapshot_diff(df_new: pd.DataFrame, df_old: pd.DataFrame) -> dict:
+    """Compute diff between two snapshot DataFrames.
+
+    Returns dict with:
+      added        — rows (records) present in new but not old
+      removed      — rows present in old but not new
+      status_changed — records where OverallStatus differs
+      class_changed  — records where DiseaseEntity / TargetCategory / ProductType differ
+      enrollment_changed — records where EnrollmentCount differs
+    """
+    tracked = ["NCTId", "BriefTitle", "OverallStatus", "Phase",
+               "DiseaseEntity", "TargetCategory", "ProductType",
+               "EnrollmentCount", "LeadSponsor"]
+    cols_new = [c for c in tracked if c in df_new.columns]
+    cols_old = [c for c in tracked if c in df_old.columns]
+
+    new_idx = df_new.set_index("NCTId")[cols_new[1:]] if not df_new.empty else pd.DataFrame()
+    old_idx = df_old.set_index("NCTId")[cols_old[1:]] if not df_old.empty else pd.DataFrame()
+
+    new_ids = set(new_idx.index) if len(new_idx) else set()
+    old_ids = set(old_idx.index) if len(old_idx) else set()
+
+    added = new_idx.loc[sorted(new_ids - old_ids)].reset_index() if (new_ids - old_ids) else pd.DataFrame()
+    removed = old_idx.loc[sorted(old_ids - new_ids)].reset_index() if (old_ids - new_ids) else pd.DataFrame()
+
+    common = sorted(new_ids & old_ids)
+    def _changes(col: str) -> pd.DataFrame:
+        if col not in new_idx.columns or col not in old_idx.columns or not common:
+            return pd.DataFrame()
+        left = new_idx.loc[common, col]
+        right = old_idx.loc[common, col]
+        mask = (left.fillna("") != right.fillna("")) if left.dtype == object else (left.fillna(-1) != right.fillna(-1))
+        if not mask.any():
+            return pd.DataFrame()
+        changed = pd.DataFrame({
+            "NCTId": left.index[mask],
+            f"{col} (old)": right[mask].values,
+            f"{col} (new)": left[mask].values,
+        })
+        titles = new_idx.loc[changed["NCTId"], "BriefTitle"].values if "BriefTitle" in new_idx.columns else [""] * len(changed)
+        changed.insert(1, "BriefTitle", titles)
+        return changed
+
+    return {
+        "added": added,
+        "removed": removed,
+        "status_changed": _changes("OverallStatus"),
+        "disease_changed": _changes("DiseaseEntity"),
+        "target_changed": _changes("TargetCategory"),
+        "product_changed": _changes("ProductType"),
+        "enrollment_changed": _changes("EnrollmentCount"),
+        "n_added": len(added),
+        "n_removed": len(removed),
+        "n_common": len(common),
+    }
+
+
+def export_curation_loop(df: pd.DataFrame, path: str = "curation_loop.csv") -> int:
+    """Write low-confidence trials to CSV for LLM re-review. Returns row count."""
+    if "Confidence" not in df.columns:
+        return 0
+    low = df[df["Confidence"] == "low"].copy()
+    cols = [c for c in [
+        "NCTId", "BriefTitle", "Conditions", "Interventions",
+        "DiseaseEntity", "TargetCategory", "ProductType",
+        "TargetSource", "ProductTypeSource", "Confidence",
+        "LeadSponsor", "BriefSummary",
+    ] if c in low.columns]
+    low[cols].to_csv(path, index=False)
+    return len(low)
 
 
 def list_snapshots(snapshot_dir: str = "snapshots") -> list[str]:

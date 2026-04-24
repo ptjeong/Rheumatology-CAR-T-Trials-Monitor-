@@ -884,9 +884,51 @@ _FILTER_KEYS = (
     "flt_disease", "flt_design", "flt_phase", "flt_target",
     "flt_status", "flt_product", "flt_modality", "flt_country",
 )
+# Short URL parameter names (keep the URL readable).
+_FILTER_QPARAM = {
+    "flt_disease": "d", "flt_design": "dd", "flt_phase": "ph",
+    "flt_target": "t", "flt_status": "s", "flt_product": "p",
+    "flt_modality": "m", "flt_country": "c",
+}
+
+
+def _seed_filter_from_query(state_key: str, options: list[str]) -> None:
+    """If query string has a value for this filter and session_state doesn't,
+    seed session_state. Unknown tokens are silently dropped."""
+    if state_key in st.session_state:
+        return
+    qkey = _FILTER_QPARAM[state_key]
+    raw = st.query_params.get(qkey)
+    if raw is None:
+        return
+    if isinstance(raw, list):
+        raw = ",".join(raw)
+    items = [x.strip() for x in str(raw).split(",") if x.strip()]
+    opt_set = set(options)
+    valid = [x for x in items if x in opt_set]
+    if valid:
+        st.session_state[state_key] = valid
+
+
+def _sync_filters_to_query(opt_map: dict[str, list[str]]) -> None:
+    """Write current filter state to URL. Omit params that equal 'all selected'."""
+    for state_key, options in opt_map.items():
+        qkey = _FILTER_QPARAM[state_key]
+        val = st.session_state.get(state_key)
+        if val is None:
+            st.query_params.pop(qkey, None)
+            continue
+        if set(val) == set(options):
+            st.query_params.pop(qkey, None)
+        else:
+            st.query_params[qkey] = ",".join(val)
+
+
 if st.sidebar.button("Reset filters", width='stretch'):
     for _k in _FILTER_KEYS:
         st.session_state.pop(_k, None)
+    for _qk in _FILTER_QPARAM.values():
+        st.query_params.pop(_qk, None)
     st.rerun()
 
 # Disease entity (multi-select) — based on DiseaseEntities so basket trials appear under each disease
@@ -897,6 +939,7 @@ for _val in df["DiseaseEntities"].dropna():
         if _e:
             _all_disease_entities.add(_e)
 disease_options = sorted(_all_disease_entities)
+_seed_filter_from_query("flt_disease", disease_options)
 disease_sel = st.sidebar.multiselect(
     "Disease entity",
     options=disease_options,
@@ -907,6 +950,7 @@ disease_sel = st.sidebar.multiselect(
 
 # Trial design (single disease vs basket)
 design_options = sorted(df["TrialDesign"].dropna().unique().tolist())
+_seed_filter_from_query("flt_design", design_options)
 design_sel = st.sidebar.multiselect(
     "Trial design",
     options=design_options,
@@ -917,6 +961,7 @@ design_sel = st.sidebar.multiselect(
 
 # Phase (multi-select, displayed as labels)
 phase_options = [PHASE_LABELS[p] for p in PHASE_ORDER if p in set(df["PhaseNormalized"].astype(str))]
+_seed_filter_from_query("flt_phase", phase_options)
 phase_sel = st.sidebar.multiselect(
     "Phase",
     options=phase_options,
@@ -929,6 +974,7 @@ target_options = sorted(
     t for t in df["TargetCategory"].dropna().unique()
     if t not in _PLATFORM_LABELS
 )
+_seed_filter_from_query("flt_target", target_options)
 target_sel = st.sidebar.multiselect(
     "Antigen target",
     options=target_options,
@@ -938,6 +984,7 @@ target_sel = st.sidebar.multiselect(
 
 # Overall status (multi-select)
 status_options = sorted(df["OverallStatus"].dropna().unique().tolist())
+_seed_filter_from_query("flt_status", status_options)
 status_sel = st.sidebar.multiselect(
     "Overall status",
     options=status_options,
@@ -947,6 +994,7 @@ status_sel = st.sidebar.multiselect(
 
 # Product type (multi-select)
 product_options = sorted(df["ProductType"].dropna().unique().tolist())
+_seed_filter_from_query("flt_product", product_options)
 product_sel = st.sidebar.multiselect(
     "Product type",
     options=product_options,
@@ -956,6 +1004,7 @@ product_sel = st.sidebar.multiselect(
 
 # Cell therapy modality (multi-select)
 modality_options = [m for m in _MODALITY_ORDER if m in set(df["Modality"])]
+_seed_filter_from_query("flt_modality", modality_options)
 modality_sel = st.sidebar.multiselect(
     "Cell therapy modality",
     options=modality_options,
@@ -971,12 +1020,25 @@ for cs in df["Countries"].dropna():
         if c:
             all_countries.add(c)
 country_options = sorted(all_countries)
+_seed_filter_from_query("flt_country", country_options)
 country_sel = st.sidebar.multiselect(
     "Country",
     options=country_options,
     default=country_options,
     key="flt_country",
 )
+
+# Sync current filter state to URL so the view is shareable
+_sync_filters_to_query({
+    "flt_disease": disease_options,
+    "flt_design": design_options,
+    "flt_phase": phase_options,
+    "flt_target": target_options,
+    "flt_status": status_options,
+    "flt_product": product_options,
+    "flt_modality": modality_options,
+    "flt_country": country_options,
+})
 
 
 # ---------------------------------------------------------------------------
@@ -1209,6 +1271,7 @@ with tab_overview:
             {"Step": "Duplicate records removed", "n": prisma_counts.get("n_duplicates_removed", "—"), "Note": "Same NCT ID"},
             {"Step": "Records screened", "n": prisma_counts.get("n_after_dedup", "—"), "Note": ""},
             {"Step": "Excluded: pre-specified NCT IDs", "n": prisma_counts.get("n_hard_excluded", "—"), "Note": "Manually curated exclusion list"},
+            {"Step": "Excluded: LLM-curation flagged", "n": prisma_counts.get("n_llm_excluded", 0), "Note": "LLM validation (high/medium confidence, exclude=true)"},
             {"Step": "Excluded: oncology / haematologic malignancy indications", "n": prisma_counts.get("n_indication_excluded", "—"), "Note": "Keyword-based exclusion"},
             {"Step": "Studies included in analysis", "n": prisma_counts.get("n_included", "—"), "Note": "Final dataset"},
         ]
@@ -1223,6 +1286,51 @@ with tab_overview:
                 "Note": st.column_config.TextColumn("Note", width="medium"),
             },
         )
+
+    # ── Snapshot diff vs previous snapshot ─────────────────────────────────
+    try:
+        from pipeline import list_snapshots as _list_snapshots, load_snapshot as _load_snap, snapshot_diff as _snap_diff
+        _snap_dates = _list_snapshots()
+    except Exception:
+        _snap_dates = []
+
+    if len(_snap_dates) >= 2 and data_source == "Frozen snapshot":
+        # selected_snapshot is the current view; find previous
+        try:
+            idx = _snap_dates.index(selected_snapshot)
+            prev_date = _snap_dates[idx + 1] if idx + 1 < len(_snap_dates) else None
+        except (ValueError, NameError):
+            prev_date = None
+
+        if prev_date:
+            with st.expander(f"Changes since previous snapshot ({prev_date} → {selected_snapshot})", expanded=False):
+                try:
+                    df_prev, _, _ = _load_snap(prev_date)
+                    diff = _snap_diff(df, df_prev)
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Trials added", diff["n_added"])
+                    c2.metric("Trials removed", diff["n_removed"])
+                    c3.metric("Status changes", len(diff["status_changed"]))
+                    c4.metric(
+                        "Classification changes",
+                        len(diff["disease_changed"]) + len(diff["target_changed"]) + len(diff["product_changed"]),
+                    )
+
+                    _sections = [
+                        ("Newly added trials", diff["added"]),
+                        ("Removed trials (no longer in dataset)", diff["removed"]),
+                        ("Status transitions", diff["status_changed"]),
+                        ("Disease-entity reclassifications", diff["disease_changed"]),
+                        ("Target reclassifications", diff["target_changed"]),
+                        ("Product-type reclassifications", diff["product_changed"]),
+                        ("Enrollment updates", diff["enrollment_changed"]),
+                    ]
+                    for label, d in _sections:
+                        if isinstance(d, pd.DataFrame) and not d.empty:
+                            st.markdown(f"**{label}** — {len(d)}")
+                            st.dataframe(d, width='stretch', hide_index=True, height=min(220, 40 + 28 * len(d)))
+                except Exception as e:
+                    st.caption(f"Snapshot diff unavailable: {type(e).__name__}: {e}")
 
     # Row 1
     ov_r1c1, ov_r1c2 = st.columns(2)
@@ -1494,6 +1602,14 @@ with tab_geo:
 with tab_data:
     st.subheader("Trial table")
 
+    search_q = st.text_input(
+        "Search",
+        value=st.session_state.get("data_search", ""),
+        key="data_search",
+        placeholder="NCT ID, title, sponsor, condition, intervention (e.g. lupus, KYV-101, Cabaletta)",
+        help="Case-insensitive substring match across NCT ID / title / sponsor / conditions / interventions.",
+    )
+
     show_cols = [
         "NCTId",
         "NCTLink",
@@ -1502,16 +1618,29 @@ with tab_data:
         "TrialDesign",
         "TargetCategory",
         "ProductType",
+        "Confidence",
         "Phase",
         "OverallStatus",
         "StartYear",
         "Countries",
         "LeadSponsor",
+        "SponsorType",
     ]
+    show_cols = [c for c in show_cols if c in df_filt.columns or c in ("NCTLink",)]
 
     table_df = df_filt.sort_values(["PhaseOrdered", "DiseaseEntity", "NCTId"], ascending=[True, True, True]).copy()
     table_df["Phase"] = table_df["PhaseLabel"]
     table_df["OverallStatus"] = table_df["OverallStatus"].map(STATUS_DISPLAY).fillna(table_df["OverallStatus"])
+
+    if search_q:
+        q = search_q.lower().strip()
+        search_cols = ["NCTId", "BriefTitle", "LeadSponsor", "Conditions", "Interventions"]
+        mask = pd.Series(False, index=table_df.index)
+        for c in search_cols:
+            if c in table_df.columns:
+                mask |= table_df[c].fillna("").astype(str).str.lower().str.contains(q, regex=False)
+        table_df = table_df[mask]
+        st.caption(f"Search '{search_q}' · {len(table_df)} of {len(df_filt)} filtered trials match")
 
     st.dataframe(
         table_df[show_cols],
@@ -1526,13 +1655,63 @@ with tab_data:
             "TrialDesign": st.column_config.TextColumn("Trial design", width="small"),
             "TargetCategory": st.column_config.TextColumn("Target"),
             "ProductType": st.column_config.TextColumn("Product"),
+            "Confidence": st.column_config.TextColumn(
+                "Confidence",
+                help="Classification confidence. high = explicit markers or curated override. medium = named-product lookup or smart default. low = insufficient signal — review candidate.",
+            ),
             "Phase": st.column_config.TextColumn("Phase"),
             "OverallStatus": st.column_config.TextColumn("Status"),
             "StartYear": st.column_config.NumberColumn("Start year", format="%d"),
             "Countries": st.column_config.TextColumn("Countries", width="large"),
             "LeadSponsor": st.column_config.TextColumn("Lead sponsor", width="medium"),
+            "SponsorType": st.column_config.TextColumn("Sponsor type", width="small"),
         },
     )
+
+    # ── Trial detail drilldown ─────────────────────────────────────────────
+    if not table_df.empty:
+        nct_options = table_df["NCTId"].tolist()
+        sel_nct = st.selectbox(
+            "Trial detail — pick an NCT ID",
+            options=["—"] + nct_options,
+            index=0,
+            key="data_detail_nct",
+            help="Shows the full record and the reasoning behind the classification.",
+        )
+        if sel_nct and sel_nct != "—":
+            rec = table_df[table_df["NCTId"] == sel_nct].iloc[0]
+            with st.expander(f"{sel_nct} — {rec.get('BriefTitle', '')}", expanded=True):
+                _link = rec.get("NCTLink") or f"https://clinicaltrials.gov/study/{sel_nct}"
+                st.markdown(f"**[Open on ClinicalTrials.gov]({_link})**")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.markdown(f"**Disease:** {rec.get('DiseaseEntities', '')}")
+                    st.markdown(f"**Trial design:** {rec.get('TrialDesign', '')}")
+                    st.markdown(f"**Phase:** {rec.get('Phase', '')}")
+                    st.markdown(f"**Status:** {rec.get('OverallStatus', '')}")
+                with c2:
+                    st.markdown(f"**Target:** {rec.get('TargetCategory', '')} *(via {rec.get('TargetSource', '—')})*")
+                    st.markdown(f"**Product:** {rec.get('ProductType', '')} *(via {rec.get('ProductTypeSource', '—')})*")
+                    st.markdown(f"**Confidence:** {rec.get('Confidence', '—')}")
+                    if bool(rec.get("LLMOverride", False)):
+                        st.markdown("**LLM override applied**")
+                with c3:
+                    st.markdown(f"**Sponsor:** {rec.get('LeadSponsor', '')}")
+                    st.markdown(f"**Sponsor type:** {rec.get('SponsorType', '')}")
+                    _enr = rec.get("EnrollmentCount")
+                    if pd.notna(_enr):
+                        st.markdown(f"**Enrollment:** {int(_enr)}")
+                    st.markdown(f"**Countries:** {rec.get('Countries', '') or '—'}")
+
+                if rec.get("Conditions"):
+                    st.markdown("**Conditions:**")
+                    st.write(str(rec["Conditions"]).replace("|", ", "))
+                if rec.get("Interventions"):
+                    st.markdown("**Interventions:**")
+                    st.write(str(rec["Interventions"]).replace("|", ", "))
+                if rec.get("BriefSummary"):
+                    st.markdown("**Brief summary:**")
+                    st.write(str(rec["BriefSummary"]))
 
     st.subheader("Studies active in Germany")
 
