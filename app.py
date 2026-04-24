@@ -1059,26 +1059,31 @@ st.markdown(
 st.sidebar.header("Data source")
 
 available_snapshots = list_snapshots()
-data_source = st.sidebar.radio(
-    "Source",
-    ["Live (ClinicalTrials.gov API)", "Frozen snapshot"],
-    index=0 if not available_snapshots else 0,
-)
-
 prisma_counts: dict = {}
 
-if data_source == "Frozen snapshot":
-    if not available_snapshots:
-        st.sidebar.warning("No snapshots found. Pull live data and save a snapshot first.")
-        st.stop()
-    selected_snapshot = st.sidebar.selectbox("Snapshot date", available_snapshots)
-    with st.spinner(f"Loading frozen snapshot {selected_snapshot}..."):
-        df, df_sites, prisma_counts = load_frozen(selected_snapshot)
-    st.sidebar.caption(f"Loaded: {selected_snapshot} ({len(df)} trials)")
+# Live-first. A snapshot is only used if the user has explicitly pinned one
+# (reproducibility mode) or if the live fetch fails.
+_pinned = st.session_state.get("pinned_snapshot")
+
+if _pinned:
+    if _pinned not in available_snapshots:
+        st.sidebar.warning(f"Pinned snapshot {_pinned} is missing; reverting to live.")
+        st.session_state["pinned_snapshot"] = None
+        _pinned = None
+
+if _pinned:
+    with st.spinner(f"Loading pinned snapshot {_pinned}..."):
+        df, df_sites, prisma_counts = load_frozen(_pinned)
+    st.sidebar.info(f"**Pinned:** {_pinned} · {len(df)} trials")
+    if st.sidebar.button("Unpin — switch back to live data", use_container_width=True):
+        st.session_state["pinned_snapshot"] = None
+        st.cache_data.clear()
+        st.rerun()
 else:
     try:
-        with st.spinner("Fetching and processing ClinicalTrials.gov data..."):
+        with st.spinner("Fetching ClinicalTrials.gov (cached 24h)..."):
             df, df_sites, prisma_counts = load_live(statuses=None)
+        st.sidebar.caption(f"Live pull · {len(df)} trials (cached 24h)")
     except Exception as api_err:
         st.sidebar.error(
             "ClinicalTrials.gov API is currently unreachable. "
@@ -1089,10 +1094,7 @@ else:
             fallback = available_snapshots[0]
             with st.spinner(f"Loading snapshot {fallback}..."):
                 df, df_sites, prisma_counts = load_frozen(fallback)
-            st.sidebar.info(
-                f"Loaded frozen snapshot **{fallback}** (fallback). "
-                "Switch the source toggle above to 'Frozen snapshot' for intentional offline use."
-            )
+            st.sidebar.info(f"Loaded frozen snapshot **{fallback}** (fallback).")
         else:
             st.error(
                 "Cannot load data: the ClinicalTrials.gov API is unreachable and no local "
@@ -1101,14 +1103,27 @@ else:
             )
             st.stop()
 
-    st.sidebar.caption(
-        f"Live pull: all statuses ({len(df)} trials). Use **Overall status** filter below to narrow."
-    )
-
-    if st.sidebar.button("Save snapshot"):
-        snap_date = save_snapshot(df, df_sites, prisma_counts, statuses=None)
-        st.sidebar.success(f"Saved snapshot: {snap_date}")
+    if st.sidebar.button("Refresh now", use_container_width=True):
         st.cache_data.clear()
+        st.rerun()
+
+    with st.sidebar.expander("Reproducibility — pin a frozen dataset", expanded=False):
+        if available_snapshots:
+            _pin_sel = st.selectbox(
+                "Snapshot date",
+                available_snapshots,
+                key="pin_snapshot_selector",
+            )
+            if st.button("Pin this snapshot", use_container_width=True):
+                st.session_state["pinned_snapshot"] = _pin_sel
+                st.cache_data.clear()
+                st.rerun()
+        else:
+            st.caption("No snapshots yet — save one below to pin it later.")
+        if st.button("Save current as snapshot", use_container_width=True):
+            snap_date = save_snapshot(df, df_sites, prisma_counts, statuses=None)
+            st.success(f"Saved snapshot: {snap_date}")
+            st.cache_data.clear()
 
 # Phase normalization + modality assignment are pure transforms. Bundled and
 # cached so they don't re-run on every widget-driven rerun.
@@ -1381,8 +1396,8 @@ def _csv_with_provenance(
         f"# {title}",
         f"# Exported (UTC): {now_utc}",
     ]
-    if data_source == "Frozen snapshot":
-        lines.append(f"# Data source: ClinicalTrials.gov API v2 — frozen snapshot {snap}")
+    if st.session_state.get("pinned_snapshot"):
+        lines.append(f"# Data source: ClinicalTrials.gov API v2 — pinned snapshot {snap}")
     else:
         lines.append(f"# Data source: ClinicalTrials.gov API v2 — live fetch (snapshot date {snap})")
     lines.append(f"# Source URL: {BASE_URL}")
@@ -1697,16 +1712,17 @@ with tab_overview:
     except Exception:
         _snap_dates = []
 
-    if len(_snap_dates) >= 2 and data_source == "Frozen snapshot":
-        # selected_snapshot is the current view; find previous
+    _pinned_for_diff = st.session_state.get("pinned_snapshot")
+    if len(_snap_dates) >= 2 and _pinned_for_diff:
+        # Pinned snapshot is the current view; find the one that preceded it.
         try:
-            idx = _snap_dates.index(selected_snapshot)
+            idx = _snap_dates.index(_pinned_for_diff)
             prev_date = _snap_dates[idx + 1] if idx + 1 < len(_snap_dates) else None
         except (ValueError, NameError):
             prev_date = None
 
         if prev_date:
-            with st.expander(f"Changes since previous snapshot ({prev_date} → {selected_snapshot})", expanded=False):
+            with st.expander(f"Changes since previous snapshot ({prev_date} → {_pinned_for_diff})", expanded=False):
                 try:
                     df_prev, _, _ = _load_snap(prev_date)
                     diff = _snap_diff(df, df_prev)
