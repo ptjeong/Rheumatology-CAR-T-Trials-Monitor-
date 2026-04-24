@@ -13,6 +13,7 @@ from pipeline import (
     list_snapshots,
     save_snapshot,
     BASE_URL,
+    _normalize_text,
 )
 from config import (
     DISEASE_ENTITIES,
@@ -26,6 +27,10 @@ from config import (
     CAR_TREG_TERMS,
     ALLOGENEIC_MARKERS,
     AUTOL_MARKERS,
+    GENERIC_AUTOIMMUNE_TERMS,
+    NAMED_PRODUCT_TARGETS,
+    NAMED_PRODUCT_TYPES,
+    NAMED_PRODUCT_PLATFORMS,
 )
 
 st.set_page_config(
@@ -100,28 +105,61 @@ _MODALITY_ORDER = [
 _MODALITY_COLORS: dict[str, str] = {}   # filled after NEJM constants are defined
 
 
+_PLATFORM_TO_MODALITY = {
+    "CAR-NK":            "CAR-NK",
+    "CAR-Treg":          "CAR-Treg",
+    "CAAR-T":            "CAAR-T",
+    "CAR-T_γδ":          "CAR-γδ T",
+    "CAR-iNKT":          "CAR-γδ T",  # nearest bucket; no separate iNKT row yet
+    "In-vivo_mRNA-LNP":  "In vivo CAR",
+}
+
+
 def _modality(row) -> str:
+    """Resolve Modality from a named-product platform override first, then
+    TargetCategory / ProductType, then text heuristics. Named-product platform
+    is the most reliable signal because it comes from a curated registry with
+    CTgov-evidence citations (see config.NAMED_PRODUCTS)."""
     t = str(row.get("TargetCategory", ""))
     p = str(row.get("ProductType", ""))
-    # γδ T detection from title / summary text
     _txt = " ".join([
         str(row.get("BriefTitle", "")),
         str(row.get("BriefSummary", "")),
         str(row.get("Interventions", "")),
     ]).lower()
-    has_gd_t = (
-        "γδ" in _txt or "gamma delta" in _txt or "gamma-delta" in _txt
-        or "-gdt" in _txt or " gdt " in _txt
-    )
-    has_nk = "car-nk" in _txt or "car nk" in _txt or "lucar-dks1" in _txt
-    if t == "CAR-NK" or has_nk:
+    normalized = _normalize_text(_txt)
+
+    # 1) Named-product platform override (highest-fidelity, evidence-backed).
+    for platform, aliases in NAMED_PRODUCT_PLATFORMS.items():
+        mapped = _PLATFORM_TO_MODALITY.get(platform)
+        if mapped is None:
+            continue  # CAR-T platform → fall through to type-based logic
+        if any(_normalize_text(a) in normalized for a in aliases):
+            return mapped
+
+    # 2) Target-category heuristics for platforms encoded as pseudo-targets.
+    if t == "CAR-NK":
         return "CAR-NK"
     if t == "CAAR-T":
         return "CAAR-T"
     if t in ("CAR-Treg", "CD6"):
         return "CAR-Treg"
+
+    # 3) Text fallbacks for products not in the named registry.
+    has_gd_t = (
+        "γδ" in _txt or "gamma delta" in _txt or "gamma-delta" in _txt
+        or "-gdt" in _txt or " gdt " in _txt
+    )
+    has_nk = (
+        "car-nk" in _txt or "car nk" in _txt
+        or "natural killer" in _txt
+    )
+    if has_nk:
+        return "CAR-NK"
     if has_gd_t:
         return "CAR-γδ T"
+
+    # 4) ProductType-based final bucket.
     if p == "In vivo":
         return "In vivo CAR"
     if p == "Autologous":
@@ -797,15 +835,9 @@ if data_source == "Frozen snapshot":
         df, df_sites, prisma_counts = load_frozen(selected_snapshot)
     st.sidebar.caption(f"Loaded: {selected_snapshot} ({len(df)} trials)")
 else:
-    st.sidebar.header("Data pull")
-    selected_statuses = st.sidebar.multiselect(
-        "Statuses to pull",
-        STATUS_OPTIONS,
-        default=["RECRUITING", "NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING"],
-    )
     try:
         with st.spinner("Fetching and processing ClinicalTrials.gov data..."):
-            df, df_sites, prisma_counts = load_live(statuses=tuple(selected_statuses))
+            df, df_sites, prisma_counts = load_live(statuses=None)
     except Exception as api_err:
         st.sidebar.error(
             "ClinicalTrials.gov API is currently unreachable. "
@@ -828,9 +860,12 @@ else:
             )
             st.stop()
 
+    st.sidebar.caption(
+        f"Live pull: all statuses ({len(df)} trials). Use **Overall status** filter below to narrow."
+    )
+
     if st.sidebar.button("Save snapshot"):
-        statuses_list = selected_statuses if selected_statuses else None
-        snap_date = save_snapshot(df, df_sites, prisma_counts, statuses=statuses_list)
+        snap_date = save_snapshot(df, df_sites, prisma_counts, statuses=None)
         st.sidebar.success(f"Saved snapshot: {snap_date}")
         st.cache_data.clear()
 
@@ -1703,30 +1738,110 @@ with tab_pub:
         if _yr_min is not None
         else "CAR-T and related cell therapies in autoimmune disease."
     )
-    _pub_header("1", "Trials by start year", _fig1_sub)
-    fig1_data = (
-        years_raw.value_counts().sort_index()
-        .rename_axis("StartYear").reset_index(name="Trials")
+    _pub_header(
+        "1",
+        "Temporal trends by disease entity, with landmark-publication overlay",
+        (
+            f"Annual trial starts by disease entity, {_yr_min}–{_yr_max}. "
+            "Vertical lines mark landmark rheumatology CAR-T publications."
+            if _yr_min is not None
+            else "Annual trial starts by disease entity. "
+                 "Vertical lines mark landmark rheumatology CAR-T publications."
+        ),
     )
 
-    if not fig1_data.empty:
-        fig1 = px.line(
-            fig1_data, x="StartYear", y="Trials", markers=True, height=420, template="plotly_white",
+    # ── Stacking groups: top-N disease entities + 'Other' ──────────────────
+    _ENTITY_COLORS = {
+        "SLE":                   NEJM_BLUE,
+        "SSc":                   NEJM_AMBER,
+        "IIM":                   NEJM_GREEN,
+        "AAV":                   NEJM_PURPLE,
+        "Sjogren":               "#0891b2",   # cyan-600
+        "RA":                    NEJM_RED,
+        "CTD_other":             "#0d9488",   # teal-600
+        "IgG4-RD":               "#ea580c",   # orange-600
+        "Behcet":                "#a855f7",   # purple-500
+        "cGVHD":                 "#db2777",   # pink-600
+        "Basket/Multidisease":   "#475569",   # slate-600
+        "Other immune-mediated": "#94a3b8",   # slate-400
+        "Unclassified":          "#cbd5e1",   # slate-300
+        "Other":                 "#e2e8f0",   # slate-200
+    }
+
+    _entity_series = df_filt["DiseaseEntity"].fillna("Unclassified").astype(str)
+    _top_entities = _entity_series.value_counts().head(7).index.tolist()
+
+    def _display_group(e: str) -> str:
+        return e if e in _top_entities else "Other"
+
+    fig1_long = (
+        df_filt.assign(
+            StartYear=pd.to_numeric(df_filt["StartYear"], errors="coerce"),
+            Group=_entity_series.map(_display_group),
         )
-        fig1.update_traces(
-            line_color=NEJM_BLUE, line_width=2.5,
-            marker=dict(color=NEJM_BLUE, size=8, line=dict(color="white", width=1.5)),
+        .dropna(subset=["StartYear"])
+        .astype({"StartYear": int})
+        .groupby(["StartYear", "Group"], as_index=False)
+        .size()
+        .rename(columns={"size": "Trials"})
+    )
+    fig1_data = fig1_long.pivot(index="StartYear", columns="Group", values="Trials").fillna(0).astype(int).reset_index()
+
+    if not fig1_long.empty:
+        # Stacking order: largest totals at the bottom, 'Other' / 'Unclassified' on top
+        group_totals = fig1_long.groupby("Group")["Trials"].sum().sort_values(ascending=False)
+        sink_labels = [g for g in ["Other", "Unclassified"] if g in group_totals.index]
+        main_order = [g for g in group_totals.index if g not in sink_labels]
+        stack_order = main_order + sink_labels
+
+        fig1 = px.area(
+            fig1_long,
+            x="StartYear",
+            y="Trials",
+            color="Group",
+            category_orders={"Group": stack_order},
+            color_discrete_map=_ENTITY_COLORS,
+            height=460,
+            template="plotly_white",
         )
+        fig1.update_traces(line=dict(width=0.8, color="white"), hovertemplate="%{x}: %{y} trials<extra>%{fullData.name}</extra>")
         fig1.update_layout(
             **PUB_LAYOUT,
             xaxis_title="Start year",
             yaxis_title="Number of trials",
+            legend=dict(
+                orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                bgcolor="rgba(0,0,0,0)", borderwidth=0, title_text="",
+            ),
         )
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
         fig1.update_yaxes(rangemode="tozero")
-        # Mark the current (incomplete) year so readers don't misread a dip as a trend
+
+        # ── Landmark publications (vertical dashed lines + labels) ─────────
+        _landmarks = [
+            (2021, "First SLE CAR-T case report"),
+            (2022, "5-patient SLE series (Mackensen)"),
+            (2024, "NEJM 15-patient series (Müller)"),
+            (2025, "First industry pivotal trials"),
+        ]
+        if _yr_min is not None and _yr_max is not None:
+            for _yr, _label in _landmarks:
+                if _yr_min <= _yr <= _yr_max:
+                    fig1.add_vline(
+                        x=_yr, line_width=1, line_dash="dash",
+                        line_color=THEME["muted"],
+                    )
+                    fig1.add_annotation(
+                        x=_yr, y=1, yref="paper",
+                        text=f"<b>{_yr}</b>",
+                        showarrow=False,
+                        font=dict(size=10, color=THEME["primary"], family="Arial, Helvetica, sans-serif"),
+                        yanchor="bottom", xanchor="center",
+                    )
+
+        # Partial-year marker
         _current_year = pd.Timestamp.now().year
-        if int(fig1_data["StartYear"].max()) >= _current_year:
+        if int(fig1_long["StartYear"].max()) >= _current_year:
             fig1.add_vrect(
                 x0=_current_year - 0.5, x1=_current_year + 0.5,
                 fillcolor="rgba(0,0,0,0.04)", line_width=0,
@@ -1740,13 +1855,28 @@ with tab_pub:
             )
         st.plotly_chart(fig1, width='stretch', config=PUB_EXPORT)
 
-        # Key statistics
+        # Landmark legend (compact, under chart)
+        _landmark_lines = " &nbsp;·&nbsp; ".join(
+            f"<b>{y}</b>&nbsp;{l}" for y, l in _landmarks if _yr_min <= y <= _yr_max
+        )
+        if _landmark_lines:
+            st.markdown(
+                f'<div class="pub-fig-caption" style="margin-top:-8px">'
+                f'Landmarks: {_landmark_lines}.</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Key statistics — use yearly totals
+        totals_by_year = fig1_long.groupby("StartYear")["Trials"].sum().reset_index()
         total_t = len(df_filt)
-        peak_year = int(fig1_data.loc[fig1_data["Trials"].idxmax(), "StartYear"])
-        peak_n = int(fig1_data["Trials"].max())
-        first_row = fig1_data.iloc[0]
-        last_row = fig1_data.iloc[-1]
-        cagr = _cagr(int(first_row["Trials"]), int(last_row["Trials"]), int(last_row["StartYear"] - first_row["StartYear"]))
+        peak_year = int(totals_by_year.loc[totals_by_year["Trials"].idxmax(), "StartYear"])
+        peak_n = int(totals_by_year["Trials"].max())
+        first_row = totals_by_year.iloc[0]
+        last_row = totals_by_year.iloc[-1]
+        cagr = _cagr(
+            int(first_row["Trials"]), int(last_row["Trials"]),
+            int(last_row["StartYear"] - first_row["StartYear"]),
+        )
         cagr_str = f"{cagr * 100:.1f}%" if cagr is not None else "N/A"
 
         c1, c2, c3, c4 = st.columns(4)
@@ -1757,7 +1887,7 @@ with tab_pub:
 
         _pub_caption(len(df_filt))
         st.download_button("Fig 1 data (CSV)",
-                           _csv_with_provenance(fig1_data, "Fig 1 — Temporal trends"),
+                           _csv_with_provenance(fig1_data, "Fig 1 — Temporal trends by disease entity"),
                            "fig1_temporal_trends.csv", "text/csv")
     else:
         st.info("No start year data available.")
@@ -2703,6 +2833,31 @@ def _build_ontology_df() -> pd.DataFrame:
             "Matching terms (sample)": "; ".join(str(t) for t in terms[:6]) + ("…" if len(terms) > 6 else ""),
             "N terms": len(terms),
         })
+    rows.append({
+        "Category": "Disease entity",
+        "Label": "Basket/Multidisease",
+        "Matching terms (sample)": "≥2 distinct systemic autoimmune diseases matched in conditions field",
+        "N terms": 0,
+    })
+    rows.append({
+        "Category": "Generic autoimmune (→ Basket)",
+        "Label": "Generic autoimmune phrases",
+        "Matching terms (sample)": "; ".join(GENERIC_AUTOIMMUNE_TERMS[:5]) + "…",
+        "N terms": len(GENERIC_AUTOIMMUNE_TERMS),
+    })
+    rows.append({
+        "Category": "Other immune-mediated",
+        "Label": "Other immune-mediated",
+        "Matching terms (sample)": "; ".join(OTHER_IMMUNE_MEDIATED_TERMS[:6]) + "…",
+        "N terms": len(OTHER_IMMUNE_MEDIATED_TERMS),
+    })
+
+    rows.append({
+        "Category": "CAR core terms",
+        "Label": "CAR-based intervention gate",
+        "Matching terms (sample)": "; ".join(CAR_CORE_TERMS),
+        "N terms": len(CAR_CORE_TERMS),
+    })
     for target, terms in CAR_SPECIFIC_TARGET_TERMS.items():
         rows.append({
             "Category": "Target (antigen)",
@@ -2717,6 +2872,14 @@ def _build_ontology_df() -> pd.DataFrame:
             "Matching terms (sample)": "; ".join(terms),
             "N terms": len(terms),
         })
+    for target, products in NAMED_PRODUCT_TARGETS.items():
+        rows.append({
+            "Category": "Named-product target fallback",
+            "Label": target,
+            "Matching terms (sample)": "; ".join(products[:6]) + ("…" if len(products) > 6 else ""),
+            "N terms": len(products),
+        })
+
     rows.append({
         "Category": "Product type",
         "Label": "Autologous",
@@ -2729,12 +2892,14 @@ def _build_ontology_df() -> pd.DataFrame:
         "Matching terms (sample)": "; ".join(ALLOGENEIC_MARKERS[:5]),
         "N terms": len(ALLOGENEIC_MARKERS),
     })
-    rows.append({
-        "Category": "Other immune-mediated",
-        "Label": "Other immune-mediated",
-        "Matching terms (sample)": "; ".join(OTHER_IMMUNE_MEDIATED_TERMS[:6]) + "…",
-        "N terms": len(OTHER_IMMUNE_MEDIATED_TERMS),
-    })
+    for ptype, products in NAMED_PRODUCT_TYPES.items():
+        rows.append({
+            "Category": "Named-product type fallback",
+            "Label": ptype,
+            "Matching terms (sample)": "; ".join(products[:6]) + ("…" if len(products) > 6 else ""),
+            "N terms": len(products),
+        })
+
     for term in EXCLUDED_INDICATION_TERMS[:10]:
         rows.append({
             "Category": "Oncology exclusion keyword",
@@ -2870,10 +3035,12 @@ with tab_methods:
             "# For each row below, read BriefTitle / Conditions / Interventions / BriefSummary.",
             "# Propose the correct DiseaseEntity, TargetCategory, and ProductType.",
             "# Then automatically patch config.py and/or pipeline.py to capture these cases.",
-            "# Allowed DiseaseEntity values: SLE, SSc, Sjogren, CTD_other, IIM, AAV, RA, IgG4-RD, Behcet,",
-            "#   Other immune-mediated, Unclassified",
-            "# Allowed TargetCategory values: CD19, BCMA, CD19/BCMA dual, CD19/BAFF dual,",
-            "#   CD20, CD6, CD7, CAR-NK, CAAR-T, CAR-Treg, CAR-T_unspecified, Other_or_unknown",
+            "# Allowed DiseaseEntity values: SLE, SSc, Sjogren, CTD_other, IIM, AAV, RA, IgG4-RD,",
+            "#   Behcet, cGVHD, Basket/Multidisease, Other immune-mediated, Autoimmune_other,",
+            "#   Unclassified, Exclude",
+            "# Allowed TargetCategory values: CD19, BCMA, CD20, CD70, CD6, CD7, BAFF,",
+            "#   CD19/BCMA dual, CD19/CD20 dual, CD19/BAFF dual, BCMA/CD70 dual,",
+            "#   CAR-NK, CAAR-T, CAR-Treg, CAR-T_unspecified, Other_or_unknown",
             "# Allowed ProductType values: Autologous, Allogeneic/Off-the-shelf, In vivo, Unclear",
             "# UnclearFields column shows which field(s) triggered inclusion (Disease|Target|Product).",
             "#",
@@ -3160,7 +3327,7 @@ regulatory, or decision-support tool.
         color: {THEME['muted']};
         line-height: 1.5;
         margin-bottom: 0.6rem;
-    ">Klinik I für Innere Medizin<br>Klinische Immunologie und Rheumatologie</div>
+    ">Klinik I für Innere Medizin<br>Hämatologie und Onkologie<br>Klinische Immunologie und Rheumatologie</div>
     <div style="
         font-size: 0.80rem;
         color: {THEME['muted']};
@@ -3196,7 +3363,8 @@ regulatory, or decision-support tool.
     citation = (
         f"Jeong P. CAR-T Rheumatology Trials Monitor "
         f"(version {sha}) [Internet]. "
-        f"Klinik I für Innere Medizin, Klinische Immunologie und Rheumatologie, "
+        f"Klinik I für Innere Medizin, Hämatologie und Onkologie, "
+        f"Klinische Immunologie und Rheumatologie, "
         f"Universitätsklinikum Köln; {date.today().year} "
         f"[cited {date.today().isoformat()}]. "
         f"DOI: 10.5281/zenodo.19713049. "
@@ -3235,7 +3403,9 @@ Anbieter dieser Webanwendung: https://rheum-car-t-trial-monitor.streamlit.app
 
 Peter Jeong
 Universitätsklinikum Köln
-Klinik I für Innere Medizin — Klinische Immunologie und Rheumatologie
+Klinik I für Innere Medizin
+Hämatologie und Onkologie
+Klinische Immunologie und Rheumatologie
 Kerpener Straße 62
 50937 Köln
 Germany
