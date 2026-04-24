@@ -2143,22 +2143,32 @@ with tab_geo:
                 if _country_geo.empty:
                     st.caption("No geocoded sites for this country yet.")
                 else:
+                    # Collapse overlapping dots: one marker per facility (lat/lon),
+                    # sized by unique trial count. sqrt scaling so mega-hubs don't
+                    # visually dominate the long tail of single-trial sites.
+                    _hub = (
+                        _country_geo
+                        .groupby(["Latitude", "Longitude", "Facility", "City"], dropna=False)
+                        .agg(Trials=("NCTId", "nunique"))
+                        .reset_index()
+                    )
+                    _hub["Size"] = 6 + 4 * np.sqrt(_hub["Trials"].clip(lower=1))
                     _lab = (
-                        _country_geo["Facility"].fillna("").astype(str)
-                        + " · " + _country_geo["City"].fillna("").astype(str)
-                        + "<br>" + _country_geo["NCTId"].fillna("").astype(str)
+                        _hub["Facility"].fillna("").astype(str)
+                        + " · " + _hub["City"].fillna("").astype(str)
+                        + "<br>" + _hub["Trials"].astype(str) + " trial(s)"
                     )
                     fig_country_geo = go.Figure(
                         go.Scattergeo(
-                            lon=_country_geo["Longitude"],
-                            lat=_country_geo["Latitude"],
+                            lon=_hub["Longitude"],
+                            lat=_hub["Latitude"],
                             text=_lab,
                             hovertemplate="%{text}<extra></extra>",
                             mode="markers",
                             marker=dict(
-                                size=7,
+                                size=_hub["Size"],
                                 color="#d97706",  # amber-600 — contrasts with blue choropleth
-                                opacity=0.82,
+                                opacity=0.78,
                                 line=dict(width=0.4, color="#ffffff"),
                             ),
                         )
@@ -2181,6 +2191,12 @@ with tab_geo:
                         ),
                     )
                     st.plotly_chart(fig_country_geo, width='stretch')
+                    _max_trials = int(_hub["Trials"].max()) if not _hub.empty else 0
+                    if _max_trials > 1:
+                        st.caption(
+                            f"Dot size ∝ √(trials at that facility) · "
+                            f"largest hub runs {_max_trials} trials."
+                        )
             with c2:
                 st.markdown("**Open sites by city**")
                 st.plotly_chart(
