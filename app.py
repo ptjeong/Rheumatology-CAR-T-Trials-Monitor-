@@ -3612,8 +3612,9 @@ from the conditions, title, brief summary, and interventions fields. Condition-f
 matches took precedence over full-text matches; multi-disease trials were identified
 when ≥2 systemic entities were detected within the conditions field. Generic
 autoimmune phrases (e.g., "autoimmune diseases", "B-cell mediated autoimmune
-disorders", "paediatric B-cell related autoimmune diseases") were mapped to
-"Unclassified" rather than a specific entity.
+disorders", "paediatric B-cell related autoimmune diseases") — which typically
+reflect basket-eligible trial designs — were mapped to "Basket/Multidisease"
+rather than a specific entity.
 
 Target category. The primary antigen target was assigned from trial text using a
 priority-ordered ruleset. Cell-therapy platform types were identified first:
@@ -3641,7 +3642,10 @@ healthy donor, donor-derived, umbilical cord blood, cord blood. In vivo markers
 included: in vivo CAR, circular RNA, lentiviral nanoparticle, mRNA-LNP. A named
 product lookup table (NAMED_PRODUCT_TYPES in config.py) was applied as a fallback
 when these generic markers were absent. Both lookup tables are updated iteratively
-via a structured curation loop applied to pipeline output.
+via an LLM-assisted curation loop (validate.py) that submits borderline
+classifications to an independent language-model reviewer and writes structured
+corrections to llm_overrides.json, which is picked up automatically by the
+pipeline at load time.
 
 Cell therapy modality. Each trial was assigned to one of eight mechanistically
 distinct modality categories based on target category and product type:
@@ -3660,14 +3664,22 @@ Planned enrollment counts were extracted from the EnrollmentCount field (type=
 "Anticipated" or "Actual") and coerced to numeric; non-numeric or missing values
 were excluded from enrollment analyses (Figure 4). Geographic classification:
 trials recruiting exclusively in China were labelled "China"; all others
-"Non-China" (based on the Countries field). Sponsor classification: lead sponsors
-were labelled "Academic" if their name contained tokens indicating a hospital,
-university, research institute, or affiliated medical centre; "Industry" if
-containing therapeutics, pharma, biotech, or corporate-suffix tokens (Inc, Ltd,
-GmbH, LLC, Corp). Short strings (≤4 words) without corporate suffixes were treated
-as PI names and classified as "Academic". Cross-tabulation of geography × sponsor
-type (Fig 4d) shows median planned enrollment and IQR (error bars) for each of
-the four strata.
+"Non-China" (based on the Countries field). Sponsor classification used a
+two-stage rule: (i) the primary signal was the ClinicalTrials.gov
+`leadSponsor.class` field, mapping INDUSTRY→Industry, NIH / FED→Government,
+NETWORK→Academic, and INDIV→Academic (investigator-initiated trials run
+through academic centres); (ii) when the CT.gov class was OTHER, UNKNOWN, or
+when OTHER_GOV was used for a non-government academic medical centre (as is
+common for Chinese provincial hospitals and European public hospitals), a
+name-based heuristic was applied — academic keywords (university, hospital,
+institute, medical centre, Mayo/Cleveland Clinic, etc.), industry keywords
+(Inc, Ltd, GmbH, Pharma, Therapeutics, Biotech, Bio), and government
+keywords (NIH, VA, DoD, Ministry of Health) were evaluated in priority order.
+Short alphabetic multi-token strings without organisational keywords —
+including those with medical-degree markers (M.D., Ph.D.) — were recognised
+as individual principal investigators and classified as Academic.
+Cross-tabulation of geography × sponsor type (Fig 4d) shows median planned
+enrollment and IQR (error bars) for each of the four strata.
 
 Data Processing
 ---------------
