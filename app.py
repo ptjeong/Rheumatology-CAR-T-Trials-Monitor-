@@ -383,15 +383,6 @@ st.markdown(
         font-weight: 400;
     }}
 
-    .hero-sub-filter {{
-        margin-top: 0.55rem;
-        color: {THEME["text"]};
-    }}
-    .hero-sub-filter strong {{
-        color: {THEME["text"]};
-        font-weight: 600;
-    }}
-
     /* ── Cards (flat, line-delineated) ────────────────────────────────── */
     .section-card {{
         background: transparent;
@@ -1068,9 +1059,6 @@ st.markdown(
             in systemic autoimmune diseases — with disease, target-antigen, and
             cell-therapy modality classification; global site-level geography; and
             publication-ready figures.
-        </div>
-        <div class="hero-sub hero-sub-filter">
-            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — filter state propagates to every chart, table, map, and CSV export in the analysis tabs (Methods &amp; Appendix and About show fixed reference material).
         </div>
     </div>
     """,
