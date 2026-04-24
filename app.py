@@ -2865,19 +2865,20 @@ with tab_pub:
     # Fig 1 — Temporal trends
     # ------------------------------------------------------------------
     years_raw = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
-    _yr_min = int(years_raw.min()) if len(years_raw) else None
-    _yr_max = int(years_raw.max()) if len(years_raw) else None
-    _fig1_sub = (
-        f"CAR-T and related cell therapies in autoimmune disease, {_yr_min}–{_yr_max}."
-        if _yr_min is not None
-        else "CAR-T and related cell therapies in autoimmune disease."
-    )
+    _FIG1_LEADING_MIN = 3
+    if len(years_raw):
+        _yearly_raw = years_raw.value_counts().sort_index()
+        _above_raw = _yearly_raw[_yearly_raw >= _FIG1_LEADING_MIN]
+        _yr_display_min = int(_above_raw.index.min()) if not _above_raw.empty else int(_yearly_raw.index.min())
+        _yr_display_max = int(_yearly_raw.index.max())
+    else:
+        _yr_display_min = _yr_display_max = None
     _pub_header(
         "1",
         "Temporal trends by disease entity",
         (
-            f"Annual trial starts by disease entity, {_yr_min}–{_yr_max}."
-            if _yr_min is not None
+            f"Annual trial starts by disease entity, {_yr_display_min}–{_yr_display_max}."
+            if _yr_display_min is not None
             else "Annual trial starts by disease entity."
         ),
     )
@@ -2930,7 +2931,12 @@ with tab_pub:
         # auto-stack, so overlapping fills hide everything behind the topmost
         # (often near-white "Other") trace.  Using go.Scatter with an explicit
         # stackgroup guarantees a proper stacked-area rendering.
-        _years_axis = list(range(int(fig1_long["StartYear"].min()), int(fig1_long["StartYear"].max()) + 1))
+        # Trim leading years whose total count is below a noise threshold —
+        # a single pilot trial in 2019 would otherwise anchor the axis to a
+        # flat sliver and push meaningful activity to the right of the chart.
+        _axis_start = _yr_display_min if _yr_display_min is not None else int(fig1_long["StartYear"].min())
+        _axis_end = _yr_display_max if _yr_display_max is not None else int(fig1_long["StartYear"].max())
+        _years_axis = list(range(_axis_start, _axis_end + 1))
         _pivot = (
             fig1_long.pivot(index="StartYear", columns="Group", values="Trials")
             .reindex(_years_axis)
@@ -2985,8 +2991,12 @@ with tab_pub:
             )
         st.plotly_chart(fig1, width='stretch', config=PUB_EXPORT)
 
-        # Key statistics — use yearly totals
-        totals_by_year = fig1_long.groupby("StartYear")["Trials"].sum().reset_index()
+        # Key statistics — use yearly totals, restricted to the displayed year
+        # window so the CAGR baseline matches what the reader actually sees.
+        totals_by_year = (
+            fig1_long[fig1_long["StartYear"] >= _axis_start]
+            .groupby("StartYear")["Trials"].sum().reset_index()
+        )
         total_t = len(df_filt)
         peak_year = int(totals_by_year.loc[totals_by_year["Trials"].idxmax(), "StartYear"])
         peak_n = int(totals_by_year["Trials"].max())
