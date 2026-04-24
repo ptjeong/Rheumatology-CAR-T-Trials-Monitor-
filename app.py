@@ -1573,6 +1573,31 @@ def _countries_by_activity() -> list[str]:
     return order.index.tolist()
 
 
+def _get_geo_sites() -> pd.DataFrame:
+    """Open sites with usable lat/lon for the current NCT filter scope, deduped.
+
+    Session-cached: the merge + drop-duplicates on ~10k rows only rebuilds when
+    the set of NCT IDs actually changes, not on every widget rerun.
+    """
+    if all_open_sites.empty or "Latitude" not in all_open_sites.columns:
+        return pd.DataFrame()
+    nct_key = hash(tuple(sorted(all_open_sites["NCTId"].dropna().unique().tolist())))
+    if st.session_state.get("_geo_sites_key") == nct_key:
+        cached = st.session_state.get("_geo_sites_df")
+        if cached is not None:
+            return cached
+    geo = all_open_sites.copy()
+    geo["Latitude"] = pd.to_numeric(geo["Latitude"], errors="coerce")
+    geo["Longitude"] = pd.to_numeric(geo["Longitude"], errors="coerce")
+    geo = geo.dropna(subset=["Latitude", "Longitude"])
+    geo = geo.drop_duplicates(
+        subset=["NCTId", "Facility", "City", "Country", "Latitude", "Longitude"]
+    )
+    st.session_state["_geo_sites_key"] = nct_key
+    st.session_state["_geo_sites_df"] = geo
+    return geo
+
+
 total_trials = len(df_filt)
 recruiting_trials = int(df_filt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())
 _tc_for_top = df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"].dropna()
@@ -1958,27 +1983,70 @@ with tab_geo:
         )
 
         country_counts = _attach_iso3(country_counts)
-        fig_world = px.choropleth(
-            country_counts,
-            locations="Iso3",
-            locationmode="ISO-3",
-            hover_name="Country",
-            color="Count",
-            color_continuous_scale=[
-                [0.00, "#dbeafe"],
-                [0.30, "#93c5fd"],
-                [0.55, "#3b82f6"],
-                [0.75, "#1d4ed8"],
-                [1.00, "#1e3a8a"],
-            ],
-            projection="natural earth",
-            template="plotly_white",
-        )
+
+        # Pill control for layer toggles. One map, two traces (choropleth + site dots).
+        _geo_layers = st.pills(
+            "Map layers",
+            options=["Country counts", "Open sites"],
+            default=["Country counts", "Open sites"],
+            selection_mode="multi",
+            label_visibility="collapsed",
+            key="geo_layers_world",
+        ) or []
+
+        geo_sites = _get_geo_sites()
+
+        fig_world = go.Figure()
+        if "Country counts" in _geo_layers:
+            fig_world.add_trace(
+                go.Choropleth(
+                    locations=country_counts["Iso3"],
+                    locationmode="ISO-3",
+                    z=country_counts["Count"],
+                    text=country_counts["Country"],
+                    hovertemplate="<b>%{text}</b><br>%{z} trials<extra></extra>",
+                    colorscale=[
+                        [0.00, "#dbeafe"],
+                        [0.30, "#93c5fd"],
+                        [0.55, "#3b82f6"],
+                        [0.75, "#1d4ed8"],
+                        [1.00, "#1e3a8a"],
+                    ],
+                    colorbar=dict(title="No. of trials", thickness=12, len=0.6),
+                    marker_line_color="rgba(255,255,255,0.6)",
+                    marker_line_width=0.4,
+                )
+            )
+        if "Open sites" in _geo_layers and not geo_sites.empty:
+            _site_label = (
+                geo_sites["Facility"].fillna("").astype(str)
+                + " · " + geo_sites["City"].fillna("").astype(str)
+                + ", " + geo_sites["Country"].fillna("").astype(str)
+                + "<br>" + geo_sites["NCTId"].fillna("").astype(str)
+            )
+            fig_world.add_trace(
+                go.Scattergeo(
+                    lon=geo_sites["Longitude"],
+                    lat=geo_sites["Latitude"],
+                    text=_site_label,
+                    hovertemplate="%{text}<extra></extra>",
+                    mode="markers",
+                    marker=dict(
+                        size=5.5,
+                        color=THEME["accent"],
+                        opacity=0.78,
+                        line=dict(width=0.3, color="#ffffff"),
+                    ),
+                    name="Open site",
+                    showlegend=False,
+                )
+            )
         fig_world.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color=THEME["text"]),
+            height=480,
             geo=dict(
                 bgcolor="rgba(0,0,0,0)",
                 lakecolor="#ddeeff",
@@ -1987,10 +2055,18 @@ with tab_geo:
                 showcoastlines=False,
                 showcountries=True,
                 countrycolor="rgba(0,0,0,0.12)",
+                projection_type="natural earth",
+                scope="world",
+                lataxis=dict(range=[-58, 80]),
+                lonaxis=dict(range=[-175, 190]),
             ),
-            coloraxis_colorbar_title="No. of trials",
         )
         st.plotly_chart(fig_world, width='stretch')
+        if "Open sites" in _geo_layers and not geo_sites.empty:
+            st.caption(
+                f"{len(geo_sites):,} open / recruiting site locations plotted. "
+                "Choropleth counts unique trials per country; dots mark individual sites."
+            )
 
         c1, c2 = st.columns([1.15, 0.85])
         with c1:
@@ -2052,26 +2128,77 @@ with tab_geo:
                     f"NCT IDs with at least one open {selected_country} site",
                 )
 
-            c1, c2 = st.columns([1, 1])
+            _country_geo = _get_geo_sites()
+            if not _country_geo.empty:
+                _country_geo = _country_geo[
+                    _country_geo["Country"].str.lower() == selected_country.lower()
+                ]
+
+            _panel_h = min(360, max(220, len(country_city_counts) * 22 + 60))
+
+            c1, c2 = st.columns([0.6, 0.4])
             with c1:
+                st.markdown(f"**{selected_country} site map**")
+                if _country_geo.empty:
+                    st.caption("No geocoded sites for this country yet.")
+                else:
+                    _lab = (
+                        _country_geo["Facility"].fillna("").astype(str)
+                        + " · " + _country_geo["City"].fillna("").astype(str)
+                        + "<br>" + _country_geo["NCTId"].fillna("").astype(str)
+                    )
+                    fig_country_geo = go.Figure(
+                        go.Scattergeo(
+                            lon=_country_geo["Longitude"],
+                            lat=_country_geo["Latitude"],
+                            text=_lab,
+                            hovertemplate="%{text}<extra></extra>",
+                            mode="markers",
+                            marker=dict(
+                                size=7,
+                                color=THEME["accent"],
+                                opacity=0.82,
+                                line=dict(width=0.4, color="#ffffff"),
+                            ),
+                        )
+                    )
+                    fig_country_geo.update_layout(
+                        margin=dict(l=0, r=0, t=4, b=0),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        height=_panel_h,
+                        geo=dict(
+                            bgcolor="rgba(0,0,0,0)",
+                            lakecolor="#ddeeff",
+                            landcolor="#e9ecef",
+                            showframe=False,
+                            showcoastlines=False,
+                            showcountries=True,
+                            countrycolor="rgba(0,0,0,0.2)",
+                            projection_type="natural earth",
+                            fitbounds="locations",
+                        ),
+                    )
+                    st.plotly_chart(fig_country_geo, width='stretch')
+            with c2:
                 st.markdown("**Open sites by city**")
                 st.plotly_chart(
                     make_bar(country_city_counts, "City", "OpenSiteCount",
-                             height=min(300, max(180, len(country_city_counts) * 20 + 48)),
+                             height=_panel_h,
                              color=THEME["primary"]),
                     width='stretch',
                 )
-            with c2:
-                st.markdown(f"**{selected_country} city table**")
-                city_event = st.dataframe(
-                    country_city_counts,
-                    width='stretch',
-                    height=min(300, max(180, len(country_city_counts) * 20 + 48)),
-                    hide_index=True,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                    key=f"city_table_{selected_country}",
-                )
+
+            st.markdown(f"**{selected_country} city table**")
+            city_event = st.dataframe(
+                country_city_counts,
+                width='stretch',
+                height=min(300, max(180, len(country_city_counts) * 20 + 48)),
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"city_table_{selected_country}",
+            )
 
             if city_event and city_event.selection.rows:
                 selected_idx = city_event.selection.rows[0]
