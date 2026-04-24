@@ -236,6 +236,15 @@ class TestSponsorClassification:
     def test_none_is_other(self):
         assert _classify_sponsor(None, None) == "Other"
 
+    def test_other_gov_academic_hospital_is_academic(self):
+        assert _classify_sponsor("Anhui Provincial Hospital", "OTHER_GOV") == "Academic"
+
+    def test_other_gov_strong_gov_name_still_government(self):
+        assert _classify_sponsor("Veterans Affairs Medical Center", "OTHER_GOV") == "Government"
+
+    def test_peoples_hospital_is_academic(self):
+        assert _classify_sponsor("Peking Union Medical College Hospital", None) == "Academic"
+
 
 # ---------------------------------------------------------------------------
 # AgeGroup derivation

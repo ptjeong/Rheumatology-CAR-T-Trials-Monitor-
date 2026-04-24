@@ -1555,9 +1555,26 @@ with tab_overview:
     if not df_filt.empty:
         st.subheader("Landscape at a glance")
         st.markdown(
-            '<p class="small-note" style="color:#555">All four panels share the disease-family colour key shown above.</p>',
+            '<p class="small-note" style="color:#555">All four panels share the disease-family colour key shown below.</p>',
             unsafe_allow_html=True,
         )
+
+        _swatch_html = (
+            '<div style="display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;'
+            'padding:6px 0 14px 0;font-family:Inter,-apple-system,sans-serif;'
+            'font-size:12px;color:#0b1220;">'
+        )
+        for _fam in _FAMILY_ORDER:
+            _c = _FAMILY_COLORS.get(_fam, "#64748b")
+            _swatch_html += (
+                f'<span style="display:inline-flex;align-items:center;gap:6px;">'
+                f'<span style="display:inline-block;width:12px;height:12px;'
+                f'background:{_c};border-radius:2px;"></span>{_fam}</span>'
+            )
+        _swatch_html += "</div>"
+        st.markdown(_swatch_html, unsafe_allow_html=True)
+
+        _PANEL_HEIGHT = 440
 
         _ov_a, _ov_b = st.columns(2)
 
@@ -1593,13 +1610,12 @@ with tab_overview:
                     category_orders={"_Family": _FAMILY_ORDER},
                     labels={"_DisplayDisease": "Disease", "_Family": "Family"},
                     template="plotly_white",
-                    height=max(320, len(_ent_counts) * 32 + 80),
+                    height=_PANEL_HEIGHT,
                 )
                 _fig_ov1.update_traces(marker_line_width=0, opacity=1)
                 _fig_ov1.update_layout(
-                    margin=dict(l=130, r=24, t=12, b=40),
-                    legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
-                                font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=140, r=24, t=12, b=56),
+                    showlegend=False,
                     yaxis_title=None, xaxis_title="Number of trials",
                     font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
                 )
@@ -1627,14 +1643,13 @@ with tab_overview:
                     category_orders={"_Target": _tg_order_ov, "DiseaseFamily": _FAMILY_ORDER},
                     labels={"_Target": "Target", "DiseaseFamily": "Family"},
                     template="plotly_white",
-                    height=max(320, len(_tg_order_ov) * 32 + 80),
+                    height=_PANEL_HEIGHT,
                 )
                 _fig_ov2.update_traces(marker_line_width=0, opacity=1)
                 _fig_ov2.update_layout(
                     barmode="stack",
-                    margin=dict(l=130, r=24, t=12, b=40),
-                    legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5,
-                                font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=140, r=24, t=12, b=56),
+                    showlegend=False,
                     yaxis_title=None, xaxis_title="Number of trials",
                     font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
                 )
@@ -1656,14 +1671,13 @@ with tab_overview:
                 category_orders={"PhaseLbl": _phase_display_order, "DiseaseFamily": _FAMILY_ORDER},
                 template="plotly_white",
                 labels={"PhaseLbl": "Phase", "DiseaseFamily": "Family"},
-                height=360,
+                height=_PANEL_HEIGHT,
             )
             _fig_ov3.update_traces(marker_line_width=0, opacity=1)
             _fig_ov3.update_layout(
                 barmode="stack",
-                margin=dict(l=56, r=24, t=12, b=90),
-                legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5,
-                            font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(l=64, r=24, t=12, b=56),
+                showlegend=False,
                 xaxis_title="Phase", yaxis_title="Number of trials",
                 font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
             )
@@ -1686,13 +1700,12 @@ with tab_overview:
                     category_orders={"DiseaseFamily": _FAMILY_ORDER},
                     template="plotly_white",
                     labels={"StartYear": "Start year", "DiseaseFamily": "Family"},
-                    height=360,
+                    height=_PANEL_HEIGHT,
                 )
                 _fig_ov4.update_traces(line=dict(width=0.5), opacity=0.95)
                 _fig_ov4.update_layout(
-                    margin=dict(l=56, r=24, t=12, b=90),
-                    legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5,
-                                font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=64, r=24, t=12, b=56),
+                    showlegend=False,
                     xaxis=dict(tickmode="linear", dtick=1, tickformat="d"),
                     xaxis_title="Start year", yaxis_title="Number of trials",
                     font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
@@ -2577,15 +2590,19 @@ with tab_pub:
                 fillcolor=_color,
                 hovertemplate="%{x}: %{y} trials<extra>" + _grp + "</extra>",
             ))
+        _fig1_layout = {**PUB_LAYOUT}
+        _fig1_layout["margin"] = dict(l=72, r=36, t=24, b=130)
         fig1.update_layout(
-            **PUB_LAYOUT,
+            **_fig1_layout,
             xaxis_title="Start year",
             yaxis_title="Number of trials",
             legend=dict(
-                orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
                 bgcolor="rgba(0,0,0,0)", borderwidth=0, title_text="",
+                font=dict(size=11),
             ),
         )
+        fig1.update_xaxes(title_standoff=12)
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
         fig1.update_yaxes(rangemode="tozero")
 

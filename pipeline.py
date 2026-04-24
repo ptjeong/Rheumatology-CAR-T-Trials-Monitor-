@@ -434,6 +434,8 @@ _ACADEMIC_HINTS = (
     "nih", "national institutes of health", "national cancer institute",
     "mayo clinic", "cleveland clinic", "charite", "charité",
     "chinese academy", "chinese pla", "pla general hospital",
+    "people's hospital", "peoples hospital",
+    "cancer center", "cancer centre",
     "fred hutchinson", "memorial sloan", "dana-farber", "md anderson",
     "children's hospital", "childrens hospital",
     "foundation", "fondazione", "trust", "nhs",
@@ -445,6 +447,7 @@ _INDUSTRY_HINTS = (
     "pharma", "pharmaceutical", "pharmaceuticals",
     "biotech", "bioscience", "biosciences", "biologics", "therapeutics",
     "bio-tech", "biopharma", "oncology",
+    "diagnostics", "genomics", "medicines", "biosimilar",
 )
 
 
@@ -472,18 +475,28 @@ def _classify_sponsor(lead_sponsor: str | None, lead_sponsor_class: str | None =
     Primary signal: CT.gov `leadSponsor.class` (INDUSTRY/NIH/OTHER_GOV/…).
     Fallback: keyword heuristic against the sponsor name.
     """
+    name = (lead_sponsor or "").lower().strip()
     if lead_sponsor_class:
-        mapped = _CTGOV_CLASS_MAP.get(str(lead_sponsor_class).upper().strip())
+        cls = str(lead_sponsor_class).upper().strip()
+        mapped = _CTGOV_CLASS_MAP.get(cls)
         if mapped is not None:
+            # CT.gov frequently tags genuinely-academic public hospitals
+            # (e.g. Chinese provincial, European public) as OTHER_GOV. Let a
+            # strong gov-name signal (NIH/VA/DoD/MoH) keep the Government
+            # label; otherwise redirect academic-named entities to Academic.
+            if mapped == "Government" and cls == "OTHER_GOV":
+                if any(h in name for h in _GOV_HINTS):
+                    return "Government"
+                if any(h in name for h in _ACADEMIC_HINTS):
+                    return "Academic"
             return mapped
-    if not lead_sponsor:
+    if not name:
         return "Other"
-    s = lead_sponsor.lower().strip()
-    if any(h in s for h in _GOV_HINTS):
+    if any(h in name for h in _GOV_HINTS):
         return "Government"
-    if any(h in s for h in _ACADEMIC_HINTS):
+    if any(h in name for h in _ACADEMIC_HINTS):
         return "Academic"
-    if any(h in s for h in _INDUSTRY_HINTS):
+    if any(h in name for h in _INDUSTRY_HINTS):
         return "Industry"
     return "Other"
 
