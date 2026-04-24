@@ -4,6 +4,7 @@ import subprocess
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 from datetime import date, datetime, timezone
 
@@ -178,31 +179,38 @@ _PLATFORM_LABELS = {"CAR-NK", "CAR-Treg", "CAAR-T", "CAR-γδ T"}
 # stacked charts and the disease-hierarchy sunburst.
 # ---------------------------------------------------------------------------
 _DISEASE_FAMILY_MAP = {
-    "SLE":       "Connective tissue",
-    "SSc":       "Connective tissue",
-    "Sjogren":   "Connective tissue",
-    "IIM":       "Connective tissue",
-    "CTD_other": "Connective tissue",
-    "IgG4-RD":   "Connective tissue",
-    "RA":        "Inflammatory arthritis",
-    "AAV":       "Vasculitis",
-    "Behcet":    "Vasculitis",
+    "SLE":                   "Connective tissue",
+    "SSc":                   "Connective tissue",
+    "Sjogren":               "Connective tissue",
+    "IIM":                   "Connective tissue",
+    "CTD_other":             "Connective tissue",
+    "IgG4-RD":               "Connective tissue",
+    "RA":                    "Inflammatory arthritis",
+    "AAV":                   "Vasculitis",
+    "Behcet":                "Vasculitis",
+    # Non-rheum autoimmune / immune-mediated indications that still show up
+    # in CAR-T trial records (pipeline emits "Other immune-mediated" as a
+    # valid DiseaseEntity, cGVHD appears in some historical trials).
+    "Other immune-mediated": "Other autoimmune",
+    "cGVHD":                 "Other autoimmune",
 }
 _FAMILY_ORDER = [
     "Connective tissue",
     "Inflammatory arthritis",
     "Vasculitis",
+    "Other autoimmune",
     "Basket/Multidisease",
     "Other / Unclassified",
 ]
-# NEJM-style palette: navy = CTD (the dominant family); other families in
-# complementary muted hues. Kept in-file so Deep Dive charts share one scheme.
+# Professional, non-purple palette: navy for the dominant CTD family, other
+# families in complementary muted hues. Shared by sunburst and Deep Dive charts.
 _FAMILY_COLORS = {
     "Connective tissue":       "#0b3d91",   # navy
     "Inflammatory arthritis":  "#b45309",   # amber-700
     "Vasculitis":              "#0f766e",   # teal-700
-    "Basket/Multidisease":     "#7c3aed",   # violet-600
-    "Other / Unclassified":    "#94a3b8",   # slate-400
+    "Other autoimmune":        "#475569",   # slate-600
+    "Basket/Multidisease":     "#64748b",   # slate-500
+    "Other / Unclassified":    "#cbd5e1",   # slate-300 — visibly lightest
 }
 
 
@@ -926,6 +934,18 @@ df["DiseaseFamily"] = df.apply(
     lambda r: _disease_family(r.get("DiseaseEntity"), r.get("TrialDesign")),
     axis=1,
 )
+# Safety-backfill columns that older cached snapshots may be missing.
+# load_snapshot() handles this on disk, but an in-memory cached DataFrame from
+# a prior deploy can still be served before a cache-clear.
+if "SponsorType" not in df.columns and "LeadSponsor" in df.columns:
+    try:
+        from pipeline import _classify_sponsor as _cs_safety
+        df["SponsorType"] = df.apply(
+            lambda r: _cs_safety(r.get("LeadSponsor"), r.get("LeadSponsorClass")),
+            axis=1,
+        )
+    except Exception:
+        pass
 
 st.sidebar.header("Filters")
 
@@ -1427,34 +1447,53 @@ with tab_overview:
         _sb["_L3"] = _sb.apply(_ov_target_l3, axis=1)
         _sb_counts = _sb.groupby(["_L1", "_L2", "_L3"]).size().reset_index(name="Trials")
 
-        import plotly.graph_objects as go
+        # Simplify the outer ring: keep only the top-2 antigen targets per
+        # disease; collapse the long tail into a single "Other targets" wedge.
+        # Eliminates the sliver clutter when a disease has many tiny cohorts.
+        _TOP_TARGETS_PER_DISEASE = 2
+        _simplified = []
+        for (_fam, _dis), _grp in _sb_counts.groupby(["_L1", "_L2"]):
+            _grp = _grp.sort_values("Trials", ascending=False)
+            _top = _grp.head(_TOP_TARGETS_PER_DISEASE)
+            _tail = _grp.iloc[_TOP_TARGETS_PER_DISEASE:]
+            _simplified.append(_top)
+            if not _tail.empty:
+                _simplified.append(pd.DataFrame([{
+                    "_L1": _fam, "_L2": _dis, "_L3": "Other targets",
+                    "Trials": int(_tail["Trials"].sum()),
+                }]))
+        _sb_counts = pd.concat(_simplified, ignore_index=True) if _simplified else _sb_counts
+
         _ids, _labels, _parents, _values, _colors = [], [], [], [], []
         for _fam, _fd in _sb_counts.groupby("_L1"):
+            _fam_color = _FAMILY_COLORS.get(_fam, "#64748b")
             _ids.append(_fam); _labels.append(_fam); _parents.append("")
             _values.append(int(_fd["Trials"].sum()))
-            _colors.append(_FAMILY_COLORS.get(_fam, "#64748b"))
+            _colors.append(_fam_color)
             for _dis, _dd in _fd.groupby("_L2"):
                 _dis_id = f"{_fam}/{_dis}"
                 _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
                 _values.append(int(_dd["Trials"].sum()))
-                _colors.append(_FAMILY_COLORS.get(_fam, "#64748b"))
+                _colors.append(_fam_color)
                 for _, _row in _dd.iterrows():
                     _tg_id = f"{_fam}/{_dis}/{_row['_L3']}"
                     _ids.append(_tg_id); _labels.append(_row["_L3"]); _parents.append(_dis_id)
                     _values.append(int(_row["Trials"]))
-                    _colors.append(_FAMILY_COLORS.get(_fam, "#64748b"))
+                    _colors.append(_fam_color)
 
         _fig_sb = go.Figure(go.Sunburst(
             ids=_ids, labels=_labels, parents=_parents, values=_values,
             branchvalues="total",
-            marker=dict(colors=_colors, line=dict(color="white", width=1)),
+            marker=dict(colors=_colors, line=dict(color="white", width=1.2)),
             hovertemplate="<b>%{label}</b><br>%{value} trials<br>%{percentRoot:.0%} of filtered total<extra></extra>",
-            insidetextorientation="radial",
+            insidetextorientation="auto",
+            maxdepth=3,
         ))
         _fig_sb.update_layout(
             height=560, margin=dict(l=8, r=8, t=8, b=8),
             paper_bgcolor="white", plot_bgcolor="white",
-            font=dict(family="Inter, -apple-system, sans-serif", size=11, color="#0b1220"),
+            font=dict(family="Inter, -apple-system, sans-serif", size=12, color="#0b1220"),
+            uniformtext=dict(minsize=10, mode="hide"),
         )
         st.plotly_chart(_fig_sb, width='stretch')
 
@@ -2055,12 +2094,12 @@ with tab_data:
 # ---------------------------------------------------------------------------
 
 # Unified visualization palette — coordinated, scientific-grade
-NEJM = ["#1d4ed8", "#dc2626", "#d97706", "#059669", "#4f46e5", "#0891b2", "#0d9488", "#64748b"]
+NEJM = ["#1d4ed8", "#dc2626", "#d97706", "#059669", "#475569", "#0891b2", "#0d9488", "#64748b"]
 NEJM_BLUE    = "#1d4ed8"   # blue-700 (primary)
 NEJM_RED     = "#dc2626"   # red-600
 NEJM_AMBER   = "#d97706"   # amber-600
 NEJM_GREEN   = "#059669"   # emerald-600
-NEJM_PURPLE  = "#4f46e5"   # indigo-600
+NEJM_PURPLE  = "#475569"   # slate-600 — non-purple replacement (legacy name kept)
 
 _MODALITY_COLORS.update({
     "Auto CAR-T":      NEJM_BLUE,
@@ -2279,10 +2318,14 @@ with tab_deepdive:
                     st.markdown("**Product types**")
                     st.dataframe(_prod, width='stretch', hide_index=True)
 
-                detail = sub[["NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
-                              "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries"]].copy()
-                detail["Phase"] = sub["PhaseLabel"].values
-                detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
+                _dd_cols = ["NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
+                            "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries"]
+                _dd_cols = [c for c in _dd_cols if c in sub.columns]
+                detail = sub[_dd_cols].copy()
+                if "PhaseLabel" in sub.columns and "Phase" in detail.columns:
+                    detail["Phase"] = sub["PhaseLabel"].values
+                if "OverallStatus" in detail.columns:
+                    detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
                 st.markdown("**Trials**")
                 st.dataframe(
                     detail, width='stretch', hide_index=True,
@@ -2339,10 +2382,15 @@ with tab_deepdive:
                     st.markdown("**Named products**")
                     st.dataframe(_np, width='stretch', hide_index=True)
 
-            detail = sub[["NCTId", "NCTLink", "BriefTitle", "DiseaseEntities", "TargetCategory",
-                          "ProductName", "Phase", "OverallStatus", "LeadSponsor", "StartYear"]].copy()
-            detail["Phase"] = sub["PhaseLabel"].values
-            detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
+            _detail_cols = ["NCTId", "NCTLink", "BriefTitle", "DiseaseEntities", "DiseaseEntity",
+                            "TargetCategory", "ProductName", "Phase", "OverallStatus",
+                            "LeadSponsor", "StartYear"]
+            _detail_cols = [c for c in _detail_cols if c in sub.columns]
+            detail = sub[_detail_cols].copy()
+            if "PhaseLabel" in sub.columns and "Phase" in detail.columns:
+                detail["Phase"] = sub["PhaseLabel"].values
+            if "OverallStatus" in detail.columns:
+                detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
             st.markdown("**Trials**")
             st.dataframe(
                 detail, width='stretch', hide_index=True,
@@ -2355,6 +2403,16 @@ with tab_deepdive:
             )
 
     else:  # By sponsor type
+        # Defensive fallback: older cached state may lack SponsorType.
+        # Recompute it on the fly rather than blocking the view.
+        if "SponsorType" not in df_filt.columns and "LeadSponsor" in df_filt.columns:
+            try:
+                from pipeline import _classify_sponsor as _cs
+                df_filt["SponsorType"] = df_filt.apply(
+                    lambda r: _cs(r.get("LeadSponsor"), r.get("LeadSponsorClass")), axis=1
+                )
+            except Exception:
+                pass
         if "SponsorType" not in df_filt.columns:
             st.info("Sponsor type not available in the current snapshot.")
         else:
@@ -2449,7 +2507,7 @@ with tab_pub:
         "RA":                    NEJM_RED,
         "CTD_other":             "#0d9488",   # teal-600
         "IgG4-RD":               "#ea580c",   # orange-600
-        "Behcet":                "#a855f7",   # purple-500
+        "Behcet":                "#7c2d12",   # amber-900 — non-purple replacement
         "cGVHD":                 "#db2777",   # pink-600
         "Basket/Multidisease":   "#475569",   # slate-600
         "Other immune-mediated": "#94a3b8",   # slate-400
@@ -2483,17 +2541,33 @@ with tab_pub:
         main_order = [g for g in group_totals.index if g not in sink_labels]
         stack_order = main_order + sink_labels
 
-        fig1 = px.area(
-            fig1_long,
-            x="StartYear",
-            y="Trials",
-            color="Group",
-            category_orders={"Group": stack_order},
-            color_discrete_map=_ENTITY_COLORS,
-            height=460,
-            template="plotly_white",
+        # Build explicit stacked-area traces.  px.area in plotly 6.x does not
+        # auto-stack, so overlapping fills hide everything behind the topmost
+        # (often near-white "Other") trace.  Using go.Scatter with an explicit
+        # stackgroup guarantees a proper stacked-area rendering.
+        _years_axis = list(range(int(fig1_long["StartYear"].min()), int(fig1_long["StartYear"].max()) + 1))
+        _pivot = (
+            fig1_long.pivot(index="StartYear", columns="Group", values="Trials")
+            .reindex(_years_axis)
+            .fillna(0)
+            .astype(int)
         )
-        fig1.update_traces(line=dict(width=0.8, color="white"), hovertemplate="%{x}: %{y} trials<extra>%{fullData.name}</extra>")
+        fig1 = go.Figure()
+        # Stack from bottom → top (largest groups first, sinks last)
+        for _grp in stack_order:
+            if _grp not in _pivot.columns:
+                continue
+            _color = _ENTITY_COLORS.get(_grp, "#94a3b8")
+            fig1.add_trace(go.Scatter(
+                x=_pivot.index.tolist(),
+                y=_pivot[_grp].tolist(),
+                name=_grp,
+                mode="lines",
+                stackgroup="one",
+                line=dict(width=0.5, color="white"),
+                fillcolor=_color,
+                hovertemplate="%{x}: %{y} trials<extra>" + _grp + "</extra>",
+            ))
         fig1.update_layout(
             **PUB_LAYOUT,
             xaxis_title="Start year",
