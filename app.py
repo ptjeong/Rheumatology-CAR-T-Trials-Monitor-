@@ -2576,12 +2576,14 @@ with tab_pub:
                 xaxis=_H_XAXIS,
                 uniformtext_minsize=9, uniformtext_mode="hide",
             )
-            fig7c.add_annotation(
-                text="Basket trials counted once per enrolled disease · Trials without reported enrollment excluded",
-                xref="paper", yref="paper", x=0, y=-0.1,
-                showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
-            )
             st.plotly_chart(fig7c, use_container_width=True, config=PUB_EXPORT)
+            st.markdown(
+                '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
+                'Basket trials counted once per enrolled disease · '
+                'Trials without reported enrollment excluded.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
         # 7d / 7e — China vs Non-China  ·  Academic vs Industry
         def _geo_group(countries_str) -> str:
@@ -2747,12 +2749,13 @@ with tab_pub:
             ),
             showlegend=False,
         )
-        fig7d.add_annotation(
-            text="Whiskers = IQR (Q1–Q3)",
-            xref="paper", yref="paper", x=0, y=-0.10,
-            showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
-        )
         st.plotly_chart(fig7d, use_container_width=True, config=PUB_EXPORT)
+        st.markdown(
+            '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
+            'Whiskers = IQR (Q1–Q3).'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         # Tabular summary (inputs to forest plot, in display order)
         _cmp_summary = forest_df[["Category", "Group", "N", "Median", "Q1", "Q3"]].iloc[::-1].reset_index(drop=True)
