@@ -385,11 +385,7 @@ st.markdown(
 
     .hero-sub-filter {{
         margin-top: 0.55rem;
-        padding: 0.35rem 0.55rem;
-        background: #dbeafe;
         color: {THEME["text"]};
-        border-radius: 2px;
-        display: inline-block;
     }}
     .hero-sub-filter strong {{
         color: {THEME["text"]};
@@ -1074,7 +1070,7 @@ st.markdown(
             publication-ready figures.
         </div>
         <div class="hero-sub hero-sub-filter">
-            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — every chart, table, map, and CSV export on every tab respects the active filter state.
+            Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — filter state propagates to every chart, table, map, and CSV export in the analysis tabs (Methods &amp; Appendix and About show fixed reference material).
         </div>
     </div>
     """,
