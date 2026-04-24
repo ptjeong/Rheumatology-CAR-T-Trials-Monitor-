@@ -1541,267 +1541,6 @@ with tab_data:
                 mime="text/csv",
             )
 
-    # ── Curation loop ──────────────────────────────────────────────────────────
-    st.subheader("Curation loop — unclear / unclassified trials")
-    st.markdown(
-        '<p class="small-note">Download the structured CSV, paste it into Claude Code, '
-        "and the assistant will propose and apply patches to config.py / pipeline.py automatically.</p>",
-        unsafe_allow_html=True,
-    )
-
-    unclear_disease_mask = df_filt["DiseaseEntity"].astype(str).str.lower().isin(
-        ["unclassified", "autoimmune_other", "other_or_unknown"]
-    )
-    unclear_target_mask = df_filt["TargetCategory"].astype(str).str.lower().isin(
-        ["other_or_unknown", "car-t_unspecified", "unclassified", "unknown"]
-    )
-    unclear_product_mask = df_filt["ProductType"].astype(str).str.lower() == "unclear"
-
-    df_unclear = df_filt[unclear_disease_mask | unclear_target_mask | unclear_product_mask].copy()
-
-    if not df_unclear.empty:
-        def _unclear_fields(row):
-            flags = []
-            if str(row.get("DiseaseEntity", "")).lower() in {"unclassified", "autoimmune_other", "other_or_unknown"}:
-                flags.append("Disease")
-            if str(row.get("TargetCategory", "")).lower() in {"other_or_unknown", "car-t_unspecified", "unclassified", "unknown"}:
-                flags.append("Target")
-            if str(row.get("ProductType", "")).lower() == "unclear":
-                flags.append("Product")
-            return "|".join(flags)
-
-        df_unclear["UnclearFields"] = df_unclear.apply(_unclear_fields, axis=1)
-
-        export_cols = [
-            "NCTId", "BriefTitle", "Conditions", "Interventions",
-            "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields",
-            "BriefSummary",
-        ]
-        df_export = df_unclear[[c for c in export_cols if c in df_unclear.columns]].copy()
-        # Truncate BriefSummary to 300 chars to keep CSV readable
-        if "BriefSummary" in df_export.columns:
-            df_export["BriefSummary"] = df_export["BriefSummary"].astype(str).str[:300]
-
-        import io as _io
-        header_lines = [
-            "# CURATION_LOOP_V1",
-            "# INSTRUCTION: You are Claude Code assisting with a CAR-T rheumatology trial pipeline.",
-            "# For each row below, read BriefTitle / Conditions / Interventions / BriefSummary.",
-            "# Propose the correct DiseaseEntity, TargetCategory, and ProductType.",
-            "# Then automatically patch config.py and/or pipeline.py to capture these cases.",
-            "# Allowed DiseaseEntity values: SLE, SSc, Sjogren, CTD_other, IIM, AAV, RA, IgG4-RD, Behcet,",
-            "#   Other immune-mediated, Unclassified",
-            "# Allowed TargetCategory values: CD19, BCMA, CD19/BCMA dual, CD19/BAFF dual,",
-            "#   CD20, CD6, CD7, CAR-NK, CAAR-T, CAR-Treg, CAR-T_unspecified, Other_or_unknown",
-            "# Allowed ProductType values: Autologous, Allogeneic/Off-the-shelf, In vivo, Unclear",
-            "# UnclearFields column shows which field(s) triggered inclusion (Disease|Target|Product).",
-            "#",
-        ]
-        buf = _io.StringIO()
-        for line in header_lines:
-            buf.write(line + "\n")
-        df_export.to_csv(buf, index=False)
-        curation_csv = buf.getvalue()
-
-        st.dataframe(
-            df_export[["NCTId", "BriefTitle", "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields"]],
-            use_container_width=True,
-            height=280,
-        )
-        st.caption(f"{len(df_export)} trial(s) flagged for curation")
-
-        st.download_button(
-            label=f"Download curation CSV ({len(df_export)} trials)",
-            data=curation_csv,
-            file_name="curation_loop.csv",
-            mime="text/csv",
-        )
-    else:
-        st.success("No unclear / unclassified trials in the current filter.")
-
-
-    st.subheader("Validation sample export")
-    st.markdown(
-        '<p class="small-note">Stratified random sample for manual classification review. '
-        "Each row includes auto-assigned labels and blank reviewer columns. "
-        "Two reviewers complete independently, then compute inter-rater agreement (Cohen's κ).</p>",
-        unsafe_allow_html=True,
-    )
-
-    val_n = st.slider("Target sample size", min_value=25, max_value=200, value=100, step=25)
-    val_seed = st.number_input("Random seed (for reproducibility)", min_value=0, max_value=9999, value=42, step=1)
-
-    def build_validation_sample(source_df: pd.DataFrame, n: int, seed: int) -> pd.DataFrame:
-        review_cols = [
-            "NCTId", "BriefTitle", "Conditions", "BriefSummary",
-            "DiseaseEntity", "TargetCategory", "ProductType",
-            "Phase", "OverallStatus", "LeadSponsor", "Countries",
-        ]
-        available = [c for c in review_cols if c in source_df.columns]
-        base = source_df[available].copy()
-
-        # Stratify proportionally by DiseaseEntity; ensure each stratum has ≥1 row
-        strata = base["DiseaseEntity"].fillna("Unclassified")
-        counts = strata.value_counts()
-        total = len(base)
-        per_stratum = (counts / total * n).clip(lower=1).round().astype(int)
-        # Adjust so sum == n
-        diff = n - per_stratum.sum()
-        if diff != 0:
-            largest = per_stratum.idxmax()
-            per_stratum[largest] = max(1, per_stratum[largest] + diff)
-
-        frames = []
-        import numpy as _np
-        rng = _np.random.default_rng(seed)  # noqa: F841 — kept for future use
-        for entity, k in per_stratum.items():
-            rows = base[strata == entity]
-            k = min(k, len(rows))
-            frames.append(rows.sample(n=k, random_state=int(seed), replace=False))
-
-        sample = pd.concat(frames, ignore_index=True).sample(frac=1, random_state=int(seed)).reset_index(drop=True)
-        sample.insert(0, "SampleID", range(1, len(sample) + 1))
-
-        # Blank reviewer columns
-        for col in ["Reviewer1_Disease", "Reviewer1_Target", "Reviewer1_Product",
-                    "Reviewer2_Disease", "Reviewer2_Target", "Reviewer2_Product", "Notes"]:
-            sample[col] = ""
-
-        return sample
-
-    if not df_filt.empty:
-        sample_df = build_validation_sample(df_filt, val_n, int(val_seed))
-        st.caption(
-            f"Sample: {len(sample_df)} trials from {df_filt['DiseaseEntity'].nunique()} disease strata "
-            f"(seed={int(val_seed)})"
-        )
-        st.dataframe(
-            sample_df[["SampleID", "NCTId", "DiseaseEntity", "TargetCategory", "ProductType", "BriefTitle"]],
-            use_container_width=True,
-            height=260,
-            hide_index=True,
-        )
-        st.download_button(
-            label="Download validation sample CSV",
-            data=sample_df.to_csv(index=False),
-            file_name=f"car_t_validation_sample_n{len(sample_df)}_seed{int(val_seed)}.csv",
-            mime="text/csv",
-        )
-    else:
-        st.info("No trials in the current filter selection.")
-
-    st.subheader("Inter-rater agreement (Cohen's κ)")
-    st.markdown(
-        '<p class="small-note">Upload the completed validation CSV (both reviewers filled in) '
-        "to compute Cohen's κ for Disease, Target, and Product classification.</p>",
-        unsafe_allow_html=True,
-    )
-
-    def _cohen_kappa(y1: list, y2: list) -> float:
-        from collections import Counter
-        n = len(y1)
-        if n == 0:
-            return float("nan")
-        p_o = sum(a == b for a, b in zip(y1, y2)) / n
-        c1, c2 = Counter(y1), Counter(y2)
-        all_labels = set(c1) | set(c2)
-        p_e = sum((c1[k] / n) * (c2[k] / n) for k in all_labels)
-        if p_e >= 1.0:
-            return 1.0
-        return (p_o - p_e) / (1 - p_e)
-
-    def _kappa_label(k: float) -> str:
-        if k != k:  # nan
-            return "—"
-        if k < 0.00:
-            return "Poor (< 0)"
-        if k < 0.20:
-            return "Slight (< 0.20)"
-        if k < 0.40:
-            return "Fair (0.20–0.40)"
-        if k < 0.60:
-            return "Moderate (0.40–0.60)"
-        if k < 0.80:
-            return "Substantial (0.60–0.80)"
-        return "Almost perfect (≥ 0.80)"
-
-    uploaded = st.file_uploader(
-        "Completed validation CSV",
-        type="csv",
-        help="Upload the filled-in validation sample with Reviewer1_* and Reviewer2_* columns.",
-    )
-
-    if uploaded is not None:
-        try:
-            rev_df = pd.read_csv(uploaded)
-        except Exception as e:
-            st.error(f"Could not read file: {e}")
-            rev_df = None
-
-        if rev_df is not None:
-            required = {
-                "Reviewer1_Disease", "Reviewer2_Disease",
-                "Reviewer1_Target", "Reviewer2_Target",
-                "Reviewer1_Product", "Reviewer2_Product",
-            }
-            missing_cols = required - set(rev_df.columns)
-            if missing_cols:
-                st.error(f"Missing columns: {', '.join(sorted(missing_cols))}")
-            else:
-                pairs = [
-                    ("Disease classification", "Reviewer1_Disease", "Reviewer2_Disease"),
-                    ("Target classification", "Reviewer1_Target", "Reviewer2_Target"),
-                    ("Product type classification", "Reviewer1_Product", "Reviewer2_Product"),
-                ]
-                kappa_rows = []
-                for label, col1, col2 in pairs:
-                    sub = rev_df[[col1, col2]].dropna()
-                    sub = sub[(sub[col1].str.strip() != "") & (sub[col2].str.strip() != "")]
-                    n_rated = len(sub)
-                    n_agreed = int((sub[col1].str.strip() == sub[col2].str.strip()).sum())
-                    k = _cohen_kappa(sub[col1].str.strip().tolist(), sub[col2].str.strip().tolist())
-                    kappa_rows.append({
-                        "Classification task": label,
-                        "n rated": n_rated,
-                        "n agreed": n_agreed,
-                        "% agreement": f"{100 * n_agreed / n_rated:.1f}%" if n_rated else "—",
-                        "κ": round(k, 3) if k == k else "—",
-                        "Interpretation": _kappa_label(k),
-                    })
-
-                kappa_summary = pd.DataFrame(kappa_rows)
-                st.dataframe(kappa_summary, use_container_width=True, hide_index=True)
-
-                # Disagreement table for adjudication
-                disagree_masks = []
-                for _, col1, col2 in pairs:
-                    sub = rev_df[[col1, col2]].copy()
-                    sub[col1] = sub[col1].fillna("").str.strip()
-                    sub[col2] = sub[col2].fillna("").str.strip()
-                    both_filled = (sub[col1] != "") & (sub[col2] != "")
-                    disagree_masks.append(both_filled & (sub[col1] != sub[col2]))
-
-                disagree_mask = disagree_masks[0] | disagree_masks[1] | disagree_masks[2]
-                df_disagree = rev_df[disagree_mask].copy()
-
-                if df_disagree.empty:
-                    st.success("No disagreements — perfect agreement on all rated rows.")
-                else:
-                    with st.expander(f"Disagreement rows ({len(df_disagree)}) — for adjudication"):
-                        show_dis_cols = [c for c in [
-                            "SampleID", "NCTId", "BriefTitle",
-                            "DiseaseEntity", "Reviewer1_Disease", "Reviewer2_Disease",
-                            "TargetCategory", "Reviewer1_Target", "Reviewer2_Target",
-                            "ProductType", "Reviewer1_Product", "Reviewer2_Product",
-                            "Notes",
-                        ] if c in df_disagree.columns]
-                        st.dataframe(df_disagree[show_dis_cols], use_container_width=True, hide_index=True)
-                        st.download_button(
-                            label="Download disagreement rows CSV",
-                            data=df_disagree[show_dis_cols].to_csv(index=False),
-                            file_name="car_t_validation_disagreements.csv",
-                            mime="text/csv",
-                        )
 
 # ---------------------------------------------------------------------------
 # TAB: Publication Figures
@@ -3076,6 +2815,268 @@ with tab_methods:
         file_name=f"car_t_excluded_nct_ids_{snap_date}.csv",
         mime="text/csv",
     )
+
+    # ── Curation loop ──────────────────────────────────────────────────────────
+    st.subheader("Curation loop — unclear / unclassified trials")
+    st.markdown(
+        '<p class="small-note">Download the structured CSV, paste it into Claude Code, '
+        "and the assistant will propose and apply patches to config.py / pipeline.py automatically.</p>",
+        unsafe_allow_html=True,
+    )
+
+    unclear_disease_mask = df_filt["DiseaseEntity"].astype(str).str.lower().isin(
+        ["unclassified", "autoimmune_other", "other_or_unknown"]
+    )
+    unclear_target_mask = df_filt["TargetCategory"].astype(str).str.lower().isin(
+        ["other_or_unknown", "car-t_unspecified", "unclassified", "unknown"]
+    )
+    unclear_product_mask = df_filt["ProductType"].astype(str).str.lower() == "unclear"
+
+    df_unclear = df_filt[unclear_disease_mask | unclear_target_mask | unclear_product_mask].copy()
+
+    if not df_unclear.empty:
+        def _unclear_fields(row):
+            flags = []
+            if str(row.get("DiseaseEntity", "")).lower() in {"unclassified", "autoimmune_other", "other_or_unknown"}:
+                flags.append("Disease")
+            if str(row.get("TargetCategory", "")).lower() in {"other_or_unknown", "car-t_unspecified", "unclassified", "unknown"}:
+                flags.append("Target")
+            if str(row.get("ProductType", "")).lower() == "unclear":
+                flags.append("Product")
+            return "|".join(flags)
+
+        df_unclear["UnclearFields"] = df_unclear.apply(_unclear_fields, axis=1)
+
+        export_cols = [
+            "NCTId", "BriefTitle", "Conditions", "Interventions",
+            "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields",
+            "BriefSummary",
+        ]
+        df_export = df_unclear[[c for c in export_cols if c in df_unclear.columns]].copy()
+        # Truncate BriefSummary to 300 chars to keep CSV readable
+        if "BriefSummary" in df_export.columns:
+            df_export["BriefSummary"] = df_export["BriefSummary"].astype(str).str[:300]
+
+        import io as _io
+        header_lines = [
+            "# CURATION_LOOP_V1",
+            "# INSTRUCTION: You are Claude Code assisting with a CAR-T rheumatology trial pipeline.",
+            "# For each row below, read BriefTitle / Conditions / Interventions / BriefSummary.",
+            "# Propose the correct DiseaseEntity, TargetCategory, and ProductType.",
+            "# Then automatically patch config.py and/or pipeline.py to capture these cases.",
+            "# Allowed DiseaseEntity values: SLE, SSc, Sjogren, CTD_other, IIM, AAV, RA, IgG4-RD, Behcet,",
+            "#   Other immune-mediated, Unclassified",
+            "# Allowed TargetCategory values: CD19, BCMA, CD19/BCMA dual, CD19/BAFF dual,",
+            "#   CD20, CD6, CD7, CAR-NK, CAAR-T, CAR-Treg, CAR-T_unspecified, Other_or_unknown",
+            "# Allowed ProductType values: Autologous, Allogeneic/Off-the-shelf, In vivo, Unclear",
+            "# UnclearFields column shows which field(s) triggered inclusion (Disease|Target|Product).",
+            "#",
+        ]
+        buf = _io.StringIO()
+        for line in header_lines:
+            buf.write(line + "\n")
+        df_export.to_csv(buf, index=False)
+        curation_csv = buf.getvalue()
+
+        st.dataframe(
+            df_export[["NCTId", "BriefTitle", "DiseaseEntity", "TargetCategory", "ProductType", "UnclearFields"]],
+            use_container_width=True,
+            height=280,
+        )
+        st.caption(f"{len(df_export)} trial(s) flagged for curation")
+
+        st.download_button(
+            label=f"Download curation CSV ({len(df_export)} trials)",
+            data=curation_csv,
+            file_name="curation_loop.csv",
+            mime="text/csv",
+        )
+    else:
+        st.success("No unclear / unclassified trials in the current filter.")
+
+
+    st.subheader("Validation sample export")
+    st.markdown(
+        '<p class="small-note">Stratified random sample for manual classification review. '
+        "Each row includes auto-assigned labels and blank reviewer columns. "
+        "Two reviewers complete independently, then compute inter-rater agreement (Cohen's κ).</p>",
+        unsafe_allow_html=True,
+    )
+
+    val_n = st.slider("Target sample size", min_value=25, max_value=200, value=100, step=25)
+    val_seed = st.number_input("Random seed (for reproducibility)", min_value=0, max_value=9999, value=42, step=1)
+
+    def build_validation_sample(source_df: pd.DataFrame, n: int, seed: int) -> pd.DataFrame:
+        review_cols = [
+            "NCTId", "BriefTitle", "Conditions", "BriefSummary",
+            "DiseaseEntity", "TargetCategory", "ProductType",
+            "Phase", "OverallStatus", "LeadSponsor", "Countries",
+        ]
+        available = [c for c in review_cols if c in source_df.columns]
+        base = source_df[available].copy()
+
+        # Stratify proportionally by DiseaseEntity; ensure each stratum has ≥1 row
+        strata = base["DiseaseEntity"].fillna("Unclassified")
+        counts = strata.value_counts()
+        total = len(base)
+        per_stratum = (counts / total * n).clip(lower=1).round().astype(int)
+        # Adjust so sum == n
+        diff = n - per_stratum.sum()
+        if diff != 0:
+            largest = per_stratum.idxmax()
+            per_stratum[largest] = max(1, per_stratum[largest] + diff)
+
+        frames = []
+        import numpy as _np
+        rng = _np.random.default_rng(seed)  # noqa: F841 — kept for future use
+        for entity, k in per_stratum.items():
+            rows = base[strata == entity]
+            k = min(k, len(rows))
+            frames.append(rows.sample(n=k, random_state=int(seed), replace=False))
+
+        sample = pd.concat(frames, ignore_index=True).sample(frac=1, random_state=int(seed)).reset_index(drop=True)
+        sample.insert(0, "SampleID", range(1, len(sample) + 1))
+
+        # Blank reviewer columns
+        for col in ["Reviewer1_Disease", "Reviewer1_Target", "Reviewer1_Product",
+                    "Reviewer2_Disease", "Reviewer2_Target", "Reviewer2_Product", "Notes"]:
+            sample[col] = ""
+
+        return sample
+
+    if not df_filt.empty:
+        sample_df = build_validation_sample(df_filt, val_n, int(val_seed))
+        st.caption(
+            f"Sample: {len(sample_df)} trials from {df_filt['DiseaseEntity'].nunique()} disease strata "
+            f"(seed={int(val_seed)})"
+        )
+        st.dataframe(
+            sample_df[["SampleID", "NCTId", "DiseaseEntity", "TargetCategory", "ProductType", "BriefTitle"]],
+            use_container_width=True,
+            height=260,
+            hide_index=True,
+        )
+        st.download_button(
+            label="Download validation sample CSV",
+            data=sample_df.to_csv(index=False),
+            file_name=f"car_t_validation_sample_n{len(sample_df)}_seed{int(val_seed)}.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No trials in the current filter selection.")
+
+    st.subheader("Inter-rater agreement (Cohen's κ)")
+    st.markdown(
+        '<p class="small-note">Upload the completed validation CSV (both reviewers filled in) '
+        "to compute Cohen's κ for Disease, Target, and Product classification.</p>",
+        unsafe_allow_html=True,
+    )
+
+    def _cohen_kappa(y1: list, y2: list) -> float:
+        from collections import Counter
+        n = len(y1)
+        if n == 0:
+            return float("nan")
+        p_o = sum(a == b for a, b in zip(y1, y2)) / n
+        c1, c2 = Counter(y1), Counter(y2)
+        all_labels = set(c1) | set(c2)
+        p_e = sum((c1[k] / n) * (c2[k] / n) for k in all_labels)
+        if p_e >= 1.0:
+            return 1.0
+        return (p_o - p_e) / (1 - p_e)
+
+    def _kappa_label(k: float) -> str:
+        if k != k:  # nan
+            return "—"
+        if k < 0.00:
+            return "Poor (< 0)"
+        if k < 0.20:
+            return "Slight (< 0.20)"
+        if k < 0.40:
+            return "Fair (0.20–0.40)"
+        if k < 0.60:
+            return "Moderate (0.40–0.60)"
+        if k < 0.80:
+            return "Substantial (0.60–0.80)"
+        return "Almost perfect (≥ 0.80)"
+
+    uploaded = st.file_uploader(
+        "Completed validation CSV",
+        type="csv",
+        help="Upload the filled-in validation sample with Reviewer1_* and Reviewer2_* columns.",
+    )
+
+    if uploaded is not None:
+        try:
+            rev_df = pd.read_csv(uploaded)
+        except Exception as e:
+            st.error(f"Could not read file: {e}")
+            rev_df = None
+
+        if rev_df is not None:
+            required = {
+                "Reviewer1_Disease", "Reviewer2_Disease",
+                "Reviewer1_Target", "Reviewer2_Target",
+                "Reviewer1_Product", "Reviewer2_Product",
+            }
+            missing_cols = required - set(rev_df.columns)
+            if missing_cols:
+                st.error(f"Missing columns: {', '.join(sorted(missing_cols))}")
+            else:
+                pairs = [
+                    ("Disease classification", "Reviewer1_Disease", "Reviewer2_Disease"),
+                    ("Target classification", "Reviewer1_Target", "Reviewer2_Target"),
+                    ("Product type classification", "Reviewer1_Product", "Reviewer2_Product"),
+                ]
+                kappa_rows = []
+                for label, col1, col2 in pairs:
+                    sub = rev_df[[col1, col2]].dropna()
+                    sub = sub[(sub[col1].str.strip() != "") & (sub[col2].str.strip() != "")]
+                    n_rated = len(sub)
+                    n_agreed = int((sub[col1].str.strip() == sub[col2].str.strip()).sum())
+                    k = _cohen_kappa(sub[col1].str.strip().tolist(), sub[col2].str.strip().tolist())
+                    kappa_rows.append({
+                        "Classification task": label,
+                        "n rated": n_rated,
+                        "n agreed": n_agreed,
+                        "% agreement": f"{100 * n_agreed / n_rated:.1f}%" if n_rated else "—",
+                        "κ": round(k, 3) if k == k else "—",
+                        "Interpretation": _kappa_label(k),
+                    })
+
+                kappa_summary = pd.DataFrame(kappa_rows)
+                st.dataframe(kappa_summary, use_container_width=True, hide_index=True)
+
+                # Disagreement table for adjudication
+                disagree_masks = []
+                for _, col1, col2 in pairs:
+                    sub = rev_df[[col1, col2]].copy()
+                    sub[col1] = sub[col1].fillna("").str.strip()
+                    sub[col2] = sub[col2].fillna("").str.strip()
+                    both_filled = (sub[col1] != "") & (sub[col2] != "")
+                    disagree_masks.append(both_filled & (sub[col1] != sub[col2]))
+
+                disagree_mask = disagree_masks[0] | disagree_masks[1] | disagree_masks[2]
+                df_disagree = rev_df[disagree_mask].copy()
+
+                if df_disagree.empty:
+                    st.success("No disagreements — perfect agreement on all rated rows.")
+                else:
+                    with st.expander(f"Disagreement rows ({len(df_disagree)}) — for adjudication"):
+                        show_dis_cols = [c for c in [
+                            "SampleID", "NCTId", "BriefTitle",
+                            "DiseaseEntity", "Reviewer1_Disease", "Reviewer2_Disease",
+                            "TargetCategory", "Reviewer1_Target", "Reviewer2_Target",
+                            "ProductType", "Reviewer1_Product", "Reviewer2_Product",
+                            "Notes",
+                        ] if c in df_disagree.columns]
+                        st.dataframe(df_disagree[show_dis_cols], use_container_width=True, hide_index=True)
+                        st.download_button(
+                            label="Download disagreement rows CSV",
+                            data=df_disagree[show_dis_cols].to_csv(index=False),
+                            file_name="car_t_validation_disagreements.csv",
+                            mime="text/csv",
+                        )
 
 
 # ---------------------------------------------------------------------------
