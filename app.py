@@ -2018,11 +2018,15 @@ with tab_data:
         table_df = table_df[mask]
         st.caption(f"Search '{search_q}' · {len(table_df)} of {len(df_filt)} filtered trials match")
 
-    st.dataframe(
+    st.caption("Click any row to open the full trial record below.")
+    _table_event = st.dataframe(
         table_df[show_cols],
         width='stretch',
         height=460,
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="data_table_sel",
         column_config={
             "NCTId": st.column_config.TextColumn("NCT ID"),
             "NCTLink": st.column_config.LinkColumn("Trial link", display_text="Open trial"),
@@ -2046,18 +2050,15 @@ with tab_data:
         },
     )
 
-    # ── Trial detail drilldown ─────────────────────────────────────────────
+    # ── Trial detail drilldown (row-click driven) ──────────────────────────
     if not table_df.empty:
-        nct_options = table_df["NCTId"].tolist()
-        sel_nct = st.selectbox(
-            "Trial detail — pick an NCT ID",
-            options=["—"] + nct_options,
-            index=0,
-            key="data_detail_nct",
-            help="Shows the full record and the reasoning behind the classification.",
+        _selected_rows = (
+            _table_event.selection.rows
+            if _table_event and hasattr(_table_event, "selection") else []
         )
-        if sel_nct and sel_nct != "—":
-            rec = table_df[table_df["NCTId"] == sel_nct].iloc[0]
+        if _selected_rows:
+            rec = table_df.iloc[_selected_rows[0]]
+            sel_nct = rec["NCTId"]
             with st.expander(f"{sel_nct} — {rec.get('BriefTitle', '')}", expanded=True):
                 _link = rec.get("NCTLink") or f"https://clinicaltrials.gov/study/{sel_nct}"
                 st.markdown(f"**[Open on ClinicalTrials.gov]({_link})**")
@@ -2096,6 +2097,8 @@ with tab_data:
                 if rec.get("BriefSummary"):
                     st.markdown("**Brief summary:**")
                     st.write(str(rec["BriefSummary"]))
+        else:
+            st.info("Select a row in the table above to see the full trial record and classification reasoning.")
 
     # Country-selectable "studies active in …" view.  Reuses the sites_country
     # session key so the Geography tab and this one stay in sync.
