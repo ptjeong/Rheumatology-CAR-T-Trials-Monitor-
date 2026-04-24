@@ -1638,6 +1638,7 @@ st.markdown(
     f"""
     <div class="small-note">
         {len(df)} total trials after processing. Current view shows {len(df_filt)} filtered trials.
+        Use the sidebar filters to narrow to a subgroup of interest — every chart, table, map, and CSV export on every tab respects the active filter state.
     </div>
     """,
     unsafe_allow_html=True,
