@@ -880,6 +880,15 @@ df["Modality"] = df.apply(_modality, axis=1)
 
 st.sidebar.header("Filters")
 
+_FILTER_KEYS = (
+    "flt_disease", "flt_design", "flt_phase", "flt_target",
+    "flt_status", "flt_product", "flt_modality", "flt_country",
+)
+if st.sidebar.button("Reset filters", width='stretch'):
+    for _k in _FILTER_KEYS:
+        st.session_state.pop(_k, None)
+    st.rerun()
+
 # Disease entity (multi-select) — based on DiseaseEntities so basket trials appear under each disease
 _all_disease_entities: set[str] = set()
 for _val in df["DiseaseEntities"].dropna():
@@ -893,6 +902,7 @@ disease_sel = st.sidebar.multiselect(
     options=disease_options,
     default=disease_options,
     help="Basket/multi-disease trials appear under every disease they enrol.",
+    key="flt_disease",
 )
 
 # Trial design (single disease vs basket)
@@ -902,6 +912,7 @@ design_sel = st.sidebar.multiselect(
     options=design_options,
     default=design_options,
     help="Filter to single-disease trials only or include basket/multi-disease trials.",
+    key="flt_design",
 )
 
 # Phase (multi-select, displayed as labels)
@@ -910,6 +921,7 @@ phase_sel = st.sidebar.multiselect(
     "Phase",
     options=phase_options,
     default=phase_options,
+    key="flt_phase",
 )
 
 # Target category (multi-select) — antigen targets only; platform labels live in modality filter
@@ -921,6 +933,7 @@ target_sel = st.sidebar.multiselect(
     "Antigen target",
     options=target_options,
     default=target_options,
+    key="flt_target",
 )
 
 # Overall status (multi-select)
@@ -929,6 +942,7 @@ status_sel = st.sidebar.multiselect(
     "Overall status",
     options=status_options,
     default=status_options,
+    key="flt_status",
 )
 
 # Product type (multi-select)
@@ -937,6 +951,7 @@ product_sel = st.sidebar.multiselect(
     "Product type",
     options=product_options,
     default=product_options,
+    key="flt_product",
 )
 
 # Cell therapy modality (multi-select)
@@ -945,6 +960,7 @@ modality_sel = st.sidebar.multiselect(
     "Cell therapy modality",
     options=modality_options,
     default=modality_options,
+    key="flt_modality",
 )
 
 # Country (multi-select)
@@ -959,6 +975,7 @@ country_sel = st.sidebar.multiselect(
     "Country",
     options=country_options,
     default=country_options,
+    key="flt_country",
 )
 
 
