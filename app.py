@@ -2616,6 +2616,12 @@ with tab_pub:
                  "Vertical lines mark landmark rheumatology CAR-T publications."
         ),
     )
+    _show_landmarks = st.checkbox(
+        "Show landmark-publication overlay",
+        value=True,
+        key="fig1_show_landmarks",
+        help="Toggle the vertical dashed lines and legend for landmark rheumatology CAR-T publications.",
+    )
 
     # ── Stacking groups: top-N disease entities + 'Other' ──────────────────
     _ENTITY_COLORS = {
@@ -2706,12 +2712,13 @@ with tab_pub:
 
         # ── Landmark publications (vertical dashed lines + labels) ─────────
         _landmarks = [
-            (2021, "First SLE CAR-T case report"),
-            (2022, "5-patient SLE series (Mackensen)"),
-            (2024, "NEJM 15-patient series (Müller)"),
-            (2025, "First industry pivotal trials"),
+            (2021, "Mougiakakos SLE case (NEJM)"),
+            (2022, "Mackensen 5-patient SLE series (Nat Med)"),
+            (2023, "First SSc & IIM series (Bergmann, Taubmann)"),
+            (2024, "Müller 15-patient multi-disease series (NEJM)"),
+            (2025, "First industry pivotal trials; in vivo CAR-T (NEJM letter)"),
         ]
-        if _yr_min is not None and _yr_max is not None:
+        if _show_landmarks and _yr_min is not None and _yr_max is not None:
             for _yr, _label in _landmarks:
                 if _yr_min <= _yr <= _yr_max:
                     fig1.add_vline(
@@ -2742,16 +2749,17 @@ with tab_pub:
             )
         st.plotly_chart(fig1, width='stretch', config=PUB_EXPORT)
 
-        # Landmark legend (compact, under chart)
-        _landmark_lines = " &nbsp;·&nbsp; ".join(
-            f"<b>{y}</b>&nbsp;{l}" for y, l in _landmarks if _yr_min <= y <= _yr_max
-        )
-        if _landmark_lines:
-            st.markdown(
-                f'<div class="pub-fig-caption" style="margin-top:-8px">'
-                f'Landmarks: {_landmark_lines}.</div>',
-                unsafe_allow_html=True,
+        # Landmark legend (compact, under chart) — hidden when overlay is toggled off
+        if _show_landmarks:
+            _landmark_lines = " &nbsp;·&nbsp; ".join(
+                f"<b>{y}</b>&nbsp;{l}" for y, l in _landmarks if _yr_min <= y <= _yr_max
             )
+            if _landmark_lines:
+                st.markdown(
+                    f'<div class="pub-fig-caption" style="margin-top:-8px">'
+                    f'Landmarks: {_landmark_lines}.</div>',
+                    unsafe_allow_html=True,
+                )
 
         # Key statistics — use yearly totals
         totals_by_year = fig1_long.groupby("StartYear")["Trials"].sum().reset_index()
