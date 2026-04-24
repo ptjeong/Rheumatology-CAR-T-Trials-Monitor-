@@ -886,6 +886,14 @@ def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
         return raw_df
     out = add_phase_columns(raw_df)
     out = _add_modality_vectorized(out)
+    # Bake NCTLink once here so downstream filtered slices inherit it for free
+    # instead of rebuilding via a row-wise apply on every widget-driven rerun.
+    _nct = out["NCTId"].astype("string")
+    out["NCTLink"] = np.where(
+        _nct.notna(),
+        "https://clinicaltrials.gov/study/" + _nct.fillna(""),
+        None,
+    )
     return out
 
 
@@ -1511,22 +1519,29 @@ if confidence_sel and "ClassificationConfidence" in df.columns:
 _df_filt = df[mask].copy()
 df_filt = add_phase_columns(_df_filt)
 df_filt["OverallStatus"] = df_filt["OverallStatus"].fillna("Unknown")
-df_filt["NCTLink"] = df_filt["NCTId"].apply(
-    lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
-)
+# NCTLink is baked in _post_process_trials; df_filt inherits the column.
 
 # Open / recruiting sites across ALL countries, restricted to trials visible
-# under the current filter.  The two Sites-by-city views (Geography tab and
-# Data tab) each pick one country out of this pool via a selectbox.
-all_open_sites = pd.DataFrame()
-if not df_sites.empty:
-    _os = df_sites[
-        df_sites["SiteStatus"].fillna("").str.upper().isin(OPEN_SITE_STATUSES)
-    ].copy()
-    _os = _os[_os["NCTId"].isin(df_filt["NCTId"])].copy()
+# under the current filter.  Session-cached by NCT filter tuple: the slice
+# rebuilds only when the filter actually changes, not on every pill click.
+def _build_all_open_sites(sites: pd.DataFrame, nct_ids: pd.Series) -> pd.DataFrame:
+    if sites.empty:
+        return pd.DataFrame()
+    key = hash(tuple(sorted(nct_ids.dropna().unique().tolist())))
+    if st.session_state.get("_all_open_sites_key") == key:
+        cached = st.session_state.get("_all_open_sites_df")
+        if cached is not None:
+            return cached
+    _os = sites[sites["SiteStatus"].fillna("").str.upper().isin(OPEN_SITE_STATUSES)]
+    _os = _os[_os["NCTId"].isin(nct_ids)].copy()
     _os["Country"] = _os["Country"].fillna("Unknown").astype(str).str.strip()
     _os = _os[_os["Country"] != ""]
-    all_open_sites = _os
+    st.session_state["_all_open_sites_key"] = key
+    st.session_state["_all_open_sites_df"] = _os
+    return _os
+
+
+all_open_sites = _build_all_open_sites(df_sites, df_filt["NCTId"])
 
 
 def _country_study_view(country: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -3340,8 +3355,13 @@ with tab_pub:
                 return "Academic"
             return "Industry"
 
-        df_enroll_known["GeoGroup"]    = df_enroll_known["Countries"].apply(_geo_group)
-        df_enroll_known["SponsorType"] = df_enroll_known["LeadSponsor"].apply(_sponsor_type)
+        # Vectorized GeoGroup; SponsorType already baked in pipeline post-process.
+        _ctr = df_enroll_known["Countries"].fillna("")
+        _has_china = _ctr.str.contains(r"(?:^|\|)China(?:$|\|)", regex=True, na=False)
+        df_enroll_known["GeoGroup"] = np.where(
+            _ctr == "", "Unknown",
+            np.where(_has_china, "China", "Non-China"),
+        )
 
         def _comparison_stats(df_sub, group_col: str) -> pd.DataFrame:
             return (
@@ -3762,8 +3782,7 @@ with tab_pub:
 
     if not df_innov.empty:
         # 7a: Therapy modality — cumulative horizontal bar
-        # _MODALITY_ORDER, _MODALITY_COLORS, _modality() are module-level; Modality column pre-computed
-        df_innov["Modality"] = df_innov.apply(_modality, axis=1)
+        # Modality is baked in _post_process_trials; no recompute needed per rerun.
         st.markdown(
             '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
             '<strong style="color: #0b1220;">7a — Cell-therapy modality distribution</strong>'
