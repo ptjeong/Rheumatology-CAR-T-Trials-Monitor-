@@ -1883,7 +1883,8 @@ with tab_geo:
         c1, c2 = st.columns([1.15, 0.85])
         with c1:
             st.markdown("**Country counts**")
-            st.dataframe(country_counts, width='stretch', height=320, hide_index=True)
+            st.dataframe(country_counts[["Country", "Count"]], width='stretch',
+                         height=320, hide_index=True)
         with c2:
             st.markdown("**Top countries**")
             st.plotly_chart(
@@ -2889,7 +2890,7 @@ with tab_pub:
         for col, (_, row) in zip([c1, c2, c3], top3_geo.iterrows()):
             col.metric(row["Country"], f"{row['Trials']} ({100*row['Trials']/total_geo:.0f}%)")
 
-        fig3_csv = geo_counts.copy()
+        fig3_csv = geo_counts[["Country", "Trials"]].copy()
         fig3_csv["% of total"] = (fig3_csv["Trials"] / total_geo * 100).round(1)
         _pub_caption(
             len(df_filt),
