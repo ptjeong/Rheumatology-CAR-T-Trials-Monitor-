@@ -2695,7 +2695,9 @@ with tab_pub:
                 hovertemplate="%{x}: %{y} trials<extra>" + _grp + "</extra>",
             ))
         _fig1_layout = {**PUB_LAYOUT}
-        _fig1_layout["margin"] = dict(l=72, r=36, t=24, b=130)
+        # Extra top padding when the landmark overlay is on so the timeline
+        # pins above the plot area have room to render without clipping.
+        _fig1_layout["margin"] = dict(l=72, r=36, t=58 if _show_landmarks else 24, b=130)
         fig1.update_layout(
             **_fig1_layout,
             xaxis_title="Start year",
@@ -2710,7 +2712,11 @@ with tab_pub:
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
         fig1.update_yaxes(rangemode="tozero")
 
-        # ── Landmark publications (vertical dashed lines + labels) ─────────
+        # ── Landmark publications (timeline pins above plot area) ──────────
+        # Using short ticks + staggered labels above the chart rather than
+        # full-height vertical lines: five consecutive landmark years
+        # (2021-2025) rendered as full-height dashes looked like gridlines
+        # rather than discrete events.
         _landmarks = [
             (2021, "Mougiakakos SLE case (NEJM)"),
             (2022, "Mackensen 5-patient SLE series (Nat Med)"),
@@ -2719,19 +2725,25 @@ with tab_pub:
             (2025, "First industry pivotal trials; in vivo CAR-T (NEJM letter)"),
         ]
         if _show_landmarks and _yr_min is not None and _yr_max is not None:
-            for _yr, _label in _landmarks:
-                if _yr_min <= _yr <= _yr_max:
-                    fig1.add_vline(
-                        x=_yr, line_width=1, line_dash="dash",
-                        line_color=THEME["muted"],
-                    )
-                    fig1.add_annotation(
-                        x=_yr, y=1, yref="paper",
-                        text=f"<b>{_yr}</b>",
-                        showarrow=False,
-                        font=dict(size=10, color=THEME["primary"], family="Arial, Helvetica, sans-serif"),
-                        yanchor="bottom", xanchor="center",
-                    )
+            _visible_landmarks = [(y, l) for y, l in _landmarks if _yr_min <= y <= _yr_max]
+            for i, (_yr, _label) in enumerate(_visible_landmarks):
+                # Short tick mark just above the plot area
+                fig1.add_shape(
+                    type="line",
+                    x0=_yr, x1=_yr,
+                    y0=1.0, y1=1.035,
+                    xref="x", yref="paper",
+                    line=dict(color=THEME["muted"], width=1),
+                )
+                # Stagger year labels (two rows) so adjacent-year pins don't collide
+                _y_text = 1.055 if i % 2 == 0 else 1.12
+                fig1.add_annotation(
+                    x=_yr, y=_y_text, xref="x", yref="paper",
+                    text=f"<b>{_yr}</b>",
+                    showarrow=False,
+                    font=dict(size=10, color=THEME["primary"], family="Arial, Helvetica, sans-serif"),
+                    yanchor="bottom", xanchor="center",
+                )
 
         # Partial-year marker
         _current_year = pd.Timestamp.now().year
