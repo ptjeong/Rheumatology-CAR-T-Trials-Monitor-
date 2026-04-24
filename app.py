@@ -2000,89 +2000,95 @@ with tab_geo:
 
         country_counts = _attach_iso3(country_counts)
 
-        # Pill control for layer toggles. One map, two traces (choropleth + site dots).
-        _geo_layers = st.pills(
-            "Map layers",
-            options=["Country counts", "Open sites"],
-            default=["Country counts", "Open sites"],
-            selection_mode="multi",
-            label_visibility="collapsed",
-            key="geo_layers_world",
-        ) or []
-
+        # Prep outside the fragment: geo_sites is session-cached upstream.
+        # Fragment captures country_counts + geo_sites via closure; only the
+        # map + caption rerun when layer pills toggle.
         geo_sites = _get_geo_sites()
 
-        fig_world = go.Figure()
-        if "Country counts" in _geo_layers:
-            fig_world.add_trace(
-                go.Choropleth(
-                    locations=country_counts["Iso3"],
-                    locationmode="ISO-3",
-                    z=country_counts["Count"],
-                    text=country_counts["Country"],
-                    hovertemplate="<b>%{text}</b><br>%{z} trials<extra></extra>",
-                    colorscale=[
-                        [0.00, "#dbeafe"],
-                        [0.30, "#93c5fd"],
-                        [0.55, "#3b82f6"],
-                        [0.75, "#1d4ed8"],
-                        [1.00, "#1e3a8a"],
-                    ],
-                    colorbar=dict(title="No. of trials", thickness=12, len=0.6),
-                    marker_line_color="rgba(255,255,255,0.6)",
-                    marker_line_width=0.4,
+        @st.fragment
+        def _render_world_map(country_counts: pd.DataFrame, geo_sites: pd.DataFrame) -> None:
+            _layers = st.pills(
+                "Map layers",
+                options=["Country counts", "Open sites"],
+                default=["Country counts", "Open sites"],
+                selection_mode="multi",
+                label_visibility="collapsed",
+                key="geo_layers_world",
+            ) or []
+
+            fig_world = go.Figure()
+            if "Country counts" in _layers:
+                fig_world.add_trace(
+                    go.Choropleth(
+                        locations=country_counts["Iso3"],
+                        locationmode="ISO-3",
+                        z=country_counts["Count"],
+                        text=country_counts["Country"],
+                        hovertemplate="<b>%{text}</b><br>%{z} trials<extra></extra>",
+                        colorscale=[
+                            [0.00, "#dbeafe"],
+                            [0.30, "#93c5fd"],
+                            [0.55, "#3b82f6"],
+                            [0.75, "#1d4ed8"],
+                            [1.00, "#1e3a8a"],
+                        ],
+                        colorbar=dict(title="No. of trials", thickness=12, len=0.6),
+                        marker_line_color="rgba(255,255,255,0.6)",
+                        marker_line_width=0.4,
+                    )
                 )
-            )
-        if "Open sites" in _geo_layers and not geo_sites.empty:
-            _site_label = (
-                geo_sites["Facility"].fillna("").astype(str)
-                + " · " + geo_sites["City"].fillna("").astype(str)
-                + ", " + geo_sites["Country"].fillna("").astype(str)
-                + "<br>" + geo_sites["NCTId"].fillna("").astype(str)
-            )
-            fig_world.add_trace(
-                go.Scattergeo(
-                    lon=geo_sites["Longitude"],
-                    lat=geo_sites["Latitude"],
-                    text=_site_label,
-                    hovertemplate="%{text}<extra></extra>",
-                    mode="markers",
-                    marker=dict(
-                        size=5.5,
-                        color="#d97706",  # amber-600 — contrasts with blue choropleth
-                        opacity=0.78,
-                        line=dict(width=0.3, color="#ffffff"),
-                    ),
-                    name="Open site",
-                    showlegend=False,
+            if "Open sites" in _layers and not geo_sites.empty:
+                _site_label = (
+                    geo_sites["Facility"].fillna("").astype(str)
+                    + " · " + geo_sites["City"].fillna("").astype(str)
+                    + ", " + geo_sites["Country"].fillna("").astype(str)
+                    + "<br>" + geo_sites["NCTId"].fillna("").astype(str)
                 )
+                fig_world.add_trace(
+                    go.Scattergeo(
+                        lon=geo_sites["Longitude"],
+                        lat=geo_sites["Latitude"],
+                        text=_site_label,
+                        hovertemplate="%{text}<extra></extra>",
+                        mode="markers",
+                        marker=dict(
+                            size=5.5,
+                            color="#d97706",  # amber-600 — contrasts with blue choropleth
+                            opacity=0.78,
+                            line=dict(width=0.3, color="#ffffff"),
+                        ),
+                        name="Open site",
+                        showlegend=False,
+                    )
+                )
+            fig_world.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color=THEME["text"]),
+                height=480,
+                geo=dict(
+                    bgcolor="rgba(0,0,0,0)",
+                    lakecolor="#ddeeff",
+                    landcolor="#e9ecef",
+                    showframe=False,
+                    showcoastlines=False,
+                    showcountries=True,
+                    countrycolor="rgba(0,0,0,0.12)",
+                    projection_type="natural earth",
+                    scope="world",
+                    lataxis=dict(range=[-58, 80]),
+                    lonaxis=dict(range=[-175, 190]),
+                ),
             )
-        fig_world.update_layout(
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color=THEME["text"]),
-            height=480,
-            geo=dict(
-                bgcolor="rgba(0,0,0,0)",
-                lakecolor="#ddeeff",
-                landcolor="#e9ecef",
-                showframe=False,
-                showcoastlines=False,
-                showcountries=True,
-                countrycolor="rgba(0,0,0,0.12)",
-                projection_type="natural earth",
-                scope="world",
-                lataxis=dict(range=[-58, 80]),
-                lonaxis=dict(range=[-175, 190]),
-            ),
-        )
-        st.plotly_chart(fig_world, width='stretch')
-        if "Open sites" in _geo_layers and not geo_sites.empty:
-            st.caption(
-                f"{len(geo_sites):,} open / recruiting site locations plotted. "
-                "Choropleth counts unique trials per country; dots mark individual sites."
-            )
+            st.plotly_chart(fig_world, width='stretch')
+            if "Open sites" in _layers and not geo_sites.empty:
+                st.caption(
+                    f"{len(geo_sites):,} open / recruiting site locations plotted. "
+                    "Choropleth counts unique trials per country; dots mark individual sites."
+                )
+
+        _render_world_map(country_counts, geo_sites)
 
         c1, c2 = st.columns([1.15, 0.85])
         with c1:
@@ -3825,70 +3831,76 @@ with tab_pub:
             '</div>',
             unsafe_allow_html=True,
         )
-        _fig7b_mode = st.pills(
-            "Scale",
-            options=["Absolute", "% of year"],
-            default="Absolute",
-            selection_mode="single",
-            label_visibility="collapsed",
-            key="fig7b_mode",
-        ) or "Absolute"
-        # Rheum CAR-T activity before ~2019 is one or two trials per year at
-        # most — restricting to ≥2019 avoids noisy early bars that dominate the
-        # "% of year" view. Applied to both modes for visual consistency.
-        mod_year = (
+        # Prep outside the fragment: groupby runs once per filter change, not per
+        # pill click. Rheum CAR-T activity before ~2019 is one or two trials per
+        # year at most — restricting to ≥2019 avoids noisy early bars dominating
+        # the "% of year" view.
+        _mod_year_raw = (
             df_innov[df_innov["StartYear"] >= 2019]
             .groupby(["StartYear", "Modality"]).size()
             .reset_index(name="Trials")
         )
-        # keep only modalities that actually appear
-        present_mods = [m for m in _MODALITY_ORDER if m in mod_year["Modality"].unique()]
-        mod_year_plot = mod_year[mod_year["Modality"].isin(present_mods)].copy()
+        _present_mods = [m for m in _MODALITY_ORDER if m in _mod_year_raw["Modality"].unique()]
+        _mod_year_base = _mod_year_raw[_mod_year_raw["Modality"].isin(_present_mods)].copy()
 
-        if _fig7b_mode == "% of year":
-            _year_tot = mod_year_plot.groupby("StartYear")["Trials"].transform("sum")
-            mod_year_plot["Share"] = (mod_year_plot["Trials"] / _year_tot * 100).fillna(0)
-            _y_col, _y_title, _y_tick = "Share", "Share of trials (%)", "%"
-        else:
-            _y_col, _y_title, _y_tick = "Trials", "Number of trials", ""
+        @st.fragment
+        def _render_fig7b(mod_year_base: pd.DataFrame) -> None:
+            _mode = st.pills(
+                "Scale",
+                options=["Absolute", "% of year"],
+                default="Absolute",
+                selection_mode="single",
+                label_visibility="collapsed",
+                key="fig7b_mode",
+            ) or "Absolute"
 
-        fig7b = px.bar(
-            mod_year_plot,
-            x="StartYear", y=_y_col, color="Modality",
-            barmode="stack", height=400, template="plotly_white",
-            color_discrete_map=_MODALITY_COLORS,
-            category_orders={"Modality": _MODALITY_ORDER},
-            labels={"StartYear": "Start year", _y_col: _y_title},
-        )
-        fig7b.update_traces(marker_line_width=0, opacity=1)
-        fig7b.update_layout(
-            **PUB_BASE,
-            margin=dict(l=64, r=36, t=24, b=130),
-            xaxis=dict(
-                tickmode="linear", dtick=1, tickformat="d", showgrid=False,
-                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
-                ticks="outside", ticklen=6, tickwidth=1.2,
-                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
-            ),
-            yaxis=dict(
-                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
-                showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
-                ticks="outside", ticklen=6, tickwidth=1.2,
-                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
-                zeroline=False,
-                ticksuffix=_y_tick,
-                range=[0, 100] if _fig7b_mode == "% of year" else None,
-            ),
-            legend=dict(
-                orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
-                font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
-                borderwidth=0,
-            ),
-            xaxis_title="Start year",
-            yaxis_title=_y_title,
-        )
-        st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
-        st.caption("Restricted to trials with start year ≥ 2019.")
+            mod_year_plot = mod_year_base.copy()
+            if _mode == "% of year":
+                _year_tot = mod_year_plot.groupby("StartYear")["Trials"].transform("sum")
+                mod_year_plot["Share"] = (mod_year_plot["Trials"] / _year_tot * 100).fillna(0)
+                _y_col, _y_title, _y_tick = "Share", "Share of trials (%)", "%"
+            else:
+                _y_col, _y_title, _y_tick = "Trials", "Number of trials", ""
+
+            fig7b = px.bar(
+                mod_year_plot,
+                x="StartYear", y=_y_col, color="Modality",
+                barmode="stack", height=400, template="plotly_white",
+                color_discrete_map=_MODALITY_COLORS,
+                category_orders={"Modality": _MODALITY_ORDER},
+                labels={"StartYear": "Start year", _y_col: _y_title},
+            )
+            fig7b.update_traces(marker_line_width=0, opacity=1)
+            fig7b.update_layout(
+                **PUB_BASE,
+                margin=dict(l=64, r=36, t=24, b=130),
+                xaxis=dict(
+                    tickmode="linear", dtick=1, tickformat="d", showgrid=False,
+                    showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                    ticks="outside", ticklen=6, tickwidth=1.2,
+                    tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+                ),
+                yaxis=dict(
+                    showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                    showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+                    ticks="outside", ticklen=6, tickwidth=1.2,
+                    tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+                    zeroline=False,
+                    ticksuffix=_y_tick,
+                    range=[0, 100] if _mode == "% of year" else None,
+                ),
+                legend=dict(
+                    orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
+                    font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
+                    borderwidth=0,
+                ),
+                xaxis_title="Start year",
+                yaxis_title=_y_title,
+            )
+            st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
+            st.caption("Restricted to trials with start year ≥ 2019.")
+
+        _render_fig7b(_mod_year_base)
 
         # Summary stats
         total_prod = len(df_innov)
