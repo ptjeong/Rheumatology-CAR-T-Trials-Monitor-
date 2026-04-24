@@ -616,6 +616,13 @@ st.markdown(
         color: {THEME["muted"]};
         margin-top: 0.15rem;
     }}
+    .pub-fig-caption {{
+        font-size: 0.72rem;
+        font-style: italic;
+        color: {THEME["faint"]};
+        margin: 0.4rem 0 0.8rem 0;
+        line-height: 1.45;
+    }}
     /* Don't double-stroke the auto h3 border on figure headers */
     .pub-fig-header + div h3,
     .pub-fig-header ~ div[data-testid="stVerticalBlock"] h3 {{
@@ -1855,6 +1862,18 @@ def _pub_header(figure_num: str, title: str, subtitle: str | None = None) -> Non
         unsafe_allow_html=True,
     )
 
+
+def _pub_caption(n: int, extra: str | None = None) -> None:
+    """Render a small muted caption beneath a publication figure, noting the
+    number of filtered trials and pointing to the CSV provenance header."""
+    extra_html = f" {extra}" if extra else ""
+    st.markdown(
+        f'<div class="pub-fig-caption">n = {n:,} trials in the filtered set. '
+        f'Full filter state and data source recorded in the CSV export header.'
+        f'{extra_html}</div>',
+        unsafe_allow_html=True,
+    )
+
 _V_XAXIS = dict(
     showline=True, linewidth=1.5, linecolor=_AX_COLOR, mirror=False,
     showgrid=False, ticks="outside", ticklen=6, tickwidth=1.2,
@@ -1997,6 +2016,7 @@ with tab_pub:
         c3.metric("Peak year", f"{peak_year} (n={peak_n})")
         c4.metric("CAGR (first → last year)", cagr_str)
 
+        _pub_caption(len(df_filt))
         st.download_button("Fig 1 data (CSV)",
                            _csv_with_provenance(fig1_data, "Fig 1 — Temporal trends"),
                            "fig1_temporal_trends.csv", "text/csv")
@@ -2035,6 +2055,7 @@ with tab_pub:
 
         fig2_csv = phase_counts[["Phase", "Trials"]].copy()
         fig2_csv["% of total"] = (fig2_csv["Trials"] / total_ph * 100).round(1)
+        _pub_caption(len(df_filt))
         st.download_button("Fig 2 data (CSV)",
                            _csv_with_provenance(fig2_csv, "Fig 2 — Phase distribution"),
                            "fig2_phase_distribution.csv", "text/csv")
@@ -2093,6 +2114,7 @@ with tab_pub:
 
         fig3_csv = target_counts.copy()
         fig3_csv["% of total"] = (fig3_csv["Trials"] / total_tg * 100).round(1)
+        _pub_caption(len(df_filt))
         st.download_button("Fig 3 data (CSV)",
                            _csv_with_provenance(fig3_csv, "Fig 3 — Target landscape"),
                            "fig3_target_landscape.csv", "text/csv")
@@ -2143,6 +2165,10 @@ with tab_pub:
 
         fig4_csv = disease_counts.copy()
         fig4_csv["% of total"] = (fig4_csv["Trials"] / total_dis * 100).round(1)
+        _pub_caption(
+            len(df_filt),
+            extra="Disease totals may exceed trial count because basket trials are attributed to multiple diseases."
+        )
         st.download_button("Fig 4 data (CSV)",
                            _csv_with_provenance(fig4_csv, "Fig 4 — Disease distribution"),
                            "fig4_disease_distribution.csv", "text/csv")
@@ -2222,6 +2248,10 @@ with tab_pub:
 
         fig5_csv = geo_counts.copy()
         fig5_csv["% of total"] = (fig5_csv["Trials"] / total_geo * 100).round(1)
+        _pub_caption(
+            len(df_filt),
+            extra="Multi-country trials are counted once per country."
+        )
         st.download_button("Fig 5 data (CSV)",
                            _csv_with_provenance(fig5_csv, "Fig 5 — Geographic distribution"),
                            "fig5_geographic_distribution.csv", "text/csv")
@@ -2393,6 +2423,10 @@ with tab_pub:
             product_year.rename(columns={"ProductType": "Category", "Trials": "n_product"}),
             df_innov.groupby(["StartYear", "Modality"]).size().reset_index(name="n_modality"),
             left_on="StartYear", right_on="StartYear", how="outer",
+        )
+        _pub_caption(
+            len(df_filt),
+            extra="Panel counts restricted to trials with a known start year."
         )
         st.download_button("Fig 6 data (CSV)",
                            _csv_with_provenance(fig6_csv, "Fig 6 — Innovation signals / cell therapy modality"),
@@ -2728,6 +2762,10 @@ with tab_pub:
                                      "ProductType", "Phase", "EnrollmentCount",
                                      "GeoGroup", "SponsorType"]].copy()
         fig7_csv = fig7_csv.sort_values("EnrollmentCount", ascending=False)
+        _pub_caption(
+            len(df_filt),
+            extra=f"Enrollment panels restricted to {len(df_enroll_known):,} trials with a numeric enrollment target."
+        )
         st.download_button("Fig 7 data (CSV)",
                            _csv_with_provenance(fig7_csv, "Fig 7 — Enrollment characteristics"),
                            "fig7_enrollment.csv", "text/csv")
