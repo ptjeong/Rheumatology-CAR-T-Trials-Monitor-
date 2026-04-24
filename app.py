@@ -2695,9 +2695,9 @@ with tab_pub:
                 hovertemplate="%{x}: %{y} trials<extra>" + _grp + "</extra>",
             ))
         _fig1_layout = {**PUB_LAYOUT}
-        # Extra top padding when the landmark overlay is on so the timeline
-        # pins above the plot area have room to render without clipping.
-        _fig1_layout["margin"] = dict(l=72, r=36, t=58 if _show_landmarks else 24, b=130)
+        # Slight extra top padding when the landmark overlay is on so the
+        # era label has room to render without touching the title bar.
+        _fig1_layout["margin"] = dict(l=72, r=36, t=42 if _show_landmarks else 24, b=130)
         fig1.update_layout(
             **_fig1_layout,
             xaxis_title="Start year",
@@ -2712,11 +2712,12 @@ with tab_pub:
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
         fig1.update_yaxes(rangemode="tozero")
 
-        # ── Landmark publications (timeline pins above plot area) ──────────
-        # Using short ticks + staggered labels above the chart rather than
-        # full-height vertical lines: five consecutive landmark years
-        # (2021-2025) rendered as full-height dashes looked like gridlines
-        # rather than discrete events.
+        # ── Landmark publications (single era callout, not per-year pins) ──
+        # Five consecutive landmark years (2021-2025) rendered as per-year
+        # markers read as uniform gridlines rather than signal. Instead,
+        # mark the single inflection that actually matters — the 2024 Müller
+        # NEJM series that preceded the >5× expansion in trial starts — and
+        # keep the per-year narrative in the caption below the chart.
         _landmarks = [
             (2021, "Mougiakakos SLE case (NEJM)"),
             (2022, "Mackensen 5-patient SLE series (Nat Med)"),
@@ -2724,22 +2725,30 @@ with tab_pub:
             (2024, "Müller 15-patient multi-disease series (NEJM)"),
             (2025, "First industry pivotal trials; in vivo CAR-T (NEJM letter)"),
         ]
-        if _show_landmarks and _yr_min is not None and _yr_max is not None:
-            _visible_landmarks = [(y, l) for y, l in _landmarks if _yr_min <= y <= _yr_max]
-            for i, (_yr, _label) in enumerate(_visible_landmarks):
-                # Short tick mark just above the plot area
+        _ERA_START = 2024  # inflection year: Müller NEJM multi-disease series
+        if _show_landmarks and _yr_min is not None and _yr_max is not None and _yr_max >= _ERA_START:
+            # Cap the era band at the last full year (don't overlap with the
+            # partial-year vrect drawn below).
+            _current_year = pd.Timestamp.now().year
+            _band_x1 = min(_yr_max, _current_year - 1) + 0.5
+            if _band_x1 > _ERA_START - 0.5:
+                fig1.add_vrect(
+                    x0=_ERA_START - 0.5, x1=_band_x1,
+                    fillcolor="rgba(29, 78, 216, 0.06)",  # very light NEJM blue
+                    line_width=0, layer="below",
+                )
+                # Single dashed boundary line at the 2024 inflection
                 fig1.add_shape(
                     type="line",
-                    x0=_yr, x1=_yr,
-                    y0=1.0, y1=1.035,
-                    xref="x", yref="paper",
-                    line=dict(color=THEME["muted"], width=1),
+                    x0=_ERA_START - 0.5, x1=_ERA_START - 0.5,
+                    y0=0, y1=1, xref="x", yref="paper",
+                    line=dict(color=THEME["muted"], width=1, dash="dash"),
                 )
-                # Stagger year labels (two rows) so adjacent-year pins don't collide
-                _y_text = 1.055 if i % 2 == 0 else 1.12
+                # Era label at top-center of the band
                 fig1.add_annotation(
-                    x=_yr, y=_y_text, xref="x", yref="paper",
-                    text=f"<b>{_yr}</b>",
+                    x=(_ERA_START - 0.5 + _band_x1) / 2, y=1.02,
+                    xref="x", yref="paper",
+                    text="<b>Multi-disease expansion era</b> (post-Müller 2024)",
                     showarrow=False,
                     font=dict(size=10, color=THEME["primary"], family="Arial, Helvetica, sans-serif"),
                     yanchor="bottom", xanchor="center",
