@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from datetime import date, datetime, timezone
 
@@ -2986,7 +2987,7 @@ with tab_pub:
     # Fig 2 — Phase distribution
     # ------------------------------------------------------------------
     _pub_header("2", "Distribution of clinical trial phases",
-                "Number of trials at each clinical development stage.")
+                "Horizontal bars by phase, split by sponsor sector (Academic vs Industry).")
 
     phase_counts = (
         df_filt.groupby("PhaseOrdered", observed=False).size().reset_index(name="Trials")
@@ -2999,9 +3000,46 @@ with tab_pub:
     phase_counts = phase_counts.sort_values("Phase")
 
     if not phase_counts.empty:
-        fig2 = pub_bar(phase_counts, "Phase", "Trials", color=NEJM_BLUE,
-                       title="Distribution of Clinical Trial Phases", xlab="Phase")
-        fig2.update_xaxes(categoryorder="array", categoryarray=[PHASE_LABELS[p] for p in PHASE_ORDER])
+        _phase_order = [PHASE_LABELS[p] for p in PHASE_ORDER
+                        if PHASE_LABELS[p] in phase_counts["Phase"].astype(str).tolist()]
+
+        _sp = df_filt.copy()
+        _sp["Phase"] = _sp["PhaseOrdered"].astype(str).map(PHASE_LABELS)
+        _sp["SponsorBucket"] = _sp["SponsorType"].where(
+            _sp["SponsorType"].isin(["Academic", "Industry"]), "Other"
+        )
+        phase_by_sp = (
+            _sp.groupby(["Phase", "SponsorBucket"], observed=False).size()
+            .reset_index(name="Trials")
+        )
+        phase_by_sp = phase_by_sp[phase_by_sp["Trials"] > 0]
+
+        _sp_colors = {"Academic": NEJM_BLUE, "Industry": NEJM_AMBER, "Other": "#94a3b8"}
+        fig2 = go.Figure()
+        for bucket in ["Academic", "Industry", "Other"]:
+            sub = phase_by_sp[phase_by_sp["SponsorBucket"] == bucket]
+            if sub.empty:
+                continue
+            fig2.add_trace(go.Bar(
+                y=sub["Phase"],
+                x=sub["Trials"],
+                name=bucket,
+                orientation="h",
+                marker_color=_sp_colors[bucket],
+                hovertemplate=f"<b>{bucket}</b> · %{{y}}<br>%{{x}} trials<extra></extra>",
+            ))
+        fig2.update_layout(
+            barmode="stack",
+            template="plotly_white",
+            height=max(320, 52 * len(_phase_order) + 80),
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis_title="Trials",
+            yaxis=dict(
+                categoryorder="array",
+                categoryarray=list(reversed(_phase_order)),  # earliest phase at top
+            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
         st.plotly_chart(fig2, width='stretch', config=PUB_EXPORT)
 
         total_ph = phase_counts["Trials"].sum()
@@ -3012,12 +3050,15 @@ with tab_pub:
         c2.metric("Late-phase (II+)", f"{late} ({100*late/total_ph:.0f}%)")
         c3.metric("Phase I/II (hybrid)", str(int(phase_counts.loc[phase_counts["Phase"] == "Phase I/II", "Trials"].sum())))
 
-        fig2_csv = phase_counts[["Phase", "Trials"]].copy()
-        fig2_csv["% of total"] = (fig2_csv["Trials"] / total_ph * 100).round(1)
+        fig2_csv = (
+            phase_by_sp.pivot(index="Phase", columns="SponsorBucket", values="Trials")
+            .fillna(0).astype(int).reset_index()
+        )
+        fig2_csv["Total"] = fig2_csv.drop(columns=["Phase"]).sum(axis=1)
         _pub_caption(len(df_filt))
         st.download_button("Fig 2 data (CSV)",
-                           _csv_with_provenance(fig2_csv, "Fig 2 — Phase distribution"),
-                           "fig2_phase_distribution.csv", "text/csv")
+                           _csv_with_provenance(fig2_csv, "Fig 2 — Phase distribution by sponsor sector"),
+                           "fig2_phase_by_sponsor.csv", "text/csv")
     else:
         st.info("No phase data available.")
 
@@ -3144,7 +3185,7 @@ with tab_pub:
         )
         fig4a = px.histogram(
             df_enroll_plot, x="EnrollmentCount", nbins=40, height=400,
-            color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
+            color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
             labels={"EnrollmentCount": "Planned enrollment (patients)"},
         )
         fig4a.update_traces(marker_line_color="white", marker_line_width=0.4, opacity=0.9)
@@ -3200,13 +3241,16 @@ with tab_pub:
         )
         fig4b = px.bar(
             _phase_enroll, x="Phase", y="Median", height=380,
-            color_discrete_sequence=[NEJM_GREEN], template="plotly_white",
+            color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
             text="label",
+            error_y=_phase_enroll["Q3"] - _phase_enroll["Median"],
+            error_y_minus=_phase_enroll["Median"] - _phase_enroll["Q1"],
         )
         fig4b.update_traces(
             marker_line_width=0, opacity=1, width=0.6,
             textposition="outside", textfont=dict(size=10, color=_AX_COLOR),
             cliponaxis=False,
+            error_y=dict(color=_AX_COLOR, thickness=1.1, width=6),
         )
         fig4b.update_layout(
             **PUB_LAYOUT,
@@ -3215,63 +3259,16 @@ with tab_pub:
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
         st.plotly_chart(fig4b, width='stretch', config=PUB_EXPORT)
+        st.markdown(
+            '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
+            'Whiskers = IQR (Q1–Q3).'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
-        # 4c — Total enrolled patients by disease (enrollment-weighted landscape)
-        _dis_enroll_rows = []
-        for _, row in df_enroll_known.iterrows():
-            entities = [e.strip() for e in str(row.get("DiseaseEntities", "")).split("|") if e.strip()]
-            if not entities:
-                entities = [str(row.get("DiseaseEntity", "Unclassified"))]
-            for ent in entities:
-                _dis_enroll_rows.append({"Disease": ent, "Enrollment": row["EnrollmentCount"]})
-        if _dis_enroll_rows:
-            _dis_enroll_df = pd.DataFrame(_dis_enroll_rows)
-            _dis_enroll_agg = (
-                _dis_enroll_df.groupby("Disease")["Enrollment"]
-                .agg(TotalEnrolled="sum", Trials="count")
-                .reset_index()
-                .sort_values("TotalEnrolled", ascending=True)
-            )
-            _dis_enroll_agg["TotalEnrolled"] = _dis_enroll_agg["TotalEnrolled"].astype(int)
+        # (Former 4c — disease-level enrollment — has been merged into Fig 5.)
 
-            st.markdown(
-                '<div class="pub-fig-sub" style="margin-top: 1rem; '
-                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-                '<strong style="color: #0b1220;">4c — Total planned enrollment by disease</strong> '
-                '<span style="color: #94a3b8;">— enrollment-weighted disease landscape</span>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            fig4c = px.bar(
-                _dis_enroll_agg, x="TotalEnrolled", y="Disease", orientation="h",
-                height=max(380, len(_dis_enroll_agg) * 34 + 100),
-                color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
-                text="TotalEnrolled",
-            )
-            fig4c.update_traces(
-                marker_line_width=0, opacity=1,
-                texttemplate="%{text:,}", textposition="outside",
-                textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
-            )
-            fig4c.update_layout(
-                **PUB_BASE,
-                xaxis_title="Total planned patients (reported trials)",
-                yaxis_title=None, showlegend=False,
-                margin=dict(l=155, r=72, t=24, b=56),
-                yaxis=_H_YAXIS,
-                xaxis=_H_XAXIS,
-                uniformtext_minsize=9, uniformtext_mode="hide",
-            )
-            st.plotly_chart(fig4c, width='stretch', config=PUB_EXPORT)
-            st.markdown(
-                '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
-                'Basket trials counted once per enrolled disease · '
-                'Trials without reported enrollment excluded.'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-        # 4d — China vs Non-China  ·  Academic vs Industry
+        # 4c — China vs Non-China  ·  Academic vs Industry  (was 4d)
         def _geo_group(countries_str) -> str:
             if not countries_str or pd.isna(countries_str):
                 return "Unknown"
@@ -3345,7 +3342,7 @@ with tab_pub:
         st.markdown(
             '<div class="pub-fig-sub" style="margin-top: 1rem; '
             'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">4d — Enrollment by subgroup</strong> '
+            '<strong style="color: #0b1220;">4c — Enrollment by subgroup</strong> '
             '<span style="color: #94a3b8;">— median (dot) and IQR (whisker)</span>'
             '</div>',
             unsafe_allow_html=True,
@@ -3417,6 +3414,14 @@ with tab_pub:
                 font=dict(size=10, color=THEME["muted"]),
                 xanchor="left",
             )
+        _overall_median = int(df_enroll_known["EnrollmentCount"].median())
+        fig4d.add_vline(
+            x=_overall_median, line_dash="dash",
+            line_color=NEJM_RED, line_width=1.3,
+            annotation_text=f" Overall median = {_overall_median}",
+            annotation_position="top right",
+            annotation_font=dict(size=10, color=NEJM_RED),
+        )
         fig4d.update_layout(
             **PUB_BASE,
             margin=dict(l=220, r=120, t=24, b=64),
@@ -3438,7 +3443,7 @@ with tab_pub:
         st.plotly_chart(fig4d, width='stretch', config=PUB_EXPORT)
         st.markdown(
             '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
-            'Whiskers = IQR (Q1–Q3).'
+            f'Whiskers = IQR (Q1–Q3). Dashed line marks the overall median ({_overall_median} patients).'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -3466,7 +3471,7 @@ with tab_pub:
     # Fig 5 — Disease distribution
     # ------------------------------------------------------------------
     _pub_header("5", "Disease entity distribution",
-                "Trials per disease. Basket and multi-disease trials are counted once per enrolled disease.")
+                "Two panels: number of trials per disease (left) and total planned patients per disease (right). Basket and multi-disease trials are attributed to each enrolled disease.")
 
     _dis_vals = split_pipe_values(df_filt["DiseaseEntities"])
     disease_counts = (
@@ -3474,28 +3479,82 @@ with tab_pub:
         .value_counts().rename_axis("Disease").reset_index(name="Trials")
     ) if _dis_vals else pd.DataFrame(columns=["Disease", "Trials"])
 
+    # Disease × total enrollment (reported-enrollment subset)
+    _dis_enroll_rows = []
+    for _, row in df_enroll_known.iterrows():
+        entities = [e.strip() for e in str(row.get("DiseaseEntities", "")).split("|") if e.strip()]
+        if not entities:
+            entities = [str(row.get("DiseaseEntity", "Unclassified"))]
+        for ent in entities:
+            _dis_enroll_rows.append({"Disease": ent, "Enrollment": row["EnrollmentCount"]})
+    dis_enroll_agg = (
+        pd.DataFrame(_dis_enroll_rows)
+        .groupby("Disease")["Enrollment"]
+        .sum()
+        .reset_index(name="TotalEnrolled")
+    ) if _dis_enroll_rows else pd.DataFrame(columns=["Disease", "TotalEnrolled"])
+
     if not disease_counts.empty:
-        disease_sorted = disease_counts.sort_values("Trials", ascending=True)
-        fig5 = px.bar(
-            disease_sorted, x="Trials", y="Disease", orientation="h", height=max(380, len(disease_sorted) * 36 + 100),
-            color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
-            text="Trials",
+        # Shared disease ordering: ascending by trial count so largest sits at top.
+        disease_sorted = disease_counts.sort_values("Trials", ascending=True).copy()
+        disease_sorted = disease_sorted.merge(dis_enroll_agg, on="Disease", how="left")
+        disease_sorted["TotalEnrolled"] = disease_sorted["TotalEnrolled"].fillna(0).astype(int)
+        _disease_order = disease_sorted["Disease"].tolist()
+
+        _row_h = max(380, len(disease_sorted) * 36 + 120)
+        fig5 = make_subplots(
+            rows=1, cols=2,
+            shared_yaxes=True,
+            horizontal_spacing=0.08,
+            subplot_titles=("5a — Trials per disease", "5b — Total planned patients per disease"),
         )
-        fig5.update_traces(
-            marker_line_width=0, opacity=1,
-            texttemplate="%{text}", textposition="outside",
-            textfont=dict(size=10, color=_AX_COLOR), cliponaxis=False,
+        fig5.add_trace(
+            go.Bar(
+                x=disease_sorted["Trials"], y=disease_sorted["Disease"],
+                orientation="h", marker_color=NEJM_AMBER,
+                text=disease_sorted["Trials"], textposition="outside",
+                textfont=dict(size=10, color=_AX_COLOR),
+                hovertemplate="<b>%{y}</b><br>%{x} trials<extra></extra>",
+                cliponaxis=False,
+            ),
+            row=1, col=1,
+        )
+        fig5.add_trace(
+            go.Bar(
+                x=disease_sorted["TotalEnrolled"], y=disease_sorted["Disease"],
+                orientation="h", marker_color=NEJM_BLUE,
+                text=disease_sorted["TotalEnrolled"].apply(lambda v: f"{v:,}" if v else ""),
+                textposition="outside",
+                textfont=dict(size=10, color=_AX_COLOR),
+                hovertemplate="<b>%{y}</b><br>%{x:,} planned patients<extra></extra>",
+                cliponaxis=False,
+            ),
+            row=1, col=2,
         )
         fig5.update_layout(
             **PUB_BASE,
-            xaxis_title="Number of trials",
-            yaxis_title=None,
             showlegend=False,
-            margin=dict(l=160, r=56, t=24, b=56),
-            yaxis=_H_YAXIS,
-            xaxis=_H_XAXIS,
+            height=_row_h,
+            margin=dict(l=170, r=64, t=48, b=56),
             uniformtext_minsize=9, uniformtext_mode="hide",
+            bargap=0.35,
         )
+        fig5.update_yaxes(
+            categoryorder="array",
+            categoryarray=_disease_order,
+            showline=False, showgrid=False, ticks="",
+            tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+        )
+        fig5.update_xaxes(
+            showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+            showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+            ticks="outside", ticklen=6, tickwidth=1.2,
+            tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+            title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+            zeroline=False, rangemode="tozero",
+        )
+        fig5.update_xaxes(title_text="Number of trials", row=1, col=1)
+        fig5.update_xaxes(title_text="Total planned patients (reported trials)", row=1, col=2)
         st.plotly_chart(fig5, width='stretch', config=PUB_EXPORT)
 
         total_dis = disease_counts["Trials"].sum()
@@ -3504,14 +3563,21 @@ with tab_pub:
         for col, (_, row) in zip([c1, c2, c3], top3.iterrows()):
             col.metric(row["Disease"], f"{row['Trials']} ({100*row['Trials']/total_dis:.0f}%)")
 
-        fig5_csv = disease_counts.copy()
-        fig5_csv["% of total"] = (fig5_csv["Trials"] / total_dis * 100).round(1)
+        fig5_csv = (
+            disease_counts.merge(dis_enroll_agg, on="Disease", how="left")
+            .fillna({"TotalEnrolled": 0})
+        )
+        fig5_csv["TotalEnrolled"] = fig5_csv["TotalEnrolled"].astype(int)
+        fig5_csv["% of total (trials)"] = (fig5_csv["Trials"] / total_dis * 100).round(1)
         _pub_caption(
             len(df_filt),
-            extra="Disease totals may exceed trial count because basket trials are attributed to multiple diseases."
+            extra=(
+                "5a counts trials with at least one match for the disease (basket trials counted per disease). "
+                "5b restricted to trials with a numeric enrollment target."
+            ),
         )
         st.download_button("Fig 5 data (CSV)",
-                           _csv_with_provenance(fig5_csv, "Fig 5 — Disease distribution"),
+                           _csv_with_provenance(fig5_csv, "Fig 5 — Disease distribution (trials + planned patients)"),
                            "fig5_disease_distribution.csv", "text/csv")
     else:
         st.info("No disease data available.")
@@ -3543,6 +3609,21 @@ with tab_pub:
         _display_target_series.value_counts().rename_axis("Target").reset_index(name="Trials")
     )
 
+    def _target_class(target: str) -> str:
+        """Group antigen targets by mechanistic class for coloring."""
+        if not target or not isinstance(target, str):
+            return "Undisclosed / unclear"
+        t = target.lower()
+        if t.startswith("other (") or "unclear" in t or "undisclosed" in t:
+            return "Undisclosed / unclear"
+        if "dual" in t or "/" in t or "tri" in t:
+            return "Dual / multi-target"
+        if any(m in t for m in ["cd19", "cd20", "cd22", "cd79"]):
+            return "B-cell surface"
+        if "bcma" in t or "gprc5d" in t:
+            return "Plasma-cell"
+        return "Other / novel"
+
     if not target_counts.empty:
         # Keep top 15 targets; collapse the long tail into a single "Other" bucket
         # so the chart stays readable even as the landscape grows.
@@ -3557,10 +3638,28 @@ with tab_pub:
             target_display = pd.concat([_top, _tail_row], ignore_index=True)
         else:
             target_display = target_counts.copy()
+        target_display["Class"] = target_display["Target"].apply(_target_class)
         target_sorted = target_display.sort_values("Trials", ascending=True)
+
+        _CLASS_COLORS = {
+            "B-cell surface":      NEJM_BLUE,
+            "Plasma-cell":         NEJM_AMBER,
+            "Dual / multi-target": NEJM_GREEN,
+            "Other / novel":       "#7c3aed",
+            "Undisclosed / unclear": "#94a3b8",
+        }
+        _class_order = [c for c in
+                        ["B-cell surface", "Plasma-cell", "Dual / multi-target",
+                         "Other / novel", "Undisclosed / unclear"]
+                        if c in target_sorted["Class"].unique()]
+
         fig6 = px.bar(
-            target_sorted, x="Trials", y="Target", orientation="h", height=max(340, len(target_sorted) * 36 + 100),
-            color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
+            target_sorted, x="Trials", y="Target", orientation="h",
+            color="Class",
+            color_discrete_map=_CLASS_COLORS,
+            category_orders={"Class": _class_order},
+            height=max(340, len(target_sorted) * 36 + 120),
+            template="plotly_white",
             text="Trials",
         )
         fig6.update_traces(
@@ -3572,11 +3671,14 @@ with tab_pub:
             **PUB_BASE,
             xaxis_title="Number of trials",
             yaxis_title=None,
-            showlegend=False,
-            margin=dict(l=160, r=56, t=24, b=56),
+            margin=dict(l=160, r=56, t=48, b=56),
             yaxis=_H_YAXIS,
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                title_text="",
+            ),
         )
         st.plotly_chart(fig6, width='stretch', config=PUB_EXPORT)
 
@@ -3666,19 +3768,40 @@ with tab_pub:
             '</div>',
             unsafe_allow_html=True,
         )
+        _fig7b_mode = st.pills(
+            "Scale",
+            options=["Absolute", "% of year"],
+            default="Absolute",
+            selection_mode="single",
+            label_visibility="collapsed",
+            key="fig7b_mode",
+        ) or "Absolute"
+        # Rheum CAR-T activity before ~2019 is one or two trials per year at
+        # most — restricting to ≥2019 avoids noisy early bars that dominate the
+        # "% of year" view. Applied to both modes for visual consistency.
         mod_year = (
-            df_innov.groupby(["StartYear", "Modality"]).size()
+            df_innov[df_innov["StartYear"] >= 2019]
+            .groupby(["StartYear", "Modality"]).size()
             .reset_index(name="Trials")
         )
         # keep only modalities that actually appear
         present_mods = [m for m in _MODALITY_ORDER if m in mod_year["Modality"].unique()]
+        mod_year_plot = mod_year[mod_year["Modality"].isin(present_mods)].copy()
+
+        if _fig7b_mode == "% of year":
+            _year_tot = mod_year_plot.groupby("StartYear")["Trials"].transform("sum")
+            mod_year_plot["Share"] = (mod_year_plot["Trials"] / _year_tot * 100).fillna(0)
+            _y_col, _y_title, _y_tick = "Share", "Share of trials (%)", "%"
+        else:
+            _y_col, _y_title, _y_tick = "Trials", "Number of trials", ""
+
         fig7b = px.bar(
-            mod_year[mod_year["Modality"].isin(present_mods)],
-            x="StartYear", y="Trials", color="Modality",
+            mod_year_plot,
+            x="StartYear", y=_y_col, color="Modality",
             barmode="stack", height=400, template="plotly_white",
             color_discrete_map=_MODALITY_COLORS,
             category_orders={"Modality": _MODALITY_ORDER},
-            labels={"StartYear": "Start year", "Trials": "Number of trials"},
+            labels={"StartYear": "Start year", _y_col: _y_title},
         )
         fig7b.update_traces(marker_line_width=0, opacity=1)
         fig7b.update_layout(
@@ -3696,6 +3819,8 @@ with tab_pub:
                 ticks="outside", ticklen=6, tickwidth=1.2,
                 tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
                 zeroline=False,
+                ticksuffix=_y_tick,
+                range=[0, 100] if _fig7b_mode == "% of year" else None,
             ),
             legend=dict(
                 orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
@@ -3703,9 +3828,10 @@ with tab_pub:
                 borderwidth=0,
             ),
             xaxis_title="Start year",
-            yaxis_title="Number of trials",
+            yaxis_title=_y_title,
         )
         st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
+        st.caption("Restricted to trials with start year ≥ 2019.")
 
         # Summary stats
         total_prod = len(df_innov)
@@ -3881,7 +4007,7 @@ keywords (NIH, VA, DoD, Ministry of Health) were evaluated in priority order.
 Short alphabetic multi-token strings without organisational keywords —
 including those with medical-degree markers (M.D., Ph.D.) — were recognised
 as individual principal investigators and classified as Academic.
-Cross-tabulation of geography × sponsor type (Fig 4d) shows median planned
+Cross-tabulation of geography × sponsor type (Fig 4c) shows median planned
 enrollment and IQR (error bars) for each of the four strata.
 
 Data Processing
