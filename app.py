@@ -1937,10 +1937,15 @@ with tab_pub:
     # ------------------------------------------------------------------
     # Fig 1 — Temporal trends
     # ------------------------------------------------------------------
-    _pub_header("1", "Trials by start year",
-                "CAR-T and related cell therapies in autoimmune disease, 2015–present.")
-
     years_raw = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
+    _yr_min = int(years_raw.min()) if len(years_raw) else None
+    _yr_max = int(years_raw.max()) if len(years_raw) else None
+    _fig1_sub = (
+        f"CAR-T and related cell therapies in autoimmune disease, {_yr_min}–{_yr_max}."
+        if _yr_min is not None
+        else "CAR-T and related cell therapies in autoimmune disease."
+    )
+    _pub_header("1", "Trials by start year", _fig1_sub)
     fig1_data = (
         years_raw.value_counts().sort_index()
         .rename_axis("StartYear").reset_index(name="Trials")
@@ -2599,136 +2604,125 @@ with tab_pub:
 
         geo_stats  = _comparison_stats(df_enroll_known, "GeoGroup")
         spon_stats = _comparison_stats(df_enroll_known, "SponsorType")
-
-        def _make_compare_fig(stats_df: pd.DataFrame, title: str,
-                              color_map: dict, height: int = 340):
-            fig = px.bar(
-                stats_df, x="Group", y="Median", height=height,
-                color="Group", color_discrete_map=color_map,
-                template="plotly_white", text="Label",
-                error_y=stats_df["Q3"] - stats_df["Median"],
-                error_y_minus=stats_df["Median"] - stats_df["Q1"],
-            )
-            fig.update_traces(
-                marker_line_width=0, opacity=1, width=0.5,
-                textposition="outside", textfont=dict(size=10, color=_AX_COLOR),
-                cliponaxis=False,
-                error_y=dict(color=_AX_COLOR, thickness=1.2, width=6),
-            )
-            fig.update_layout(
-                **PUB_LAYOUT,
-                xaxis_title=None,
-                yaxis_title="Median planned enrollment (patients)",
-                showlegend=False,
-                uniformtext_minsize=9, uniformtext_mode="hide",
-            )
-            fig.add_annotation(
-                text="Error bars = IQR (Q1–Q3)",
-                xref="paper", yref="paper", x=0, y=-0.12,
-                showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
-            )
-            return fig
-
-        col_geo, col_spon = st.columns(2)
-        with col_geo:
-            if not geo_stats.empty:
-                st.markdown(
-                    '<div class="pub-fig-sub" style="margin-top: 1rem; '
-                    'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-                    '<strong style="color: #0b1220;">7d — Median enrollment: China vs non-China</strong>'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-                fig7d = _make_compare_fig(
-                    geo_stats, "",
-                    color_map={"China": NEJM_RED, "Non-China": NEJM_BLUE},
-                )
-                st.plotly_chart(fig7d, use_container_width=True, config=PUB_EXPORT)
-
-        with col_spon:
-            if not spon_stats.empty:
-                st.markdown(
-                    '<div class="pub-fig-sub" style="margin-top: 1rem; '
-                    'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-                    '<strong style="color: #0b1220;">7e — Median enrollment: academic vs industry sponsor</strong>'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-                fig7e = _make_compare_fig(
-                    spon_stats, "",
-                    color_map={"Academic": NEJM_GREEN, "Industry": NEJM_PURPLE},
-                )
-                st.plotly_chart(fig7e, use_container_width=True, config=PUB_EXPORT)
-
-        # 7f: Combined geography × sponsor type
-        cross_stats = (
+        cross_stats_raw = (
             df_enroll_known[
                 (df_enroll_known["GeoGroup"] != "Unknown") &
                 (df_enroll_known["SponsorType"] != "Unknown")
             ]
             .groupby(["GeoGroup", "SponsorType"])["EnrollmentCount"]
-            .agg(
-                Median="median",
-                Q1=lambda x: int(x.quantile(0.25)),
-                Q3=lambda x: int(x.quantile(0.75)),
-                N="count",
-            )
+            .agg(Median="median",
+                 Q1=lambda x: int(x.quantile(0.25)),
+                 Q3=lambda x: int(x.quantile(0.75)),
+                 N="count")
             .reset_index()
             .assign(Median=lambda d: d["Median"].astype(int))
-            .assign(Label=lambda d: d.apply(lambda r: f"n={r['N']}", axis=1))
         )
-        if not cross_stats.empty:
-            st.markdown(
-                '<div class="pub-fig-sub" style="margin-top: 1rem; '
-                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-                '<strong style="color: #0b1220;">7f — Median enrollment: geography × sponsor type</strong>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            _err_plus  = cross_stats["Q3"] - cross_stats["Median"]
-            _err_minus = cross_stats["Median"] - cross_stats["Q1"]
-            fig7f = px.bar(
-                cross_stats, x="SponsorType", y="Median",
-                color="GeoGroup", barmode="group", height=400,
-                color_discrete_map={"China": NEJM_RED, "Non-China": NEJM_BLUE},
-                template="plotly_white", text="Label",
-                error_y=_err_plus, error_y_minus=_err_minus,
-                labels={"SponsorType": "Sponsor type", "Median": "Median enrollment (patients)", "GeoGroup": ""},
-            )
-            fig7f.update_traces(
-                marker_line_width=0, opacity=1, width=0.35,
-                textposition="outside", textfont=dict(size=10, color=_AX_COLOR),
-                cliponaxis=False,
-                error_y=dict(color=_AX_COLOR, thickness=1.2, width=6),
-            )
-            fig7f.update_layout(
-                **PUB_LAYOUT,
-                xaxis_title=None,
-                yaxis_title="Median planned enrollment (patients)",
-                legend=dict(
-                    orientation="v", yanchor="top", y=0.98, xanchor="right", x=0.99,
-                    font=dict(size=10, color=_AX_COLOR),
-                    bgcolor="rgba(255,255,255,0.85)", bordercolor="rgba(0,0,0,0.08)",
-                    borderwidth=1,
-                ),
-                uniformtext_minsize=9, uniformtext_mode="hide",
-            )
-            fig7f.add_annotation(
-                text="Error bars = IQR (Q1–Q3)",
-                xref="paper", yref="paper", x=0, y=-0.14,
-                showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
-            )
-            st.plotly_chart(fig7f, use_container_width=True, config=PUB_EXPORT)
 
-        # Tabular summary
-        _cmp_summary = pd.DataFrame({
-            "Group": list(geo_stats["Group"]) + list(spon_stats["Group"]),
-            "Category": (["Geography"] * len(geo_stats)) + (["Sponsor type"] * len(spon_stats)),
-            "N (trials)": list(geo_stats["N"]) + list(spon_stats["N"]),
-            "Median enrollment": list(geo_stats["Median"]) + list(spon_stats["Median"]),
-            "IQR Q1": list(geo_stats["Q1"]) + list(spon_stats["Q1"]),
-            "IQR Q3": list(geo_stats["Q3"]) + list(spon_stats["Q3"]),
+        # ── Forest plot: one panel replacing the three previous comparison charts.
+        #    Rows are grouped vertically by category; dot = median, whisker = IQR.
+        st.markdown(
+            '<div class="pub-fig-sub" style="margin-top: 1rem; '
+            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+            '<strong style="color: #0b1220;">7d — Enrollment by subgroup</strong> '
+            '<span style="color: #94a3b8;">— median (dot) and IQR (whisker)</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        forest_rows = []
+        # Overall row
+        _all = df_enroll_known["EnrollmentCount"]
+        forest_rows.append({
+            "Category": "Overall", "Group": "All trials",
+            "Median": int(_all.median()),
+            "Q1": int(_all.quantile(0.25)), "Q3": int(_all.quantile(0.75)),
+            "N": int(len(_all)),
         })
+        # Geography subgroup
+        for _, r in geo_stats.iterrows():
+            forest_rows.append({
+                "Category": "Geography", "Group": r["Group"],
+                "Median": int(r["Median"]), "Q1": int(r["Q1"]), "Q3": int(r["Q3"]), "N": int(r["N"]),
+            })
+        # Sponsor subgroup
+        for _, r in spon_stats.iterrows():
+            forest_rows.append({
+                "Category": "Sponsor", "Group": r["Group"],
+                "Median": int(r["Median"]), "Q1": int(r["Q1"]), "Q3": int(r["Q3"]), "N": int(r["N"]),
+            })
+        # Cross-stratified subgroup
+        for _, r in cross_stats_raw.iterrows():
+            forest_rows.append({
+                "Category": "Geography × Sponsor",
+                "Group": f"{r['GeoGroup']} · {r['SponsorType']}",
+                "Median": int(r["Median"]), "Q1": int(r["Q1"]), "Q3": int(r["Q3"]), "N": int(r["N"]),
+            })
+        forest_df = pd.DataFrame(forest_rows)
+        forest_df["Label"] = forest_df.apply(
+            lambda r: f"{r['Category']}: {r['Group']}", axis=1
+        )
+        forest_df["NLabel"] = forest_df["N"].apply(lambda n: f"  Median {forest_df.loc[forest_df['N']==n, 'Median'].iloc[0]}  ·  n={n}")
+        # Reverse so Overall sits at the top of the chart (Plotly y axis flips)
+        forest_df = forest_df.iloc[::-1].reset_index(drop=True)
+
+        # Color per category
+        _CAT_COLORS = {
+            "Overall":             "#0b1220",
+            "Geography":           NEJM_BLUE,
+            "Sponsor":             NEJM_GREEN,
+            "Geography × Sponsor": NEJM_AMBER,
+        }
+        forest_df["Color"] = forest_df["Category"].map(_CAT_COLORS)
+
+        fig7d = px.scatter(
+            forest_df, x="Median", y="Label",
+            color="Category", color_discrete_map=_CAT_COLORS,
+            error_x=forest_df["Q3"] - forest_df["Median"],
+            error_x_minus=forest_df["Median"] - forest_df["Q1"],
+            height=max(360, 28 * len(forest_df) + 110),
+            template="plotly_white",
+        )
+        fig7d.update_traces(
+            marker=dict(size=11, line=dict(color="white", width=1.2)),
+            error_x=dict(color=_AX_COLOR, thickness=1.2, width=6),
+        )
+        # Sample-size annotations to the right of each whisker
+        for _, r in forest_df.iterrows():
+            fig7d.add_annotation(
+                x=r["Q3"], y=r["Label"], xref="x", yref="y",
+                text=f"  Median {r['Median']}  ·  n={r['N']}",
+                showarrow=False,
+                font=dict(size=10, color=THEME["muted"]),
+                xanchor="left",
+            )
+        fig7d.update_layout(
+            **PUB_BASE,
+            margin=dict(l=220, r=120, t=24, b=64),
+            xaxis=dict(
+                title="Median planned enrollment (patients)",
+                showline=True, linewidth=1.5, linecolor=_AX_COLOR,
+                showgrid=True, gridcolor=_GRID_CLR, gridwidth=0.7,
+                ticks="outside", ticklen=6, tickwidth=1.2,
+                tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+                title_font=dict(size=_LAB_SZ, color=_AX_COLOR),
+                zeroline=False, rangemode="tozero",
+            ),
+            yaxis=dict(
+                title=None, showline=False, showgrid=False,
+                ticks="", tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
+            ),
+            showlegend=False,
+        )
+        fig7d.add_annotation(
+            text="Whiskers = IQR (Q1–Q3)",
+            xref="paper", yref="paper", x=0, y=-0.10,
+            showarrow=False, font=dict(size=10, color="#555555"), xanchor="left",
+        )
+        st.plotly_chart(fig7d, use_container_width=True, config=PUB_EXPORT)
+
+        # Tabular summary (inputs to forest plot, in display order)
+        _cmp_summary = forest_df[["Category", "Group", "N", "Median", "Q1", "Q3"]].iloc[::-1].reset_index(drop=True)
+        _cmp_summary = _cmp_summary.rename(columns={"N": "N (trials)", "Median": "Median enrollment", "Q1": "IQR Q1", "Q3": "IQR Q3"})
 
         fig7_csv = df_enroll_known[["NCTId", "BriefTitle", "DiseaseEntity", "TargetCategory",
                                      "ProductType", "Phase", "EnrollmentCount",

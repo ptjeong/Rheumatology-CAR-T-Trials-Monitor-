@@ -374,6 +374,8 @@ NAMED_PRODUCT_TARGETS = {
     "Other_or_unknown": [
         "lucar-dks1",                       # NK-cell product, antigen undisclosed
         "sbt777101",                        # HS treatment (Starpax Bio)
+        "cptx2309",                         # In vivo CAR delivery, antigen undisclosed
+        "hn2301", "hn2302",                 # MagicRNA mRNA-LNP in vivo, antigen undisclosed
     ],
 }
 
