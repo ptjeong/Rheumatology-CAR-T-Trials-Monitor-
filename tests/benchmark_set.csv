@@ -1,21 +1,43 @@
-# Locked benchmark of 12 pivotal/representative rheum CAR-T trials.
+# Locked benchmark of pivotal/representative rheum CAR-T trials.
 # Ground-truth labels were curated from CT.gov and the published literature,
 # then cross-checked against the 2026-04-25 snapshot. Re-classification by the
-# pipeline is verified per-axis in tests/test_benchmark.py.
+# pipeline (live, not snapshot-frozen) is verified per-axis in
+# tests/test_benchmark.py.
 #
 # Axes mirror the pipeline's classifier outputs (no Branch — rheum is a single
 # branch). DiseaseEntity uses the closed vocabulary from config.DISEASE_ENTITIES
 # plus the special labels Basket/Multidisease and Other immune-mediated.
+#
+# Coverage targets (REVIEW.md Phase 1 expansion):
+#  - Every disease entity the pipeline can emit (SLE, SSc, Sjogren, CTD_other,
+#    IIM, AAV, RA, IgG4-RD, cGVHD, Other immune-mediated, Basket/Multidisease)
+#    except Behcet (zero trials in the snapshot).
+#  - Every ProductType bucket (Autologous, Allogeneic/Off-the-shelf, In vivo,
+#    Unclear).
+#  - Every Modality bucket actually present in the snapshot (Auto CAR-T,
+#    Allo CAR-T, CAR-NK, CAR-γδ T, CAR-Treg, In vivo CAR, CAR-T (unclear)).
+#  - Both academic and industry sponsorship within each disease where possible.
+#  - The CTD_other + SLE basket case (NCT07490041) — regression for
+#    pipeline.py:164 (CTD_other was missing from _SYSTEMIC_DISEASES).
 NCTId,DiseaseEntity,TargetCategory,ProductType,Modality,SponsorType,TrialDesign,Source
 NCT06585514,SLE,CD19,Autologous,Auto CAR-T,Academic,Single disease,Anti-CD19 CAR-T for refractory SLE (academic)
 NCT06342960,SLE,CD19,Autologous,Auto CAR-T,Industry,Single disease,KYV-101 KYSA-3 SLE (Kyverna)
 NCT06328777,SSc,CD19,Autologous,Auto CAR-T,Industry,Single disease,CABA-201 RESET-SSc (Cabaletta)
+NCT06414135,SSc,CD19,Autologous,Auto CAR-T,Academic,Single disease,Relma-cel SSc (academic)
 NCT06154252,IIM,CD19,Autologous,Auto CAR-T,Industry,Single disease,CABA-201 RESET-Myositis (Cabaletta)
 NCT06298019,IIM,CD19,Autologous,Auto CAR-T,Academic,Single disease,KYV-101 dermatomyositis (academic)
+NCT07391605,IIM,BCMA,Autologous,Auto CAR-T,Industry,Single disease,Descartes-08 BCMA myositis (Cartesian)
 NCT06868290,AAV,CD19,Autologous,Auto CAR-T,Industry,Single disease,Rapcabtagene autoleucel GPA/MPA (Novartis)
 NCT06590545,AAV,CD19,Autologous,Auto CAR-T,Academic,Single disease,Anti-CD19 CAR-T ANCA vasculitis (academic)
+NCT07033299,AAV,CD19/CD20 dual,Allogeneic/Off-the-shelf,Allo CAR-T,Academic,Single disease,CT1192 CD19/CD20 dual allo AAV (academic)
 NCT05085431,Sjogren,CD19/BCMA dual,Autologous,Auto CAR-T,Academic,Single disease,CD19/BCMA CAR-T Sjogren (academic)
 NCT07100873,RA,CD20,Allogeneic/Off-the-shelf,CAR-γδ T,Industry,Single disease,ADI-001 CD20 γδ CAR-T in RA (Adicet)
+NCT06475495,RA,CD19,Autologous,Auto CAR-T,Academic,Single disease,Rituximab vs anti-CD19 CAR-T RA (academic)
 NCT07148791,IgG4-RD,CD19/BCMA dual,Autologous,Auto CAR-T,Academic,Single disease,BCMA-CD19 CAR-T IgG4-RD (academic)
+NCT07152223,CTD_other,CD19/BCMA dual,Autologous,Auto CAR-T,Industry,Single disease,CD19-BCMA CAR-T connective tissue disease
+NCT07490041,Basket/Multidisease,CD19/BCMA dual,Allogeneic/Off-the-shelf,CAR-NK,Academic,Basket/Multidisease,Pediatric rheumatic diseases CAR-NK (CTD_other+SLE; regression evidence for pipeline.py:164)
+NCT05993611,cGVHD,CD6,Allogeneic/Off-the-shelf,CAR-Treg,Academic,Single disease,Allogeneic CD6 CAR-Treg cGVHD (academic)
 NCT06255028,Basket/Multidisease,CD19,Allogeneic/Off-the-shelf,CAR-NK,Industry,Basket/Multidisease,CNTY-101 iPSC CAR-NK B-cell autoimmune (Century)
+NCT06318533,Basket/Multidisease,CD19,Allogeneic/Off-the-shelf,CAR-NK,Academic,Basket/Multidisease,CD19 CAR-NK refractory B-cell autoimmune (academic)
 NCT07333677,Other immune-mediated,CD19,In vivo,In vivo CAR,Academic,Single disease,In vivo CAR-T Graves' disease
+NCT07412210,SLE,Other_or_unknown,Unclear,CAR-T (unclear),Academic,Single disease,ES-NK injection refractory lupus nephritis (Unclear ProductType regression case)
