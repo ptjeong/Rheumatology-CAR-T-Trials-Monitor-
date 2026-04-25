@@ -1257,7 +1257,13 @@ else:
         else:
             st.caption("No snapshots yet — save one below to pin it later.")
         if st.button("Save current as snapshot", use_container_width=True):
-            snap_date = save_snapshot(df, df_sites, prisma_counts, statuses=None)
+            with st.spinner("Saving snapshot (incl. geo backfill for any missing site coords)..."):
+                # backfill_geo=True means newly saved snapshots are geo-complete
+                # on day one (Phase 2 of REVIEW.md). Older snapshots can still
+                # be patched retroactively via scripts/backfill_site_geo.py.
+                snap_date = save_snapshot(
+                    df, df_sites, prisma_counts, statuses=None, backfill_geo=True,
+                )
             st.success(f"Saved snapshot: {snap_date}")
             st.cache_data.clear()
 

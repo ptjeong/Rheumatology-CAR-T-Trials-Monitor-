@@ -956,12 +956,89 @@ def build_sites_dataframe(max_records: int = 1000, statuses: list[str] | None = 
 # Snapshot I/O
 # ---------------------------------------------------------------------------
 
+def backfill_site_geo(df_sites: pd.DataFrame, *, batch_size: int = 100,
+                       sleep_between_batches: float = 0.25) -> pd.DataFrame:
+    """Patch a sites DataFrame with geoPoint.lat / lon for every row that
+    lacks them. Returns a new DataFrame; never mutates the input.
+
+    Re-fetches CT.gov in batches of 100 NCT IDs, extracts geoPoint per
+    location, and merges by (NCTId, Facility, City, Country). Existing
+    Latitude / Longitude values are preserved — only blanks are filled.
+
+    The standalone scripts/backfill_site_geo.py CLI also calls this so
+    the runtime path and the retroactive-snapshot path share one
+    implementation. (Phase 2 of REVIEW.md.)
+    """
+    out = df_sites.copy()
+    for col in ("Latitude", "Longitude"):
+        if col not in out.columns:
+            out[col] = pd.NA
+    if out.empty:
+        return out
+
+    needs_geo = out["Latitude"].isna() | out["Longitude"].isna()
+    if not needs_geo.any():
+        return out
+
+    nct_ids = sorted(out.loc[needs_geo, "NCTId"].dropna().unique().tolist())
+    if not nct_ids:
+        return out
+
+    lookup: dict[tuple[str, str, str, str], tuple[float, float]] = {}
+    for i in range(0, len(nct_ids), batch_size):
+        batch = nct_ids[i : i + batch_size]
+        params = {
+            "filter.ids": ",".join(batch),
+            "fields": "NCTId,ContactsLocationsModule",
+            "pageSize": batch_size,
+            "format": "json",
+        }
+        try:
+            resp = _request_with_retry(BASE_URL, params)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+        except Exception:
+            # Backfill is best-effort; a transient failure on one batch
+            # shouldn't fail the parent save_snapshot. Operator can re-run
+            # scripts/backfill_site_geo.py against the saved snapshot.
+            continue
+        for study in data.get("studies", []):
+            ps = study.get("protocolSection", {}) or {}
+            ident = ps.get("identificationModule", {}) or {}
+            nct = ident.get("nctId") or ""
+            loc_mod = ps.get("contactsLocationsModule", {}) or {}
+            for loc in (loc_mod.get("locations") or []):
+                gp = loc.get("geoPoint") or {}
+                lat, lon = gp.get("lat"), gp.get("lon")
+                if lat is None or lon is None:
+                    continue
+                key = (
+                    str(nct), str(loc.get("facility") or ""),
+                    str(loc.get("city") or ""), str(loc.get("country") or ""),
+                )
+                lookup[key] = (float(lat), float(lon))
+        time.sleep(sleep_between_batches)
+
+    for idx in out.index[needs_geo]:
+        row = out.loc[idx]
+        key = (
+            str(row.get("NCTId") or ""), str(row.get("Facility") or ""),
+            str(row.get("City") or ""), str(row.get("Country") or ""),
+        )
+        hit = lookup.get(key)
+        if hit:
+            out.at[idx, "Latitude"], out.at[idx, "Longitude"] = hit
+    return out
+
+
 def save_snapshot(
     df: pd.DataFrame,
     df_sites: pd.DataFrame,
     prisma: dict,
     snapshot_dir: str = "snapshots",
     statuses: list[str] | None = None,
+    backfill_geo: bool = False,
 ) -> str:
     """Save a frozen dataset to snapshots/<date>/. Returns the snapshot date string.
 
@@ -972,10 +1049,19 @@ def save_snapshot(
       * metadata.json carries snapshot_date but NOT a wall-clock timestamp;
         the per-run wall clock lives in `runinfo.json` alongside it (kept
         out of any byte-identity comparison).
+
+    backfill_geo: when True (default False — non-breaking for existing
+    callers and tests), runs `backfill_site_geo` against df_sites before
+    sorting + writing so the saved snapshot is geo-complete on day one.
+    The app's "Save snapshot" button opts in; tests / dev callers stay
+    network-free unless they pass True explicitly.
     """
     snapshot_date = datetime.utcnow().date().isoformat()
     out_dir = os.path.join(snapshot_dir, snapshot_date)
     os.makedirs(out_dir, exist_ok=True)
+
+    if backfill_geo:
+        df_sites = backfill_site_geo(df_sites)
 
     df_out = df.sort_values("NCTId", kind="stable").reset_index(drop=True) \
         if "NCTId" in df.columns else df
