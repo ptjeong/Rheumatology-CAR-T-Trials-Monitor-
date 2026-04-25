@@ -190,16 +190,20 @@ _DISEASE_FAMILY_MAP = {
     "RA":                    "Inflammatory arthritis",
     "AAV":                   "Vasculitis",
     "Behcet":                "Vasculitis",
-    # Non-rheum autoimmune / immune-mediated indications that still show up
-    # in CAR-T trial records (pipeline emits "Other immune-mediated" as a
-    # valid DiseaseEntity, cGVHD appears in some historical trials).
-    "Other immune-mediated": "Other autoimmune",
+    # cGVHD is mechanistically distinct from autoantibody-driven autoimmunity;
+    # leave it in the generic "Other autoimmune" bucket rather than try to
+    # sub-classify it. "Other immune-mediated" is resolved by _system_subfamily.
     "cGVHD":                 "Other autoimmune",
 }
 _FAMILY_ORDER = [
     "Connective tissue",
     "Inflammatory arthritis",
     "Vasculitis",
+    "Neurologic autoimmune",
+    "Autoimmune cytopenias",
+    "Glomerular / renal",
+    "Endocrine autoimmune",
+    "Dermatologic autoimmune",
     "Other autoimmune",
     "Basket/Multidisease",
     "Other / Unclassified",
@@ -207,24 +211,94 @@ _FAMILY_ORDER = [
 # Professional, non-purple palette: navy for the dominant CTD family, other
 # families in complementary muted hues. Shared by sunburst and Deep Dive charts.
 _FAMILY_COLORS = {
-    "Connective tissue":       "#0b3d91",   # navy
-    "Inflammatory arthritis":  "#b45309",   # amber-700
-    "Vasculitis":              "#0f766e",   # teal-700
-    "Other autoimmune":        "#475569",   # slate-600
-    "Basket/Multidisease":     "#64748b",   # slate-500
-    "Other / Unclassified":    "#cbd5e1",   # slate-300 — visibly lightest
+    "Connective tissue":        "#0b3d91",   # navy
+    "Inflammatory arthritis":   "#b45309",   # amber-700
+    "Vasculitis":               "#0f766e",   # teal-700
+    "Neurologic autoimmune":    "#6d28d9",   # violet-700 — neuro cue
+    "Autoimmune cytopenias":    "#b91c1c",   # red-700 — heme cue
+    "Glomerular / renal":       "#a16207",   # yellow-700 — ochre, kidney cue
+    "Endocrine autoimmune":     "#be185d",   # pink-700
+    "Dermatologic autoimmune":  "#ea580c",   # orange-600
+    "Other autoimmune":         "#475569",   # slate-600 — neutral fallback
+    "Basket/Multidisease":      "#64748b",   # slate-500
+    "Other / Unclassified":     "#cbd5e1",   # slate-300 — visibly lightest
 }
 
+# System-level sub-family classifier for the "Other immune-mediated" entity
+# bucket from the pipeline. Conservative high-confidence patterns only — a
+# false negative is graceful (stays in "Other autoimmune"); a false positive
+# creates a silently miscategorized trial. New indications that don't match
+# any pattern remain in "Other autoimmune" until a curator promotes them.
+_SUBFAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
+    (
+        "Autoimmune cytopenias",
+        r"hemolytic anemia|\baiha\b|\bwaiha\b|immune thrombocytopen|\bitp\b|"
+        r"evans syndrome|aplastic anemia|alloimmune thrombocyt|"
+        r"immune cytopen|red cell aplasia|platelet transfusion refractor|"
+        r"autoimmune neutropen",
+    ),
+    (
+        "Glomerular / renal",
+        r"iga nephropathy|\bigan\b|membranous nephropathy|nephrotic syndrome|"
+        r"glomeruloneph|focal segmental",
+    ),
+    (
+        "Endocrine autoimmune",
+        r"type 1 diabetes|\bt1dm\b|graves|hashimoto",
+    ),
+    (
+        "Dermatologic autoimmune",
+        r"pemphigus|pemphigoid|hidradenitis|bullous",
+    ),
+    (
+        "Neurologic autoimmune",
+        r"multiple sclerosis|myasthenia|neuromyelitis|\bnmosd?\b|"
+        r"autoimmune encephalitis|stiff[-\s]person|demyelinating|\bcidp\b|"
+        r"\bmog\b|\bmusk\b|nervous system|neurolog",
+    ),
+)
+_SUBFAMILY_REGEX = tuple(
+    (label, re.compile(pat, re.IGNORECASE)) for label, pat in _SUBFAMILY_PATTERNS
+)
 
-def _disease_family(entity: str, trial_design: str | None = None) -> str:
+
+def _system_subfamily(text: str) -> str:
+    """Classify an 'Other immune-mediated' trial into a system-level family.
+
+    Multi-match guard: if the text matches more than one sub-bucket pattern
+    (e.g., a basket-like trial naming both AIHA and MS), fall back to the
+    generic 'Other autoimmune' rather than silently picking the first hit.
+    """
+    if not text:
+        return "Other autoimmune"
+    hits = [label for label, rx in _SUBFAMILY_REGEX if rx.search(text)]
+    if len(hits) == 1:
+        return hits[0]
+    return "Other autoimmune"
+
+
+def _disease_family(
+    entity: str,
+    trial_design: str | None = None,
+    conditions: str | None = None,
+    brief_title: str | None = None,
+) -> str:
     """Map a disease entity to its family. Basket trials always resolve to
     'Basket/Multidisease' regardless of their primary-disease assignment —
-    matches how the sunburst presents them as a distinct branch."""
+    matches how the sunburst presents them as a distinct branch.
+    'Other immune-mediated' is sub-classified into a system-level family
+    (Neurologic / Cytopenias / Glomerular / Endocrine / Dermatologic) when
+    the conditions+title text cleanly matches one bucket; otherwise falls
+    back to the generic 'Other autoimmune' label."""
     if trial_design == "Basket/Multidisease":
         return "Basket/Multidisease"
     if not entity or entity in ("Unclassified", ""):
         return "Other / Unclassified"
-    return _DISEASE_FAMILY_MAP.get(str(entity), "Other / Unclassified")
+    s = str(entity)
+    if s == "Other immune-mediated":
+        text = f"{conditions or ''} {brief_title or ''}".strip()
+        return _system_subfamily(text)
+    return _DISEASE_FAMILY_MAP.get(s, "Other / Unclassified")
 
 THEME = {
     "bg":      "#ffffff",            # pure white canvas
@@ -1145,7 +1219,12 @@ if df.empty:
     st.error("No studies were returned. Try broadening the status filters.")
     st.stop()
 df["DiseaseFamily"] = df.apply(
-    lambda r: _disease_family(r.get("DiseaseEntity"), r.get("TrialDesign")),
+    lambda r: _disease_family(
+        r.get("DiseaseEntity"),
+        r.get("TrialDesign"),
+        r.get("Conditions"),
+        r.get("BriefTitle"),
+    ),
     axis=1,
 )
 # Safety-backfill columns that older cached snapshots may be missing.
@@ -1841,7 +1920,11 @@ with tab_overview:
                 axis=1,
             )
             _dd_ov["_Family"] = _dd_ov.apply(
-                lambda r: _disease_family(r["_Disease"], r.get("TrialDesign")), axis=1
+                lambda r: _disease_family(
+                    r["_Disease"], r.get("TrialDesign"),
+                    r.get("Conditions"), r.get("BriefTitle"),
+                ),
+                axis=1,
             )
             _dd_dedup = _dd_ov.drop_duplicates(subset=["NCTId"])
             _ent_counts = (
@@ -4240,6 +4323,69 @@ with tab_methods:
         file_name=f"car_t_classification_ontology_{snap_date}.csv",
         mime="text/csv",
     )
+
+    # ── Audit: how trials in the "Other immune-mediated" entity bucket are
+    # routed into system-level sub-families. Curator-facing: surfaces the
+    # current count per sub-family, the trials still falling through to the
+    # generic "Other autoimmune" label, and any multi-match conflicts that
+    # were defensively dropped to "Other autoimmune".
+    st.subheader("Audit — system sub-family routing")
+    st.markdown(
+        '<p class="small-note">Trials with <code>DiseaseEntity == "Other immune-mediated"</code> '
+        "are sub-classified into a system-level family by conservative regex on Conditions + BriefTitle. "
+        "Multi-match (≥2 sub-bucket patterns) defensively falls back to <em>Other autoimmune</em> rather than picking. "
+        "Anything unmatched stays in <em>Other autoimmune</em>; promote a sub-bucket to a first-class entity in pipeline.py once it has matured.</p>",
+        unsafe_allow_html=True,
+    )
+    _audit_src = df[df["DiseaseEntity"] == "Other immune-mediated"][
+        ["NCTId", "Conditions", "BriefTitle", "DiseaseFamily"]
+    ].copy() if "DiseaseEntity" in df.columns else pd.DataFrame()
+    if _audit_src.empty:
+        st.caption("No trials currently in the 'Other immune-mediated' entity bucket.")
+    else:
+        _audit_src["_text"] = (
+            _audit_src["Conditions"].fillna("").astype(str) + " "
+            + _audit_src["BriefTitle"].fillna("").astype(str)
+        )
+        _audit_src["_hits"] = _audit_src["_text"].apply(
+            lambda t: [label for label, rx in _SUBFAMILY_REGEX if rx.search(t)]
+        )
+        _audit_src["NMatched"] = _audit_src["_hits"].apply(len)
+        _audit_src["MatchedSubfamilies"] = _audit_src["_hits"].apply(
+            lambda hits: ", ".join(hits) if hits else "—"
+        )
+        _audit_src["RoutingFlag"] = np.select(
+            [
+                _audit_src["NMatched"] == 0,
+                _audit_src["NMatched"] >= 2,
+            ],
+            ["Unmatched (stays in Other autoimmune)",
+             "Multi-match conflict (defensive fallback to Other autoimmune)"],
+            default="Single-match → routed",
+        )
+        _summary = (
+            _audit_src.groupby("DiseaseFamily").size()
+            .reset_index(name="Trials")
+            .sort_values("Trials", ascending=False)
+        )
+        st.markdown("**Routing summary**")
+        st.dataframe(_summary, width='stretch', hide_index=True,
+                     height=min(280, 40 + 36 * len(_summary)))
+
+        _conflicts = _audit_src[_audit_src["NMatched"] >= 2][
+            ["NCTId", "MatchedSubfamilies", "Conditions", "BriefTitle"]
+        ]
+        if not _conflicts.empty:
+            st.markdown(f"**Multi-match conflicts ({len(_conflicts)})** — review and add an LLM override if a single subfamily is correct.")
+            st.dataframe(_conflicts, width='stretch', hide_index=True,
+                         height=min(280, 40 + 32 * len(_conflicts)))
+        _unmatched = _audit_src[_audit_src["NMatched"] == 0][
+            ["NCTId", "Conditions", "BriefTitle"]
+        ]
+        if not _unmatched.empty:
+            with st.expander(f"Unmatched in 'Other autoimmune' ({len(_unmatched)}) — candidates for new sub-bucket if one indication recurs ≥3 trials", expanded=False):
+                st.dataframe(_unmatched, width='stretch', hide_index=True,
+                             height=min(360, 40 + 28 * len(_unmatched)))
 
     st.subheader("Appendix — Hard-excluded NCT IDs")
     st.markdown(
