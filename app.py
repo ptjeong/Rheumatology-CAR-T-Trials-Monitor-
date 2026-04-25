@@ -1797,34 +1797,59 @@ with tab_overview:
 
         _UNCLEAR_BUCKET_OV = "Undisclosed / unclear"
 
-        def _ov_disease_l2(row) -> str:
-            """L2 (middle-ring) label. Dispatch by L1 family:
-            - Neurologic autoimmune  → specific disease (MS / Myasthenia /
-              NMOSD / AIE / CIDP / MOGAD / Stiff-person / Neurology_other).
-            - Other autoimmune       → system-level sub-family (Cytopenias /
-              Glomerular / Endocrine / Dermatologic / GVHD).
-            - Everything else        → raw disease entity."""
-            if row.get("TrialDesign") == "Basket/Multidisease":
-                return "Basket/Multidisease"
-            fam = row.get("DiseaseFamily")
-            text = f"{row.get('Conditions') or ''} {row.get('BriefTitle') or ''}"
-            if fam == "Neurologic autoimmune":
-                return _neuro_disease(text)
-            ent = str(row.get("DiseaseEntity") or "Unclassified")
-            if ent in _OTHER_AUTOIMMUNE_ENTITIES:
-                return _system_subfamily(text)
-            return ent
+        def _fold_unclear_target(series: pd.Series) -> pd.Series:
+            """Fold the three unclear-target labels into one bucket.
 
-        def _ov_target_l3(row) -> str:
-            t = str(row.get("TargetCategory") or "Unknown")
-            if t in ("CAR-T_unspecified", "Other_or_unknown", "Unknown"):
-                return _UNCLEAR_BUCKET_OV
-            return t
+            Vectorised replacement for the previous row-wise apply. Used
+            here for the sunburst L3 ring and again below for the antigen
+            target bar chart so the buckets stay aligned across panels.
+            """
+            t = series.fillna("Unknown").astype(str)
+            return t.where(
+                ~t.isin(["CAR-T_unspecified", "Other_or_unknown", "Unknown"]),
+                _UNCLEAR_BUCKET_OV,
+            )
 
+        # Vectorised L2 / L3 derivation. The previous row-wise apply (axis=1)
+        # touched every row on every filter-widget event, even though most
+        # rows take the trivial "raw entity" branch. The vectorised form
+        # builds the default once, then only invokes the regex-heavy
+        # _system_subfamily / _neuro_disease helpers on the small subset of
+        # rows that actually need them.
         _sb = df_filt.copy()
         _sb["_L1"] = _sb["DiseaseFamily"]
-        _sb["_L2"] = _sb.apply(_ov_disease_l2, axis=1)
-        _sb["_L3"] = _sb.apply(_ov_target_l3, axis=1)
+
+        # L2 default: raw DiseaseEntity (unchanged for the majority of rows)
+        _entity_str = _sb["DiseaseEntity"].fillna("Unclassified").astype(str)
+        _sb["_L2"] = _entity_str
+
+        # Concatenated text used by the regex helpers (built once)
+        _sub_text = (
+            _sb["Conditions"].fillna("").astype(str)
+            + " "
+            + _sb["BriefTitle"].fillna("").astype(str)
+        )
+
+        # Override 1: rows whose entity is one of the non-specific "Other
+        # autoimmune" labels get a system-level sub-family.
+        _oa_mask = _entity_str.isin(_OTHER_AUTOIMMUNE_ENTITIES)
+        if _oa_mask.any():
+            _sb.loc[_oa_mask, "_L2"] = _sub_text[_oa_mask].apply(_system_subfamily)
+
+        # Override 2: rows in the Neurologic autoimmune family get a
+        # specific neuro disease label.
+        _neuro_mask = _sb["DiseaseFamily"].eq("Neurologic autoimmune")
+        if _neuro_mask.any():
+            _sb.loc[_neuro_mask, "_L2"] = _sub_text[_neuro_mask].apply(_neuro_disease)
+
+        # Override 3 (highest priority): basket trials always get the
+        # Basket/Multidisease label regardless of the prior overrides.
+        _basket_mask = _sb["TrialDesign"].eq("Basket/Multidisease")
+        if _basket_mask.any():
+            _sb.loc[_basket_mask, "_L2"] = "Basket/Multidisease"
+
+        # L3: target with the unclear bucket folded.
+        _sb["_L3"] = _fold_unclear_target(_sb["TargetCategory"])
         _sb_counts = _sb.groupby(["_L1", "_L2", "_L3"]).size().reset_index(name="Trials")
 
         # Simplify the outer ring: keep only the top-2 antigen targets per
@@ -2032,7 +2057,7 @@ with tab_overview:
 
         # Panel 2: Antigen target, colored stack by family
         _tg_ov = df_filt.copy()
-        _tg_ov["_Target"] = _tg_ov.apply(_ov_target_l3, axis=1)
+        _tg_ov["_Target"] = _fold_unclear_target(_tg_ov["TargetCategory"])
         _tg_ov = _tg_ov[~_tg_ov["TargetCategory"].isin(_PLATFORM_LABELS)]
         _tg_counts = (
             _tg_ov.groupby(["_Target", "DiseaseFamily"]).size().reset_index(name="Trials")
