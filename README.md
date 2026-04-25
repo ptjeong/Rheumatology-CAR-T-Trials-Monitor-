@@ -20,9 +20,19 @@ regulatory, or decision-support tool.
 ## Features
 
 - **Live pull** from ClinicalTrials.gov API v2 or reproducible **frozen snapshots**
-- **Classification pipeline** covering 9 systemic autoimmune diseases, 12+ antigen-target
-  categories, and 8 cell-therapy modalities (Auto / Allo CAR-T, CAR-NK, CAR-γδ T,
-  CAAR-T, CAR-Treg, in vivo CAR, plus an explicit "unclear" bucket)
+- **Classification pipeline** covering 10 disease entities (SLE, SSc, Sjogren,
+  CTD_other, IIM, AAV, RA, IgG4-RD, Behcet, cGVHD) plus generic
+  Basket/Multidisease and Other immune-mediated buckets, 15 antigen-target
+  categories (CD19, CD20, BCMA, BAFF, CD6, CD7, CD70, dual / combinatorial
+  variants, CAR-Treg, CAAR-T, plus generic fallbacks), and 8 cell-therapy
+  modalities (Auto / Allo CAR-T, CAR-NK, CAR-γδ T, CAAR-T, CAR-Treg, in vivo
+  CAR, plus an explicit "unclear" bucket)
+- **Three-layer validation** loop: locked benchmark of 21 hand-curated trials
+  with per-axis F1 floors (`tests/test_benchmark.py`); independent-LLM cross-
+  validation with per-provider Cohen's κ across Gemini / OpenAI / Groq /
+  Anthropic (`scripts/validate_independent_llm.py`); snapshot-to-snapshot
+  reclassification diff to bound the blast radius of pipeline edits
+  (`scripts/snapshot_diff.py`)
 - **LLM-assisted classification** via `validate.py` — a standalone Claude-powered
   second-opinion tool that writes persistent per-trial overrides to
   `llm_overrides.json`, picked up automatically by the pipeline
