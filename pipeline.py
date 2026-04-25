@@ -864,27 +864,59 @@ def save_snapshot(
     snapshot_dir: str = "snapshots",
     statuses: list[str] | None = None,
 ) -> str:
-    """Save a frozen dataset to snapshots/<date>/. Returns the snapshot date string."""
+    """Save a frozen dataset to snapshots/<date>/. Returns the snapshot date string.
+
+    Determinism contract (REVIEW.md Phase 2):
+      * trials.csv and sites.csv are sorted by stable keys before write so
+        two snapshots of identical upstream data are byte-identical (CT.gov
+        pagination ordering does not leak into the snapshot).
+      * metadata.json carries snapshot_date but NOT a wall-clock timestamp;
+        the per-run wall clock lives in `runinfo.json` alongside it (kept
+        out of any byte-identity comparison).
+    """
     snapshot_date = datetime.utcnow().date().isoformat()
     out_dir = os.path.join(snapshot_dir, snapshot_date)
     os.makedirs(out_dir, exist_ok=True)
 
-    df.to_csv(os.path.join(out_dir, "trials.csv"), index=False)
-    df_sites.to_csv(os.path.join(out_dir, "sites.csv"), index=False)
+    df_out = df.sort_values("NCTId", kind="stable").reset_index(drop=True) \
+        if "NCTId" in df.columns else df
+    df_out.to_csv(os.path.join(out_dir, "trials.csv"), index=False)
+
+    if not df_sites.empty and {"NCTId", "Facility"}.issubset(df_sites.columns):
+        # Sort on the full discriminating tuple so duplicate (NCTId, Facility,
+        # City, Country) rows (multi-contact sites) are deterministically
+        # ordered. State / Zip / SiteStatus / Lat / Lon serve as tiebreakers
+        # so byte-identity holds across reshuffled inputs.
+        sites_sort_keys = [c for c in (
+            "NCTId", "Facility", "City", "Country", "State", "Zip",
+            "SiteStatus", "Latitude", "Longitude",
+        ) if c in df_sites.columns]
+        sites_out = df_sites.sort_values(sites_sort_keys, kind="stable").reset_index(drop=True)
+    else:
+        sites_out = df_sites
+    sites_out.to_csv(os.path.join(out_dir, "sites.csv"), index=False)
 
     with open(os.path.join(out_dir, "prisma.json"), "w") as f:
-        json.dump(prisma, f, indent=2)
+        json.dump(prisma, f, indent=2, sort_keys=True)
 
     metadata = {
         "snapshot_date": snapshot_date,
-        "created_utc": datetime.utcnow().isoformat(),
-        "statuses_filter": statuses or [],
-        "n_trials": len(df),
-        "n_sites": len(df_sites),
+        "statuses_filter": sorted(statuses or []),
+        "n_trials": len(df_out),
+        "n_sites": len(sites_out),
         "api_base_url": BASE_URL,
     }
     with open(os.path.join(out_dir, "metadata.json"), "w") as f:
-        json.dump(metadata, f, indent=2)
+        json.dump(metadata, f, indent=2, sort_keys=True)
+
+    # Per-run wall-clock info kept separate so it doesn't break byte-identity
+    # comparisons of metadata.json. Reviewers can still see when the snapshot
+    # was rebuilt without that info polluting the deterministic surface.
+    runinfo = {
+        "created_utc": datetime.utcnow().isoformat(),
+    }
+    with open(os.path.join(out_dir, "runinfo.json"), "w") as f:
+        json.dump(runinfo, f, indent=2, sort_keys=True)
 
     return snapshot_date
 
