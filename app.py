@@ -200,6 +200,7 @@ _FAMILY_ORDER = [
     "Connective tissue",
     "Inflammatory arthritis",
     "Vasculitis",
+    "Neurologic autoimmune",
     "Other autoimmune",
     "Basket/Multidisease",
     "Other / Unclassified",
@@ -211,6 +212,7 @@ _FAMILY_COLORS = {
     "Connective tissue":       "#0b3d91",   # deep navy   — rheum
     "Inflammatory arthritis":  "#2e6dbf",   # mid blue    — rheum
     "Vasculitis":              "#5fa3d9",   # light blue  — rheum
+    "Neurologic autoimmune":   "#7c3aed",   # violet-600  — own clinical specialty
     "Other autoimmune":        "#475569",   # slate-600
     "Basket/Multidisease":     "#94a3b8",   # slate-400
     "Other / Unclassified":    "#cbd5e1",   # slate-300
@@ -280,6 +282,23 @@ _SUBFAMILY_REGEX = tuple(
 # whose L2 sunburst wedge is uninformative without sub-classification.
 _OTHER_AUTOIMMUNE_ENTITIES = ("Other immune-mediated", "cGVHD")
 
+# Specific neurologic-autoimmune diseases used as the L2 (middle-ring) label
+# inside the Neurologic autoimmune family. Conservative high-confidence
+# patterns; trials that match the broad neuro umbrella but no specific
+# disease fall through to "Neurology_other".
+_NEURO_DISEASE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("MS",            r"multiple sclerosis|\brrms\b|\bppms\b|\bspms\b"),
+    ("Myasthenia",    r"myasthenia gravis|\bmgfa\b|\bmusk\b"),
+    ("NMOSD",         r"neuromyelitis|\bnmosd?\b"),
+    ("AIE",           r"autoimmune encephalitis|anti[-\s]?nmda|lgi1|\bcaspr2\b"),
+    ("CIDP",          r"\bcidp\b|chronic inflammatory demyelinating"),
+    ("MOGAD",         r"\bmogad?\b|mog antibody|mog[-\s]?associated"),
+    ("Stiff-person",  r"stiff[-\s]person"),
+)
+_NEURO_DISEASE_REGEX = tuple(
+    (label, re.compile(pat, re.IGNORECASE)) for label, pat in _NEURO_DISEASE_PATTERNS
+)
+
 
 def _system_subfamily(text: str) -> str:
     """Classify a non-rheum autoimmune trial into a system-level sub-family.
@@ -296,16 +315,39 @@ def _system_subfamily(text: str) -> str:
     return "Other autoimmune"
 
 
-def _disease_family(entity: str, trial_design: str | None = None) -> str:
+def _neuro_disease(text: str) -> str:
+    """Classify a Neurologic autoimmune trial into a specific disease bucket.
+    Multi-match → 'Neurology_other' (defensive); no match → 'Neurology_other'.
+    """
+    if not text:
+        return "Neurology_other"
+    hits = [label for label, rx in _NEURO_DISEASE_REGEX if rx.search(text)]
+    if len(hits) == 1:
+        return hits[0]
+    return "Neurology_other"
+
+
+def _disease_family(
+    entity: str,
+    trial_design: str | None = None,
+    conditions: str | None = None,
+    brief_title: str | None = None,
+) -> str:
     """Map a disease entity to its top-level family. Basket trials always
-    resolve to 'Basket/Multidisease' regardless of their primary-disease
-    assignment — matches how the sunburst presents them as a distinct branch.
-    Sub-family classification (Neurologic / Cytopenias / etc.) lives in
-    _system_subfamily() and is used by the sunburst L2 ring, not here."""
+    resolve to 'Basket/Multidisease'. Trials whose pipeline entity is a
+    non-specific autoimmune bucket ('Other immune-mediated' / 'cGVHD') and
+    whose conditions/title flag them as neurologic are promoted to the
+    Neurologic autoimmune family — neuro is the largest non-rheum cluster
+    and a distinct clinical specialty, so it gets its own L1 branch with
+    disease-level L2 detail."""
     if trial_design == "Basket/Multidisease":
         return "Basket/Multidisease"
     if not entity or entity in ("Unclassified", ""):
         return "Other / Unclassified"
+    if entity in _OTHER_AUTOIMMUNE_ENTITIES and (conditions or brief_title):
+        text = f"{conditions or ''} {brief_title or ''}"
+        if _system_subfamily(text) == "Neurologic autoimmune":
+            return "Neurologic autoimmune"
     return _DISEASE_FAMILY_MAP.get(str(entity), "Other / Unclassified")
 
 THEME = {
@@ -1227,7 +1269,12 @@ if df.empty:
     st.error("No studies were returned. Try broadening the status filters.")
     st.stop()
 df["DiseaseFamily"] = df.apply(
-    lambda r: _disease_family(r.get("DiseaseEntity"), r.get("TrialDesign")),
+    lambda r: _disease_family(
+        r.get("DiseaseEntity"),
+        r.get("TrialDesign"),
+        r.get("Conditions"),
+        r.get("BriefTitle"),
+    ),
     axis=1,
 )
 # Safety-backfill columns that older cached snapshots may be missing.
@@ -1751,16 +1798,20 @@ with tab_overview:
         _UNCLEAR_BUCKET_OV = "Undisclosed / unclear"
 
         def _ov_disease_l2(row) -> str:
-            """L2 (middle-ring) label. Trials whose pipeline entity is the
-            uninformative 'Other immune-mediated' or 'cGVHD' get a system-level
-            sub-family label (Neurologic / Cytopenias / etc.) instead of
-            repeating the parent family wedge. Sub-family is a sunburst-only
-            concept; DiseaseFamily at L1 is unchanged."""
+            """L2 (middle-ring) label. Dispatch by L1 family:
+            - Neurologic autoimmune  → specific disease (MS / Myasthenia /
+              NMOSD / AIE / CIDP / MOGAD / Stiff-person / Neurology_other).
+            - Other autoimmune       → system-level sub-family (Cytopenias /
+              Glomerular / Endocrine / Dermatologic / GVHD).
+            - Everything else        → raw disease entity."""
             if row.get("TrialDesign") == "Basket/Multidisease":
                 return "Basket/Multidisease"
+            fam = row.get("DiseaseFamily")
+            text = f"{row.get('Conditions') or ''} {row.get('BriefTitle') or ''}"
+            if fam == "Neurologic autoimmune":
+                return _neuro_disease(text)
             ent = str(row.get("DiseaseEntity") or "Unclassified")
             if ent in _OTHER_AUTOIMMUNE_ENTITIES:
-                text = f"{row.get('Conditions') or ''} {row.get('BriefTitle') or ''}"
                 return _system_subfamily(text)
             return ent
 
@@ -1935,18 +1986,24 @@ with tab_overview:
                 _ov_exp_rows.append(_rr)
         _dd_ov = pd.DataFrame(_ov_exp_rows) if _ov_exp_rows else pd.DataFrame()
         if not _dd_ov.empty:
+            _dd_ov["_Family"] = _dd_ov.apply(
+                lambda r: _disease_family(
+                    r["_Disease"], r.get("TrialDesign"),
+                    r.get("Conditions"), r.get("BriefTitle"),
+                ),
+                axis=1,
+            )
             _dd_ov["_DisplayDisease"] = _dd_ov.apply(
                 lambda r: (
                     "Basket/Multidisease"
                     if r.get("TrialDesign") == "Basket/Multidisease"
+                    else "Neurologic autoimmune"
+                    if r["_Family"] == "Neurologic autoimmune"
                     else "Other immune-mediated"
                     if r["_Disease"] == "cGVHD"
                     else r["_Disease"]
                 ),
                 axis=1,
-            )
-            _dd_ov["_Family"] = _dd_ov.apply(
-                lambda r: _disease_family(r["_Disease"], r.get("TrialDesign")), axis=1
             )
             _dd_dedup = _dd_ov.drop_duplicates(subset=["NCTId"])
             _ent_counts = (
@@ -3028,6 +3085,8 @@ with tab_pub:
         # Vasculitis
         "AAV":                   "#5fa3d9",
         "Behcet":                "#7dd3fc",
+        # Neurologic autoimmune (own family, violet accent)
+        "Neurologic autoimmune": "#7c3aed",
         # Other autoimmune (slate)
         "Other immune-mediated": "#475569",   # slate-600
         # Multi/Other
@@ -3036,12 +3095,16 @@ with tab_pub:
         "Other":                 "#e2e8f0",   # slate-200
     }
 
-    # cGVHD trials are folded into "Other immune-mediated" so the chart reads
-    # in line with the bar-chart and audit panel grouping.
+    # cGVHD trials are folded into "Other immune-mediated"; neurology trials
+    # (now their own L1 family) are split out from "Other immune-mediated"
+    # so the chart matches the family rollup used elsewhere.
     _entity_series = (
         df_filt["DiseaseEntity"].fillna("Unclassified").astype(str)
         .replace({"cGVHD": "Other immune-mediated"})
     )
+    if "DiseaseFamily" in df_filt.columns:
+        _is_neuro = df_filt["DiseaseFamily"].eq("Neurologic autoimmune")
+        _entity_series = _entity_series.mask(_is_neuro, "Neurologic autoimmune")
     _top_entities = _entity_series.value_counts().head(7).index.tolist()
 
     def _display_group(e: str) -> str:
