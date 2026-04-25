@@ -4420,24 +4420,27 @@ with tab_methods:
         mime="text/csv",
     )
 
-    # ── Audit: how trials whose pipeline entity is the uninformative
-    # 'Other immune-mediated' or 'cGVHD' are sub-classified into a
-    # system-level label for the sunburst middle ring. The DiseaseFamily
-    # for these trials remains 'Other autoimmune' at the family level —
-    # sub-family is sunburst-only.
-    st.subheader("Audit — system sub-family routing")
+    # ── Audit: trials whose pipeline entity is the uninformative
+    # 'Other immune-mediated' or 'cGVHD'. Two routing destinations:
+    #   1. Promoted to a new L1 family (Neurologic autoimmune) when the text
+    #      matches the neuro umbrella — these get disease-level L2 detail.
+    #   2. Stayed inside Other autoimmune — sub-family becomes the L2 label.
+    st.subheader("Audit — sub-family routing & L1 promotion")
     st.markdown(
         '<p class="small-note">Trials whose pipeline entity is '
-        "<code>Other immune-mediated</code> or <code>cGVHD</code> are sub-classified into a "
-        "system-level label (Neurologic / Cytopenias / Glomerular / Endocrine / Dermatologic / GVHD) "
-        "via conservative regex on Conditions + BriefTitle. Multi-match (≥2 sub-bucket patterns) "
-        "defensively falls back to <em>Other autoimmune</em> rather than picking. "
-        "Anything unmatched also stays in <em>Other autoimmune</em>; promote a sub-bucket to a "
-        "first-class entity in pipeline.py once it has matured (≥3 stable trials).</p>",
+        "<code>Other immune-mediated</code> or <code>cGVHD</code> are routed by conservative "
+        "regex on Conditions + BriefTitle. Trials matching the neurologic umbrella are "
+        "<strong>promoted to a new L1 family</strong> (Neurologic autoimmune) with disease-level L2 "
+        "(MS / Myasthenia / NMOSD / AIE / CIDP / MOGAD / Stiff-person / Neurology_other). "
+        "Everything else stays inside <em>Other autoimmune</em> with a sub-family L2 (Cytopenias / "
+        "Glomerular / Endocrine / Dermatologic / GVHD). Multi-match (≥2 sub-bucket patterns) "
+        "defensively falls back to <em>Other autoimmune</em> or <em>Neurology_other</em> rather "
+        "than picking. Promote a sub-bucket to a first-class entity in pipeline.py once it has "
+        "matured (≥3 stable trials).</p>",
         unsafe_allow_html=True,
     )
     _audit_src = df[df["DiseaseEntity"].isin(_OTHER_AUTOIMMUNE_ENTITIES)][
-        ["NCTId", "DiseaseEntity", "Conditions", "BriefTitle"]
+        ["NCTId", "DiseaseEntity", "DiseaseFamily", "Conditions", "BriefTitle"]
     ].copy() if "DiseaseEntity" in df.columns else pd.DataFrame()
     if _audit_src.empty:
         st.caption("No trials currently in the 'Other immune-mediated' / 'cGVHD' entity buckets.")
@@ -4456,17 +4459,35 @@ with tab_methods:
         _audit_src["MatchedSubfamilies"] = _audit_src["_hits"].apply(
             lambda hits: ", ".join(hits) if hits else "—"
         )
-        _summary = (
-            _audit_src.groupby("Subfamily").size()
-            .reset_index(name="Trials")
-            .sort_values("Trials", ascending=False)
-        )
-        st.markdown("**Routing summary** — counts under the 'Other autoimmune' family")
-        st.dataframe(_summary, width='stretch', hide_index=True,
-                     height=min(280, 40 + 36 * len(_summary)))
+
+        # Split: promoted to Neurologic L1 vs stayed in Other autoimmune
+        _promoted = _audit_src[_audit_src["DiseaseFamily"] == "Neurologic autoimmune"].copy()
+        _stayed = _audit_src[_audit_src["DiseaseFamily"] != "Neurologic autoimmune"].copy()
+
+        _l1_col, _l2_col = st.columns(2)
+        with _l1_col:
+            st.markdown(f"**Promoted to L1 — Neurologic autoimmune ({len(_promoted)})**")
+            if _promoted.empty:
+                st.caption("No trials currently promoted.")
+            else:
+                _promoted["NeuroDisease"] = _promoted["_text"].apply(_neuro_disease)
+                _neuro_summary = (
+                    _promoted.groupby("NeuroDisease").size()
+                    .reset_index(name="Trials").sort_values("Trials", ascending=False)
+                )
+                st.dataframe(_neuro_summary, width='stretch', hide_index=True,
+                             height=min(280, 40 + 36 * len(_neuro_summary)))
+        with _l2_col:
+            st.markdown(f"**Stayed in Other autoimmune ({len(_stayed)})** — sub-family L2")
+            _stayed_summary = (
+                _stayed.groupby("Subfamily").size()
+                .reset_index(name="Trials").sort_values("Trials", ascending=False)
+            )
+            st.dataframe(_stayed_summary, width='stretch', hide_index=True,
+                         height=min(280, 40 + 36 * len(_stayed_summary)))
 
         _conflicts = _audit_src[_audit_src["NMatched"] >= 2][
-            ["NCTId", "DiseaseEntity", "MatchedSubfamilies", "Conditions", "BriefTitle"]
+            ["NCTId", "DiseaseEntity", "DiseaseFamily", "MatchedSubfamilies", "Conditions", "BriefTitle"]
         ]
         if not _conflicts.empty:
             st.markdown(f"**Multi-match conflicts ({len(_conflicts)})** — review and add an LLM override if a single subfamily is correct.")
