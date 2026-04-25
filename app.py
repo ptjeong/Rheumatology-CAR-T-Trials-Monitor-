@@ -204,15 +204,30 @@ _FAMILY_ORDER = [
     "Basket/Multidisease",
     "Other / Unclassified",
 ]
-# Professional, non-purple palette: navy for the dominant CTD family, other
-# families in complementary muted hues. Shared by sunburst and Deep Dive charts.
+# Unified palette: rheumatology families share a blue ramp (CTD/IA/Vasc) so a
+# reader sees them as one super-family at a glance; non-rheum buckets sit in a
+# distinct slate range. Shared by sunburst and Deep Dive charts.
 _FAMILY_COLORS = {
-    "Connective tissue":       "#0b3d91",   # navy
-    "Inflammatory arthritis":  "#b45309",   # amber-700
-    "Vasculitis":              "#0f766e",   # teal-700
+    "Connective tissue":       "#0b3d91",   # deep navy   — rheum
+    "Inflammatory arthritis":  "#2e6dbf",   # mid blue    — rheum
+    "Vasculitis":              "#5fa3d9",   # light blue  — rheum
     "Other autoimmune":        "#475569",   # slate-600
-    "Basket/Multidisease":     "#64748b",   # slate-500
-    "Other / Unclassified":    "#cbd5e1",   # slate-300 — visibly lightest
+    "Basket/Multidisease":     "#94a3b8",   # slate-400
+    "Other / Unclassified":    "#cbd5e1",   # slate-300
+}
+
+# Sub-family palette — used only on the sunburst L2 ring inside the
+# "Other autoimmune" family. Neurologic gets a distinct violet accent (per
+# convention); other sub-buckets stay in the slate family so they read as
+# "still part of Other autoimmune" rather than separate top-level categories.
+_SUBFAMILY_COLORS = {
+    "Neurologic autoimmune":   "#7c3aed",   # violet-600 — neuro accent
+    "Autoimmune cytopenias":   "#64748b",   # slate-500
+    "Glomerular / renal":      "#52606d",
+    "Endocrine autoimmune":    "#475569",   # slate-600
+    "Dermatologic autoimmune": "#3f4a5c",
+    "GVHD":                    "#94a3b8",   # slate-400
+    "Other autoimmune":        "#475569",   # default fallback
 }
 
 # System-level sub-family classifier — used as the L2 (middle-ring) label
@@ -1785,15 +1800,24 @@ with tab_overview:
             _values.append(int(_fd["Trials"].sum()))
             _colors.append(_fam_color)
             for _dis, _dd in _fd.groupby("_L2"):
+                # Inside the Other autoimmune family the L2 label is a
+                # sub-family — give it its own colour (neuro = violet,
+                # everything else = slate variants). All children inherit
+                # the L2 colour so the outer ring reads as one branch.
+                _l2_color = (
+                    _SUBFAMILY_COLORS.get(_dis, _fam_color)
+                    if _fam == "Other autoimmune"
+                    else _fam_color
+                )
                 _dis_id = f"{_fam}/{_dis}"
                 _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
                 _values.append(int(_dd["Trials"].sum()))
-                _colors.append(_fam_color)
+                _colors.append(_l2_color)
                 for _, _row in _dd.iterrows():
                     _tg_id = f"{_fam}/{_dis}/{_row['_L3']}"
                     _ids.append(_tg_id); _labels.append(_row["_L3"]); _parents.append(_dis_id)
                     _values.append(int(_row["Trials"]))
-                    _colors.append(_fam_color)
+                    _colors.append(_l2_color)
 
         _fig_sb = go.Figure(go.Sunburst(
             ids=_ids, labels=_labels, parents=_parents, values=_values,
@@ -1912,7 +1936,13 @@ with tab_overview:
         _dd_ov = pd.DataFrame(_ov_exp_rows) if _ov_exp_rows else pd.DataFrame()
         if not _dd_ov.empty:
             _dd_ov["_DisplayDisease"] = _dd_ov.apply(
-                lambda r: "Basket/Multidisease" if r.get("TrialDesign") == "Basket/Multidisease" else r["_Disease"],
+                lambda r: (
+                    "Basket/Multidisease"
+                    if r.get("TrialDesign") == "Basket/Multidisease"
+                    else "Other immune-mediated"
+                    if r["_Disease"] == "cGVHD"
+                    else r["_Disease"]
+                ),
                 axis=1,
             )
             _dd_ov["_Family"] = _dd_ov.apply(
@@ -2983,24 +3013,35 @@ with tab_pub:
     )
 
     # ── Stacking groups: top-N disease entities + 'Other' ──────────────────
+    # Rheumatology entities all sit in a navy → light-blue ramp so they read as
+    # one super-family; non-rheum buckets sit in a distinct slate range.
     _ENTITY_COLORS = {
-        "SLE":                   NEJM_BLUE,
-        "SSc":                   NEJM_AMBER,
-        "IIM":                   NEJM_GREEN,
-        "AAV":                   NEJM_PURPLE,
-        "Sjogren":               "#0891b2",   # cyan-600
-        "RA":                    NEJM_RED,
-        "CTD_other":             "#0d9488",   # teal-600
-        "IgG4-RD":               "#ea580c",   # orange-600
-        "Behcet":                "#7c2d12",   # amber-900 — non-purple replacement
-        "cGVHD":                 "#db2777",   # pink-600
-        "Basket/Multidisease":   "#475569",   # slate-600
-        "Other immune-mediated": "#94a3b8",   # slate-400
+        # Connective tissue (deep navy → light navy)
+        "SLE":                   "#0b3d91",
+        "SSc":                   "#1e40af",
+        "IIM":                   "#2563eb",
+        "Sjogren":               "#3b82f6",
+        "CTD_other":             "#60a5fa",
+        "IgG4-RD":               "#93c5fd",
+        # Inflammatory arthritis
+        "RA":                    "#2e6dbf",
+        # Vasculitis
+        "AAV":                   "#5fa3d9",
+        "Behcet":                "#7dd3fc",
+        # Other autoimmune (slate)
+        "Other immune-mediated": "#475569",   # slate-600
+        # Multi/Other
+        "Basket/Multidisease":   "#94a3b8",   # slate-400
         "Unclassified":          "#cbd5e1",   # slate-300
         "Other":                 "#e2e8f0",   # slate-200
     }
 
-    _entity_series = df_filt["DiseaseEntity"].fillna("Unclassified").astype(str)
+    # cGVHD trials are folded into "Other immune-mediated" so the chart reads
+    # in line with the bar-chart and audit panel grouping.
+    _entity_series = (
+        df_filt["DiseaseEntity"].fillna("Unclassified").astype(str)
+        .replace({"cGVHD": "Other immune-mediated"})
+    )
     _top_entities = _entity_series.value_counts().head(7).index.tolist()
 
     def _display_group(e: str) -> str:
