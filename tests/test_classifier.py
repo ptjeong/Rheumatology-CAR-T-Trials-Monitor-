@@ -449,3 +449,53 @@ class TestDiseaseClassification:
         ))
         assert entities == ["IgG4-RD"]
         assert primary == "IgG4-RD"
+
+
+# ---------------------------------------------------------------------------
+# Disease-result post-hook (defensive consistency guard)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeDiseaseResult:
+    """Direct tests for _normalize_disease_result. The rule-based classifier
+    already produces consistent triples, so these document the invariants
+    the hook enforces against future LLM-override / rule edits."""
+
+    def test_basket_primary_forces_basket_design(self):
+        from pipeline import _normalize_disease_result
+        ents, design, primary = _normalize_disease_result(
+            ["Basket/Multidisease"], "Single disease", "Basket/Multidisease",
+        )
+        assert design == "Basket/Multidisease"
+        assert primary == "Basket/Multidisease"
+
+    def test_basket_design_forces_basket_primary(self):
+        from pipeline import _normalize_disease_result
+        ents, design, primary = _normalize_disease_result(
+            ["SLE", "SSc"], "Basket/Multidisease", "SLE",
+        )
+        assert design == "Basket/Multidisease"
+        assert primary == "Basket/Multidisease"
+
+    def test_unclassified_does_not_bundle_with_specific_entity(self):
+        from pipeline import _normalize_disease_result
+        ents, design, primary = _normalize_disease_result(
+            ["SLE", "Unclassified"], "Single disease", "SLE",
+        )
+        assert "Unclassified" not in ents
+        assert ents == ["SLE"]
+
+    def test_other_immune_mediated_does_not_bundle(self):
+        from pipeline import _normalize_disease_result
+        ents, design, primary = _normalize_disease_result(
+            ["SLE", "Other immune-mediated"], "Single disease", "SLE",
+        )
+        assert "Other immune-mediated" not in ents
+
+    def test_consistent_triple_passes_through_unchanged(self):
+        from pipeline import _normalize_disease_result
+        ents, design, primary = _normalize_disease_result(
+            ["SLE"], "Single disease", "SLE",
+        )
+        assert ents == ["SLE"]
+        assert design == "Single disease"
+        assert primary == "SLE"

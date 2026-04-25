@@ -191,19 +191,55 @@ _BROAD_AUTOIMMUNE_PHRASES = [
 ]
 
 
+def _normalize_disease_result(
+    entities: list[str], design: str, primary: str,
+) -> tuple[list[str], str, str]:
+    """Post-classification normalisation: enforce the invariant that
+    primary == 'Basket/Multidisease' iff design == 'Basket/Multidisease',
+    and that 'Unclassified' / 'Other immune-mediated' are never bundled
+    with a specific entity in the entities list.
+
+    Defensive guard for future contributors / LLM overrides that might
+    set the three values inconsistently. The rule-based classifier is
+    already internally consistent — this hook locks that property in.
+    Aligned with the onc app's _normalize_disease_result.
+    """
+    # Coerce primary <-> design consistency on the basket axis.
+    if primary == "Basket/Multidisease" and design != "Basket/Multidisease":
+        design = "Basket/Multidisease"
+    elif design == "Basket/Multidisease" and primary != "Basket/Multidisease":
+        # Caller asserts a multi-disease cohort but pinned a single primary;
+        # flip primary to the basket label so chart bins are consistent.
+        primary = "Basket/Multidisease"
+
+    # Sentinel labels (Unclassified / Other immune-mediated) must stand
+    # alone — bundling them with a specific entity is logically incoherent.
+    if "Unclassified" in entities and len(entities) > 1:
+        entities = [e for e in entities if e != "Unclassified"]
+    if "Other immune-mediated" in entities and len(entities) > 1:
+        entities = [e for e in entities if e != "Other immune-mediated"]
+    # Idempotent fallback: if entities ends up empty, mirror primary.
+    if not entities:
+        entities = [primary]
+    return entities, design, primary
+
+
 def _classify_disease(row: dict) -> tuple[list[str], str, str]:
     """Return (disease_entities, trial_design, primary_entity).
 
     disease_entities: every specific disease label matched (pipe-join for DiseaseEntities column)
     trial_design:     "Single disease" | "Basket/Multidisease"
     primary_entity:   single label for charts/display (DiseaseEntity column)
+
+    Every return path runs through `_normalize_disease_result` so the three
+    values are guaranteed mutually consistent.
     """
     nct = str(row.get("NCTId", "")).strip()
     if nct and nct in _LLM_OVERRIDES:
         ov = _LLM_OVERRIDES[nct]
         entity = ov.get("disease_entity", "Unclassified")
         design = "Basket/Multidisease" if entity == "Basket/Multidisease" else "Single disease"
-        return [entity], design, entity
+        return _normalize_disease_result([entity], design, entity)
 
     conditions_raw = _safe_text(row.get("Conditions"))
     full_text = _row_text(row)
@@ -216,27 +252,27 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
     if all_matched:
         n_systemic = sum(1 for m in all_matched if m in _SYSTEMIC_DISEASES)
         if n_systemic >= 2:
-            return all_matched, "Basket/Multidisease", "Basket/Multidisease"
-        return all_matched, "Single disease", all_matched[0]
+            return _normalize_disease_result(all_matched, "Basket/Multidisease", "Basket/Multidisease")
+        return _normalize_disease_result(all_matched, "Single disease", all_matched[0])
 
     if _contains_any(full_text, OTHER_IMMUNE_MEDIATED_TERMS):
-        return ["Other immune-mediated"], "Single disease", "Other immune-mediated"
+        return _normalize_disease_result(["Other immune-mediated"], "Single disease", "Other immune-mediated")
 
     if any(term in full_text for term in _BROAD_BASKET_TERMS):
-        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
+        return _normalize_disease_result(["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease")
 
     if any(p in full_text for p in _BROAD_AUTOIMMUNE_PHRASES):
-        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
+        return _normalize_disease_result(["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease")
 
     for entity, syns in DISEASE_ENTITIES.items():
         specific_syns = [_normalize_text(s) for s in syns if len(str(s)) > 3]
         if any(s in full_text for s in specific_syns):
-            return [entity], "Single disease", entity
+            return _normalize_disease_result([entity], "Single disease", entity)
 
     if _contains_any(full_text, GENERIC_AUTOIMMUNE_TERMS):
-        return ["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease"
+        return _normalize_disease_result(["Basket/Multidisease"], "Basket/Multidisease", "Basket/Multidisease")
 
-    return ["Unclassified"], "Single disease", "Unclassified"
+    return _normalize_disease_result(["Unclassified"], "Single disease", "Unclassified")
 
 
 def _assign_disease_entity(row: dict) -> str:
