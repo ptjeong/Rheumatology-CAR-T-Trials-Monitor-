@@ -12,7 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        # 3.11 matches the devcontainer; 3.12 matches the Streamlit Cloud
+        # default; 3.13 covers the local-dev floor noted in REVIEW.md so a
+        # 3.13-only regression would be caught in CI.
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
