@@ -160,7 +160,11 @@ _DISEASE_TERMS = {
 }
 
 _SYSTEMIC_DISEASES = {
-    "SLE", "SSc", "Sjogren", "IIM", "AAV", "RA", "IgG4-RD", "Behcet", "cGVHD",
+    # Diseases that count toward the >=2 threshold for Basket/Multidisease.
+    # CTD_other (mixed/undifferentiated CTD) is included here because trials
+    # that pair it with SLE / SSc / IIM are real multi-disease cohorts, not
+    # single-disease trials with an incidental CTD label.
+    "SLE", "SSc", "Sjogren", "CTD_other", "IIM", "AAV", "RA", "IgG4-RD", "Behcet", "cGVHD",
 }
 
 _BROAD_BASKET_TERMS = [

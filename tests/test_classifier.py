@@ -344,3 +344,73 @@ class TestDiseaseClassification:
             conditions="Unusual rare syndrome X",
         ))
         assert primary == "Unclassified"
+
+    def test_ctd_other_pair_with_sle_is_basket(self):
+        """CTD_other paired with another systemic disease (SLE/SSc/IIM/AAV)
+        is a real multi-disease cohort, not a single-disease trial. Regression
+        for the bug surfaced in REVIEW.md (pipeline.py:164 — CTD_other was
+        missing from _SYSTEMIC_DISEASES). Live evidence: NCT07490041.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions=(
+                "Connective Tissue Disease | Systemic Lupus Erythematosus | "
+                "Connective Tissue Disease-associated Interstitial Lung Disease"
+            ),
+        ))
+        assert "CTD_other" in entities
+        assert "SLE" in entities
+        assert design == "Basket/Multidisease"
+        assert primary == "Basket/Multidisease"
+
+    def test_ctd_other_alone_stays_single_disease(self):
+        """CTD_other on its own (no other systemic disease) must remain
+        Single-disease. The basket promotion only fires when ≥2 systemic
+        diseases match.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Mixed Connective Tissue Disease",
+        ))
+        assert entities == ["CTD_other"]
+        assert design == "Single disease"
+        assert primary == "CTD_other"
+
+    def test_other_immune_mediated_fallback(self):
+        """Trials whose only signal is in OTHER_IMMUNE_MEDIATED_TERMS land in
+        the 'Other immune-mediated' bucket. Coverage gap flagged in REVIEW.md.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Myasthenia Gravis",
+        ))
+        assert primary == "Other immune-mediated"
+        assert design == "Single disease"
+
+    def test_broad_basket_phrase_promotes(self):
+        """Generic 'B-cell mediated autoimmune disease' phrasing without any
+        specific disease match still promotes to Basket/Multidisease.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Refractory B-cell mediated autoimmune disease",
+        ))
+        assert design == "Basket/Multidisease"
+        assert primary == "Basket/Multidisease"
+
+    def test_behcet_single_disease(self):
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Behcet's Disease",
+        ))
+        assert entities == ["Behcet"]
+        assert primary == "Behcet"
+
+    def test_cgvhd_single_disease(self):
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Chronic Graft Versus Host Disease",
+        ))
+        assert entities == ["cGVHD"]
+        assert primary == "cGVHD"
+
+    def test_iggm4_single_disease(self):
+        entities, design, primary = _classify_disease(self._row(
+            conditions="IgG4 Related Disease",
+        ))
+        assert entities == ["IgG4-RD"]
+        assert primary == "IgG4-RD"
