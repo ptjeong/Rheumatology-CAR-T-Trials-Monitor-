@@ -49,10 +49,13 @@ TARGET_CLASS_COLORS = {
     "Undisclosed": "#94a3b8",
 }
 MODALITY_COLORS = {
-    "Autologous":              "#0b3d91",
-    "Allogeneic/Off-the-shelf":"#0f766e",
-    "In vivo":                 "#92400e",
-    "Unclear":                 "#94a3b8",
+    # Modality uses a desaturated grayscale ramp + amber accent for the
+    # emerging in-vivo frontier — keeps Fig 5 visually independent from
+    # Fig 4's target palette (where navy/amber/teal carry semantic meaning).
+    "Autologous":              "#1f2937",   # gray-800, established baseline
+    "Allogeneic/Off-the-shelf":"#9ca3af",   # gray-400, scaling step
+    "In vivo":                 "#d97706",   # amber-600 accent, frontier
+    "Unclear":                 "#e5e7eb",   # gray-200, residual
 }
 SPONSOR_COLORS = {
     "Academic": "#0b3d91",
@@ -247,25 +250,27 @@ def fig1_prisma_growth(df: pd.DataFrame, prisma: dict):
     )
 
     # --- Left panel: PRISMA flow as labelled boxes via shapes/annotations ---
+    # Each box: (label, n_string, center_y, half_height)
+    # The Excluded box gets a taller half_height to accommodate 5 text lines.
     boxes = [
         ("Records identified from<br>ClinicalTrials.gov v2 API",
-         f"n = {prisma['n_fetched']:,}", 0.86),
+         f"n = {prisma['n_fetched']:,}", 0.88, 0.08),
         ("After de-duplication",
-         f"n = {prisma['n_after_dedup']:,}", 0.66),
+         f"n = {prisma['n_after_dedup']:,}", 0.66, 0.07),
         (f"Excluded:<br>• Hard-excluded NCT IDs (n={prisma['n_hard_excluded']})<br>"
          f"• Indication keyword filters (n={prisma['n_indication_excluded']})<br>"
          f"• LLM-derived exclusions (n={prisma['n_llm_excluded']})",
-         f"n = {prisma['n_total_excluded']:,}", 0.40),
+         f"n = {prisma['n_total_excluded']:,}", 0.36, 0.13),
         ("Trials included in analysis",
-         f"n = {prisma['n_included']:,}", 0.14),
+         f"n = {prisma['n_included']:,}", 0.09, 0.07),
     ]
     box_x_lo, box_x_hi = 0.02, 0.36  # left subplot, width 0.34 fits long labels; center ~0.19
-    for i, (label, n, y) in enumerate(boxes):
+    for i, (label, n, y, hh) in enumerate(boxes):
         fillcolor = "#0b3d91" if i == len(boxes) - 1 else "#f8fafc"
         fontcolor = "#ffffff" if i == len(boxes) - 1 else THEME["text"]
         fig.add_shape(
             type="rect", xref="paper", yref="paper",
-            x0=box_x_lo, x1=box_x_hi, y0=y - 0.08, y1=y + 0.08,
+            x0=box_x_lo, x1=box_x_hi, y0=y - hh, y1=y + hh,
             line=dict(color=THEME["border"], width=1),
             fillcolor=fillcolor,
         )
@@ -277,8 +282,8 @@ def fig1_prisma_growth(df: pd.DataFrame, prisma: dict):
     # Connecting lines (drawn as shapes — no arrowheads; readers infer top→bottom flow)
     arrow_x = (box_x_lo + box_x_hi) / 2
     for i in range(len(boxes) - 1):
-        y_top = boxes[i][2] - 0.08
-        y_bot = boxes[i + 1][2] + 0.08
+        y_top = boxes[i][2] - boxes[i][3]
+        y_bot = boxes[i + 1][2] + boxes[i + 1][3]
         fig.add_shape(
             type="line", xref="paper", yref="paper",
             x0=arrow_x, x1=arrow_x, y0=y_top, y1=y_bot,
