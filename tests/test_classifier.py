@@ -43,7 +43,26 @@ class TestWordBoundary:
         assert not _term_in_text("brain tumour", "ra")
 
     def test_hyphenated_tokens_match(self):
-        assert _term_in_text("caba-201 autologous", "caba-201")
+        # _term_in_text expects already-normalized text. After uniform hyphen
+        # collapse, both sides become "caba 201" / "car t" / etc., so search
+        # should match symmetrically regardless of hyphen presence in input.
+        norm = _normalize_text("CABA-201 autologous CAR-T")
+        assert _term_in_text(norm, "caba-201")
+        assert _term_in_text(norm, "caba 201")
+        assert _term_in_text(norm, "car-t")
+        # Negative: a substring that crosses a (former) hyphen boundary
+        # should NOT match — collapsing makes "201autologous" impossible.
+        assert not _term_in_text(norm, "201autologous")
+
+    def test_normalize_collapses_hyphens_uniformly(self):
+        """Phase 2 alignment with onc: hyphens become spaces in every token,
+        so 'anti-CD19' / 'BCMA-CD19' / 'non-rheumatic' all normalise to a
+        clean space-separated form."""
+        assert _normalize_text("anti-CD19") == "anti cd19"
+        assert _normalize_text("BCMA-CD19 dual") == "bcma cd19 dual"
+        assert _normalize_text("non-rheumatic") == "non rheumatic"
+        # Period preserved (e.g. for "claudin 18.2"-style version tokens)
+        assert _normalize_text("claudin 18.2") == "claudin 18.2"
 
     def test_normalize_strips_accents_and_punctuation(self):
         assert "sjogren" in _normalize_text("Sjögren's syndrome")

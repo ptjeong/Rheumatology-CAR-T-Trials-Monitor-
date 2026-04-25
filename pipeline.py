@@ -70,13 +70,24 @@ def _safe_text(value) -> str:
 
 
 def _normalize_text(text: str) -> str:
+    """Lowercase + collapse to a deterministic alphanumeric form.
+
+    Aligned with the onc app's normalisation (Phase 2 of REVIEW.md):
+      * Hyphens are uniformly collapsed to spaces. Previously only "b-cell",
+        "t-cell" and "nk-cell" were rewritten; new hyphenated tokens
+        (e.g. "anti-CD19", "BCMA-CD19", "CABA-201") were left half-handled,
+        masking term-matching collisions.
+      * The character class keeps "." so version-tagged tokens
+        (e.g. "claudin 18.2") survive normalisation.
+      * Tokens previously hand-rewritten (b-cell / t-cell / nk-cell) drop
+        out — the unconditional hyphen collapse handles them generically.
+    """
     text = (text or "").lower()
     text = text.replace("sjögren", "sjogren")
     text = text.replace("r/r", "relapsed refractory")
-    text = text.replace("b-cell", "b cell")
-    text = text.replace("t-cell", "t cell")
-    text = text.replace("nk-cell", "nk cell")
-    text = re.sub(r"[^a-z0-9/+\- ]+", " ", text)
+    text = re.sub(r"[^a-z0-9/+.\- ]+", " ", text)
+    # Treat hyphens as word separators uniformly.
+    text = text.replace("-", " ")
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -623,11 +634,16 @@ _rebuild_named_product_alias_index()
 
 def _derive_product_name(text: str) -> str | None:
     """Return canonical NAMED_PRODUCTS key whose longest alias appears in text.
-    Uses word-boundary matching to avoid partial-alias collisions."""
+    Uses word-boundary matching to avoid partial-alias collisions.
+
+    Normalises text internally so callers may pass raw or already-normalised
+    input. _normalize_text is idempotent on already-normalised input.
+    """
     if not text:
         return None
+    normalized = _normalize_text(text)
     for alias, canonical in _NAMED_PRODUCT_ALIASES:
-        if _term_in_text(text, alias):
+        if _term_in_text(normalized, alias):
             return canonical
     return None
 
