@@ -259,7 +259,7 @@ def fig1_prisma_growth(df: pd.DataFrame, prisma: dict):
         ("Trials included in analysis",
          f"n = {prisma['n_included']:,}", 0.14),
     ]
-    box_x_lo, box_x_hi = 0.00, 0.36  # left subplot
+    box_x_lo, box_x_hi = 0.02, 0.36  # left subplot, width 0.34 fits long labels; center ~0.19
     for i, (label, n, y) in enumerate(boxes):
         fillcolor = "#0b3d91" if i == len(boxes) - 1 else "#f8fafc"
         fontcolor = "#ffffff" if i == len(boxes) - 1 else THEME["text"]
@@ -676,12 +676,12 @@ def fig7_phase_sponsor(df: pd.DataFrame):
             hovertemplate=f"%{{y}} · {s}: %{{x}}<extra></extra>",
         ))
 
-    _layout(fig, height=420, width=900)
+    _layout(fig, height=460, width=900)
     fig.update_layout(barmode="stack",
-                      legend=dict(orientation="h", x=0.5, y=-0.12, xanchor="center",
+                      legend=dict(orientation="h", x=0.5, y=-0.28, xanchor="center",
                                   font=dict(size=10)),
-                      margin=dict(l=120, r=60, t=30, b=80))
-    fig.update_xaxes(title_text="Number of trials")
+                      margin=dict(l=120, r=60, t=30, b=120))
+    fig.update_xaxes(title_text="Number of trials", title_standoff=12)
     fig.update_yaxes(title_text="", autorange="reversed")
     _save(fig, "fig7_phase_sponsor")
 
