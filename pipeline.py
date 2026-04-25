@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 import requests
 import pandas as pd
 from datetime import datetime
@@ -683,6 +684,39 @@ def _derive_product_name(text: str) -> str | None:
     return None
 
 
+_FETCH_MAX_ATTEMPTS = 4
+_FETCH_BACKOFF_BASE = 1.5  # seconds — 1.5, 3.0, 6.0
+
+
+def _request_with_retry(url: str, params: dict, timeout: int = 30) -> requests.Response:
+    """GET with exponential backoff on transient failures.
+
+    Retries on ConnectionError, Timeout, and 5xx responses. 4xx (client
+    errors) and other unexpected exceptions raise immediately — those are
+    not transient. Caller still receives a clear HTTPError if every retry
+    fails so a partial fetch surfaces as a hard failure rather than silent
+    data loss. (Phase 2 of REVIEW.md.)
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, _FETCH_MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
+        else:
+            if resp.status_code < 500:
+                # 2xx success or 4xx client error — return either way; the
+                # caller checks status_code and raises on non-200.
+                return resp
+            last_exc = requests.HTTPError(
+                f"ClinicalTrials.gov API error {resp.status_code}: {resp.text[:200]}"
+            )
+        if attempt < _FETCH_MAX_ATTEMPTS:
+            time.sleep(_FETCH_BACKOFF_BASE ** attempt)
+    # All retries exhausted.
+    raise last_exc if last_exc else RuntimeError("fetch failed without an exception")
+
+
 def fetch_raw_trials(max_records: int = 1000, statuses: list[str] | None = None) -> list[dict]:
     term_query = (
         "("
@@ -702,11 +736,25 @@ def fetch_raw_trials(max_records: int = 1000, statuses: list[str] | None = None)
     if statuses:
         params["filter.overallStatus"] = ",".join(statuses)
 
-    studies = []
+    studies: list[dict] = []
+    page_no = 0
     while True:
-        resp = requests.get(BASE_URL, params=params, timeout=30)
+        page_no += 1
+        try:
+            resp = _request_with_retry(BASE_URL, params)
+        except Exception as e:
+            # Surface the partial-fetch context — without this, a transient
+            # CT.gov outage mid-pagination silently loses cumulative pages.
+            raise requests.HTTPError(
+                f"ClinicalTrials.gov fetch failed on page {page_no} after "
+                f"{_FETCH_MAX_ATTEMPTS} attempts (cumulative studies so far: "
+                f"{len(studies):,}): {e}"
+            ) from e
         if resp.status_code != 200:
-            raise requests.HTTPError(f"ClinicalTrials.gov API error {resp.status_code}: {resp.text}")
+            raise requests.HTTPError(
+                f"ClinicalTrials.gov API error {resp.status_code} on page "
+                f"{page_no}: {resp.text[:200]}"
+            )
         data = resp.json()
         studies.extend(data.get("studies", []))
         if len(studies) >= max_records:
