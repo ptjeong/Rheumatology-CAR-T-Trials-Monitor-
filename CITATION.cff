@@ -1,0 +1,65 @@
+cff-version: 1.2.0
+message: >-
+  If you use this dashboard in scientific work, please cite the software
+  entry below. When citing a specific dataset or figure, also cite the
+  snapshot date that appears in the dashboard's About tab.
+title: CAR-T Rheumatology Trials Monitor
+type: software
+authors:
+  - family-names: Jeong
+    given-names: Peter
+    email: peter.jeong@uk-koeln.de
+    affiliation: >-
+      Klinik I für Innere Medizin, Hämatologie und Onkologie, Klinische
+      Immunologie und Rheumatologie, Universitätsklinikum Köln
+    orcid: null  # TODO: add ORCID if available
+version: "1.0.0"
+date-released: "2026-04-25"
+doi: "10.5281/zenodo.19713049"
+repository-code: "https://github.com/ptjeong/Rheumatology-CAR-T-Trials-Monitor-"
+url: "https://rheum-car-t-trial-monitor.streamlit.app"
+license: MIT
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.19713049"
+    description: Concept DOI for all versions
+abstract: >-
+  An interactive Streamlit dashboard that tracks CAR-T, CAR-NK, CAAR-T,
+  CAR-γδ T, CAR-Treg, and in-vivo CAR clinical trials across rheumatologic
+  and immune-mediated diseases, sourced from the ClinicalTrials.gov v2 API.
+  Provides per-trial classification of disease entity (10 closed-vocabulary
+  labels plus Basket/Multidisease and Other immune-mediated buckets),
+  antigen target (15 closed-vocabulary labels), product type (Autologous /
+  Allogeneic / In vivo / Unclear), and cell-therapy modality. Includes a
+  PRISMA-style flow, geographic mapping (global plus Germany-specific
+  site-level view), publication-ready figures with provenance-tagged CSV
+  exports, an auto-generated methods section, and a three-layer validation
+  loop (locked benchmark with per-axis F1 floors; cross-vendor LLM
+  agreement on a stratified sample; snapshot-to-snapshot reclassification
+  diff to bound the blast radius of pipeline edits).
+keywords:
+  - CAR-T
+  - chimeric antigen receptor T cells
+  - CAR-NK
+  - CAR-Treg
+  - CAAR-T
+  - autoimmune disease
+  - rheumatology
+  - systemic lupus erythematosus
+  - systemic sclerosis
+  - vasculitis
+  - myositis
+  - clinical trials
+  - ClinicalTrials.gov
+  - dashboard
+  - streamlit
+  - reproducible research
+preferred-citation:
+  type: software
+  title: CAR-T Rheumatology Trials Monitor
+  authors:
+    - family-names: Jeong
+      given-names: Peter
+  doi: "10.5281/zenodo.19713049"
+  url: "https://rheum-car-t-trial-monitor.streamlit.app"
+  year: 2026
