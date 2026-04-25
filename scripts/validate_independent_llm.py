@@ -85,6 +85,16 @@ ALLOWED_VALUES = {
         sorted(DISEASE_ENTITIES.keys())
         + ["cGVHD", "Other immune-mediated", "Basket/Multidisease", "Unclassified"]
     ),
+    "TargetCategory": [
+        # Single-antigen
+        "CD19", "CD20", "CD7", "CD70", "BCMA", "BAFF", "CD6",
+        # Dual / combinatorial
+        "CD19/BCMA dual", "CD19/CD20 dual", "CD19/BAFF dual", "BCMA/CD70 dual",
+        # Construct types (target IS the construct)
+        "CAR-Treg", "CAAR-T",
+        # Generic / fallback
+        "CAR-T_unspecified", "Other_or_unknown",
+    ],
     "ProductType": [
         "Autologous", "Allogeneic/Off-the-shelf", "In vivo", "Unclear",
     ],
@@ -104,12 +114,11 @@ markdown fences):
                     autoimmune indication that doesn't fit the listed
                     rheumatology entities (e.g. multiple sclerosis,
                     myasthenia gravis, pemphigus, ITP, Graves', etc.).
-  target_category:  the antigen/construct, in the canonical short form
-                    used in the CAR-T literature. Use the protein name
-                    when that's canonical, and the abbreviation when
-                    THAT'S canonical: "CD19", "CD20", "BCMA", "BAFF",
-                    "CD7", "CAR-Treg", "CAAR-T", "CD19/BCMA dual",
-                    "CD19/CD20 dual", "BCMA/CD70 dual", "Other_or_unknown".
+  target_category:  EXACTLY one of: {targets}
+                    (use the exact label spelling — do not invent
+                    variants such as "CD-19", "cd19", "CD19/CD20-dual"
+                    or "Bcma". For dual targets the canonical form is
+                    "X/Y dual" with a single space before "dual".)
   product_type:     EXACTLY one of: {product_types}
 
 Be conservative — if the trial text doesn't clearly support a label, use
@@ -366,6 +375,7 @@ def main() -> int:
         nct = row["NCTId"]
         prompt = PROMPT.format(
             entities=", ".join(ALLOWED_VALUES["DiseaseEntity"]),
+            targets=", ".join(ALLOWED_VALUES["TargetCategory"]),
             product_types=", ".join(ALLOWED_VALUES["ProductType"]),
             nct=nct,
             title=str(row.get("BriefTitle", ""))[:300],
