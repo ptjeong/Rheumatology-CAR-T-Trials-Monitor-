@@ -1,0 +1,29 @@
+# Table 1: CAR-T autoimmune trials by L1 family with L2 detail
+# Snapshot: 2026-04-25 | Code: commit 540b9c1 | Source: ClinicalTrials.gov v2 API
+# n_trials = number of trials; n_active = recruiting/not-yet/active-not/enrolling-by-invitation; total_enrolled = sum of EnrollmentCount across trials
+Family,L2,n_trials,n_active,total_enrolled
+Connective tissue,(family total),104,89,2874
+Connective tissue,SLE,79,67,2144
+Connective tissue,IIM,11,10,468
+Connective tissue,SSc,9,8,170
+Connective tissue,CTD_other,2,2,56
+Connective tissue,IgG4-RD,2,2,27
+Connective tissue,Sjogren,1,0,9
+Inflammatory arthritis,(family total),3,3,47
+Inflammatory arthritis,RA,3,3,47
+Vasculitis,(family total),5,5,170
+Vasculitis,AAV,5,5,170
+Neurologic autoimmune,(family total),43,37,1176
+Neurologic autoimmune,Myasthenia,18,14,424
+Neurologic autoimmune,MS,11,10,335
+Neurologic autoimmune,Neurology_other,11,11,365
+Neurologic autoimmune,NMOSD,2,1,27
+Neurologic autoimmune,Stiff-person,1,1,25
+Other autoimmune,(family total),31,27,570
+Other autoimmune,Autoimmune cytopenias,16,14,346
+Other autoimmune,Endocrine autoimmune,6,6,32
+Other autoimmune,Glomerular / renal,6,5,101
+Other autoimmune,Dermatologic autoimmune,2,2,64
+Other autoimmune,GVHD,1,0,27
+Basket/Multidisease,(family total),98,91,3417
+Basket/Multidisease,Basket/Multidisease,98,91,3417

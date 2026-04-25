@@ -1,0 +1,18 @@
+# Table 2B: Top 15 named CAR-T products (by trial count)
+# Snapshot: 2026-04-25
+ProductName,n_trials,targets,modality,leading_indication
+kyv-101,12,"CD19,CD19/CD20 dual",Autologous,Other immune-mediated
+gc012f,11,CD19/BCMA dual,Autologous,Other immune-mediated
+ytb323,8,CD19,Autologous,Other immune-mediated
+caba-201,6,"CAAR-T,CD19",Autologous,Other immune-mediated
+hn2301,5,"CD19,Other_or_unknown",In vivo,Other immune-mediated
+kn5501,5,CD19,Allogeneic/Off-the-shelf,Basket/Multidisease
+kn5601,5,CD19/BCMA dual,Allogeneic/Off-the-shelf,Other immune-mediated
+bms-986353,5,CD19,Autologous,Other immune-mediated
+rd06-05,5,CD19/BCMA dual,Allogeneic/Off-the-shelf,Other immune-mediated
+descartes-08,4,BCMA,Autologous,Other immune-mediated
+ct1192,4,"CD19,CD19/CD20 dual",Allogeneic/Off-the-shelf,SLE
+qt-019c,4,CD19/BCMA dual,Allogeneic/Off-the-shelf,Other immune-mediated
+jy231,3,CD19,In vivo,Basket/Multidisease
+lcar-aio,3,CD19/CD20 dual,Autologous,Basket/Multidisease
+cnct19,3,CD19,Autologous,Other immune-mediated
