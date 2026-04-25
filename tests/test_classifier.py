@@ -243,7 +243,23 @@ class TestSponsorClassification:
 
     def test_government_via_ctgov_class(self):
         assert _classify_sponsor("NCI", "NIH") == "Government"
-        assert _classify_sponsor("VA", "OTHER_GOV") == "Government"
+        # OTHER_GOV is intentionally NOT pre-mapped to Government (Phase 2
+        # alignment with onc; see _CTGOV_CLASS_MAP). Sponsors whose name
+        # carries an explicit gov-agency signal still resolve to Government
+        # via the name heuristic.
+        assert _classify_sponsor("Department of Veterans Affairs", "OTHER_GOV") == "Government"
+
+    def test_other_gov_with_industry_name_resolves_to_industry(self):
+        """OTHER_GOV with industry-name signals correctly resolves through
+        the heuristic to Industry. Old behaviour pre-mapped OTHER_GOV →
+        Government, masking these.
+        """
+        assert _classify_sponsor("Acme Therapeutics, Inc.", "OTHER_GOV") == "Industry"
+
+    def test_other_gov_with_blank_name_is_other(self):
+        """OTHER_GOV with no name signal falls through to 'Other' rather
+        than silently 'Government'."""
+        assert _classify_sponsor("", "OTHER_GOV") == "Other"
 
     def test_academic_keyword_fallback(self):
         assert _classify_sponsor("Universitätsklinikum Köln", None) == "Academic"

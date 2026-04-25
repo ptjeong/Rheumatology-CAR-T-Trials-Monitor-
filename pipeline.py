@@ -506,7 +506,12 @@ _CTGOV_CLASS_MAP = {
     "INDUSTRY": "Industry",
     "NIH": "Government",
     "FED": "Government",
-    "OTHER_GOV": "Government",
+    # OTHER_GOV is deliberately NOT mapped (Phase 2 alignment with the onc
+    # app). CT.gov over-applies it to non-US public hospitals — Chinese
+    # provincial hospitals, Czech public research institutes, Russian federal
+    # institutes — that are functionally academic. Those cases are routed
+    # through the name-based heuristic. Only sponsors whose names carry an
+    # explicit gov-agency signal (NIH / VA / DoD / MoH) end up "Government".
     "NETWORK": "Academic",
     "INDIV": "Academic",  # investigator-initiated trials run through academic centers
     "OTHER": None,  # fall through to heuristic
@@ -531,16 +536,10 @@ def _classify_sponsor(lead_sponsor: str | None, lead_sponsor_class: str | None =
         cls = str(lead_sponsor_class).upper().strip()
         mapped = _CTGOV_CLASS_MAP.get(cls)
         if mapped is not None:
-            # CT.gov frequently tags genuinely-academic public hospitals
-            # (e.g. Chinese provincial, European public) as OTHER_GOV. Let a
-            # strong gov-name signal (NIH/VA/DoD/MoH) keep the Government
-            # label; otherwise redirect academic-named entities to Academic.
-            if mapped == "Government" and cls == "OTHER_GOV":
-                if any(h in name for h in _GOV_HINTS):
-                    return "Government"
-                if any(h in name for h in _ACADEMIC_HINTS):
-                    return "Academic"
             return mapped
+        # OTHER_GOV / OTHER / UNKNOWN fall through to the name-based
+        # heuristic below — see the _CTGOV_CLASS_MAP comment for why
+        # OTHER_GOV is not pre-mapped to Government.
     if not name:
         return "Other"
     if any(h in name for h in _GOV_HINTS):
