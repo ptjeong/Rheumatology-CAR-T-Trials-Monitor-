@@ -2906,6 +2906,11 @@ with tab_overview:
             hovertemplate="<b>%{label}</b><br>%{value} trials<br>%{percentRoot:.0%} of filtered total<extra></extra>",
             insidetextorientation="auto",
             maxdepth=3,
+            # Plotly defaults to sort=True, which orders wedges by VALUE
+            # descending — ignoring our explicit _FAMILY_ORDER input order
+            # and breaking the contiguous rheum-triad arc (CTD → IA →
+            # Vasculitis). sort=False honours the order of the ids array.
+            sort=False,
         ))
         _fig_sb.update_layout(
             height=560, margin=dict(l=8, r=8, t=8, b=8),
