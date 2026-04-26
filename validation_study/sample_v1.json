@@ -1,0 +1,2105 @@
+{
+  "version": "v1",
+  "n": 100,
+  "n_requested": 100,
+  "snapshot_date": "2026-04-25",
+  "seed": 20260426,
+  "generated_at": "2026-04-26T07:35:24.906057+00:00",
+  "pipeline_sha": "1d5cd49a28e7497bdf09a36f7af75293bcc9b919",
+  "pipeline_dirty_worktree": true,
+  "stratification": "Stratified by DiseaseEntity. \u22653 trials per DiseaseEntity that has \u22655 in the source snapshot. Trials with insufficient text (no Title/Summary/Conditions/Interventions \u226550 chars) excluded.",
+  "stratification_breakdown": [
+    {
+      "DiseaseEntity": "AAV",
+      "n": 4
+    },
+    {
+      "DiseaseEntity": "Basket/Multidisease",
+      "n": 36
+    },
+    {
+      "DiseaseEntity": "CTD_other",
+      "n": 2
+    },
+    {
+      "DiseaseEntity": "IIM",
+      "n": 6
+    },
+    {
+      "DiseaseEntity": "IgG4-RD",
+      "n": 2
+    },
+    {
+      "DiseaseEntity": "Other immune-mediated",
+      "n": 25
+    },
+    {
+      "DiseaseEntity": "SLE",
+      "n": 21
+    },
+    {
+      "DiseaseEntity": "SSc",
+      "n": 4
+    }
+  ],
+  "axes_to_rate": [
+    "DiseaseEntity",
+    "TargetCategory",
+    "ProductType",
+    "TrialDesign",
+    "SponsorType"
+  ],
+  "autocomplete_vocab": {
+    "DiseaseEntity": [
+      "AAV",
+      "Behcet",
+      "CTD_other",
+      "IIM",
+      "IgG4-RD",
+      "RA",
+      "SLE",
+      "SSc",
+      "Sjogren",
+      "cGVHD",
+      "Other immune-mediated",
+      "Basket/Multidisease",
+      "Unclassified"
+    ],
+    "TargetCategory": [
+      "CD19",
+      "CD20",
+      "CD7",
+      "CD70",
+      "BCMA",
+      "BAFF",
+      "CD6",
+      "CD19/BCMA dual",
+      "CD19/CD20 dual",
+      "CD19/BAFF dual",
+      "BCMA/CD70 dual",
+      "CAR-Treg",
+      "CAAR-T",
+      "CAR-T_unspecified",
+      "Other_or_unknown"
+    ],
+    "ProductType": [
+      "Autologous",
+      "Allogeneic/Off-the-shelf",
+      "In vivo",
+      "Unclear"
+    ],
+    "TrialDesign": [
+      "Single disease",
+      "Basket/Multidisease"
+    ],
+    "SponsorType": [
+      "Industry",
+      "Academic",
+      "Government",
+      "Other"
+    ]
+  },
+  "trials": [
+    {
+      "NCTId": "NCT06775912",
+      "BriefTitle": "Clinical Study on Targeted CD19/BCMA CAR-T Therapy for Autoimmune Diseases",
+      "BriefSummary": "This is an open clinical pharmacological translational Research Study, aiming to evaluate the safety, tolerability, pharmacokinetics, pharmacodynamics and efficacy of RD06-05 in patients with active SLE, SSc, AAV, IIM, NMOSD, MS, MG",
+      "Conditions": "SLE|Systemic Sclerosis|IIM|NMOSD|MS|MG|ANCA Associated Vasculitis (AAV)",
+      "Interventions": "RD06-05 CART Cell Injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Nanjing Bioheng Biotech Co., Ltd.",
+      "EnrollmentCount": 18,
+      "StartDate": "2025-01-03T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06417398",
+      "BriefTitle": "Preliminary Clinical Study of UTAA09 Injection in the Treatment of Relapsed/Refractory Autoimmune Diseases",
+      "BriefSummary": "To evaluate the safety of UTAA09 injection in the treatment of relapsed/refractory (R/R) autoimmune disease (AID).\n\nTo evaluate the pharmacokinetic (PK) profile of UTAA09 injection in patients with R/R AID.\n\nTo evaluate the pharmacodynamic (PD) characteristics of UTAA09 injection in patients with R/R AID.\n\nTo evaluate the initial efficacy of UTAA09 injection in the treatment of R/R AID subjects.\n\nTo evaluate the immunogenicity of UTAA09 injection in R/R AID subjects.",
+      "Conditions": "Systemic Lupus Erythematosus|Idiopathic Inflammatory Myopathies|Systemic Sclerosis|Sjogren's Syndrome|Rheumatoid Arthritis|Immune Thrombocytopenia|Primary Biliary Cholangitis",
+      "Interventions": "T cell injection targeting CD19 chimeric antigen receptor",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "PersonGen BioTherapeutics (Suzhou) Co., Ltd.",
+      "EnrollmentCount": 10,
+      "StartDate": "2024-05-14T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06710717",
+      "BriefTitle": "Autologous CD19 Car T-Cell Therapy For Severe Refractory Systemic Lupus Erythematosus (SLE)",
+      "BriefSummary": "This pilot clinical study aims to evaluate the effectiveness of Chimeric Antigen Receptor (CAR) T-cell therapy in treating severe, refractory systemic lupus erythematosus (SLE), an autoimmune disease driven by autoreactive B-cells. Current treatments for severe SLE, including glucocorticoids, cytotoxic, and immunosuppressive drugs, have significant limitations. These treatments do not adequately control the underlying autoimmune process and require long-term use, leading to chronic side effects and often failing to prevent permanent organ damage. Given the high prevalence and mortality rates associated with SLE in regions like Asia and Malaysia, there is a pressing need for more effective therapies.",
+      "Conditions": "Systemic Lupus Erythematous (SLE)",
+      "Interventions": "CD19 CAR-T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "National University of Malaysia",
+      "EnrollmentCount": 5,
+      "StartDate": "2025-01-03T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07040917",
+      "BriefTitle": "A Study of CAR-T Cells in Subjects With Autoimmune Diseases",
+      "BriefSummary": "The purpose of this study is to assess the safety and efficacy of CAR-T cell therapy in Subjects with autoimmune diseases.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "CAR-T cell",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Chinese PLA General Hospital",
+      "EnrollmentCount": 12,
+      "StartDate": "2025-09-30T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CAR-T_unspecified",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07391605",
+      "BriefTitle": "Descartes-08 in Autoantibody Myositis",
+      "BriefSummary": "This is a randomized, double-blind, placebo-controlled phase 2 study to evaluate the efficacy, safety and tolerability of an autologous T-cells expressing a chimeric antigen receptor (CAR) directed to B-Cell maturation antigen (BCMA) in patients with autoantibody-mediated myositis, including antisynthetase syndrome (ASyS) and dermatomyositis (DM).",
+      "Conditions": "Antisynthetase Syndrome",
+      "Interventions": "Descartes-08|Placebo",
+      "Phase": "PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Cartesian Therapeutics",
+      "EnrollmentCount": 60,
+      "StartDate": "2026-04-28T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IIM",
+        "TargetCategory": "BCMA",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06694298",
+      "BriefTitle": "A Study of SYS6020 Injection in Refractory Active Systemic Lupus Erythematosus",
+      "BriefSummary": "This study aimed to observe the safety and tolerability of SYS6020 in adult participants with refractory active systemic lupus erythematosus, determine the recommended dose (RD) that may be explored for subsequent studies, and preliminly evaluate the clinical efficacy of this product,and explore the pharmacokinetics and immunogenicity of SYS6020 injection in those participants.",
+      "Conditions": "Refractory Active Systemic Lupus Erythematosus",
+      "Interventions": "SYS6020",
+      "Phase": "PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "CSPC ZhongQi Pharmaceutical Technology Co., Ltd.",
+      "EnrollmentCount": 50,
+      "StartDate": "2024-12-26T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "BCMA",
+        "ProductType": "In vivo",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT05239702",
+      "BriefTitle": "Clinical Study of Targeting CD7 CAR-T Cells in the Treatment of Autoimmune Diseases",
+      "BriefSummary": "A Clinical Study on the Safety and Effectiveness of Targeting CD7 Chimeric Antigen Receptor T Cells in the Treatment of Autoimmune Diseases",
+      "Conditions": "Crohn Disease|Ulcerative Colitis|Dermatomyositis|Still Disease|Autoimmune Diseases",
+      "Interventions": "CD7 CAR T-cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "UNKNOWN",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 75,
+      "StartDate": "2022-02-28T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IIM",
+        "TargetCategory": "CD7",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07315087",
+      "BriefTitle": "CAR T-cell Therapy Targeting CD19 and BCMA(QT-019C) in Patients With Relapse/Refractory Autoimmune Diseases",
+      "BriefSummary": "CAR T-cell Therapy Targeting CD19 and BCMA(QT-019C) in Patients With Relapse/Refractory Autoimmune Diseases",
+      "Conditions": "SLE - Systemic Lupus Erythematosus|SSc-Systemic Sclerosis|IIM- Idiopathic Inflammatory Myopathies|ANCA Associated Vasculitis (AAV)|Connective Tissue Disease-Associated Thrombocytopenia|SLE-ITP",
+      "Interventions": "QT-019C",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Institute of Hematology & Blood Diseases Hospital, China",
+      "EnrollmentCount": 12,
+      "StartDate": "2026-01-01T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06208280",
+      "BriefTitle": "F01 in the Treatment of Autoimmune Diseases",
+      "BriefSummary": "This is a multicenter, open lable clinical study to evaluate the safety and tolerability of F01 in autoimmune diseases.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "After preconditioning with Fludarabine and Cyclophosphamide, F01 will be evaluated.",
+      "Phase": "PHASE1",
+      "OverallStatus": "UNKNOWN",
+      "LeadSponsor": "RenJi Hospital",
+      "EnrollmentCount": 20,
+      "StartDate": "2024-01-09T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CAR-T_unspecified",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07341828",
+      "BriefTitle": "A Study of C-CAR168 in the Treatment of Central Nervous System Autoimmune Diseases Refractory to Standard Therapy",
+      "BriefSummary": "This is an investigator-initiated, single-center, open-label study of C-CAR168, an autologous bi-specific CAR-T therapy targeting CD20 and BCMA, for the treatment of adult patients with central nervous system autoimmune diseases refractory to standard therapy",
+      "Conditions": "Multiple Sclerosis (MS)|Neuromyelitis Optica Spectrum Disorders (NMOSD)|Autoimmune Encephalitis|Stiff Person Syndrome",
+      "Interventions": "CD20/BCMA-directed CAR-T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Huashan Hospital",
+      "EnrollmentCount": 15,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "BCMA",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06588491",
+      "BriefTitle": "KYSA-8: A Study of Anti-CD19 Chimeric Antigen Receptor T-Cell (CD19 CAR T) Therapy, in Subjects With Treatment Refractory Stiff Person Syndrome",
+      "BriefSummary": "A Study of Anti-CD19 Chimeric Antigen Receptor T-Cell Therapy for Subjects with Treatment Refractory Stiff Person Syndrome",
+      "Conditions": "Stiff-Person Syndrome|SPS",
+      "Interventions": "Standard lymphodepletion regimen",
+      "Phase": "PHASE2",
+      "OverallStatus": "ACTIVE_NOT_RECRUITING",
+      "LeadSponsor": "Kyverna Therapeutics",
+      "EnrollmentCount": 25,
+      "StartDate": "2024-09-25T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06544330",
+      "BriefTitle": "A Phase 1 Study of SYNCAR-001 + STK-009 Without Conditioning Chemotherapy (Lymphodepletion) in Subjects With Severe, Refractory Systemic Autoimmune Rheumatic Disease",
+      "BriefSummary": "This is a phase 1 study of SYNCAR-001 + STK-009 in patients with severe, refractory systemic autoimmune rheumatic disease.",
+      "Conditions": "Systemic Lupus Erythematosus|Lupus Nephritis|Systemic Sclerosis",
+      "Interventions": "STK-009|SYNCAR-001",
+      "Phase": "PHASE1",
+      "OverallStatus": "ACTIVE_NOT_RECRUITING",
+      "LeadSponsor": "Synthekine",
+      "EnrollmentCount": 48,
+      "StartDate": "2025-04-29T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06557265",
+      "BriefTitle": "A Phase 1/2 Study of NKX019 in Subjects With Autoimmune Disease (Ntrust-1)",
+      "BriefSummary": "This is an open-label, multi-center, non-randomized, Phase 1/2 study to determine the safety and tolerability of NKX019 (allogeneic CAR NK cells targeting CD19) in participants with active lupus nephritis (LN) or primary membranous nephropathy (pMN).",
+      "Conditions": "Lupus Nephritis|Primary Membranous Nephropathy",
+      "Interventions": "Fludarabine, Cyclophosphamide|NKX019",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Nkarta, Inc.",
+      "EnrollmentCount": 96,
+      "StartDate": "2024-06-13T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07224373",
+      "BriefTitle": "An Open-label Study of AZD0120 in Adults With Multiple Sclerosis",
+      "BriefSummary": "This trial is a Phase 1b, open-label, multi-center, clinical study of AZD0120, a BCMA/CD19 dual targeting CAR+ T-cell therapy, to evaluate the safety and tolerability in adult participants with Multiple Sclerosis.",
+      "Conditions": "Multiple Sclerosis",
+      "Interventions": "AZD0120 - Regimen 1|AZD0120 - Regimen 2",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "AstraZeneca",
+      "EnrollmentCount": 24,
+      "StartDate": "2025-12-09T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06686524",
+      "BriefTitle": "Clinical Study of CD19 Targeted Universal Chimeric Antigen Receptor T Lymphocytes (UCAR-T) for the Treatment of Refractory Juvenile Dermatomyositis (RJDM)",
+      "BriefSummary": "This study is an open-label, single-arm, dose-escalation trial primarily designed to evaluate the safety and efficacy of a universal CAR-T cell therapy targeting CD19 in the treatment of patients with RJDM. Additionally, the study aims to characterize its pharmacokinetic and pharmacodynamic properties, explore its role in immune system reconstitution, and assess long-term survival benefits.",
+      "Conditions": "Dermatomyositis, Juvenile|Dermatomyositis",
+      "Interventions": "Anti-CD19 UCAR-T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chongqing Precision Biotech Co., Ltd",
+      "EnrollmentCount": 18,
+      "StartDate": "2024-11-11T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IIM",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07364396",
+      "BriefTitle": "Efficacy and Safety of CRC01 in Participants With Severe, Refractory Systemic Lupus Erythematosus",
+      "BriefSummary": "The purpose of this clinical trial is to evaluate the safety and efficacy of CRC01, an investigational autologous anti-CD19 chimeric antigen receptor T-cell (CAR-T) therapy, in people with lupus nephritis (LN), a serious kidney complication of systemic lupus erythematosus (SLE).\n\nThe main objectives of the study are:\n\n1. To determine whether CRC01 infusion can improve kidney outcomes and reduce disease activity in participants with lupus nephritis.\n2. To assess the safety profile, including potential risks such as cytokine release syndrome (CRS) and neurotoxicity.\n\nStudy Design This is a single-arm, open-label, multi-center, Phase 1/2 study. All enrolled participants will receive CRC01 after screening and baseline assessments.\n\nStudy Procedures\n\nParticipants will:\n\n* Undergo eligibility screening, including blood tests, urine tests, and disease activity assessments.\n* Provide autologous T lymphocytes through a procedure called leukapheresis.\n* Receive a lymphodepleting pre-conditioning regimen (short course of chemotherapy).\n* Receive a single intravenous infusion of CRC01 cells.\n* Be hospitalized for close monitoring to detect and manage early adverse events such as CRS or neurotoxicity.\n* Return for scheduled follow-up assessments through Week 52 (12 months) post-infusion to evaluate safety and treatment response.\n\nKey Outcomes\n\nResearchers will measure:\n\n* Changes in proteinuria and kidney function.\n* Changes in disease activity scores.\n* Incidence and severity of adverse events.",
+      "Conditions": "Lupus Nephritis|Lupus Nephritis (LN)|SLE|SLE (Systemic Lupus)",
+      "Interventions": "CRC01",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Curocell Inc.",
+      "EnrollmentCount": 39,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06868290",
+      "BriefTitle": "Phase 2 Study Evaluating Rapcabtagene Autoleucel in Participants With Severe Active GPA or MPA",
+      "BriefSummary": "The purpose of this study is to evaluate the efficacy and safety of rapcabtagene autoleucel versus comparator in participants with severe active Granulomatosis with Polyangiitis (GPA) or Microscopic Polyangiitis (MPA)",
+      "Conditions": "ANCA Associated Vasculitis (AAV)",
+      "Interventions": "Active Comparator|Glucocorticoids|Rapcabtagene autoleucel",
+      "Phase": "PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Novartis Pharmaceuticals",
+      "EnrollmentCount": 126,
+      "StartDate": "2025-03-13T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "AAV",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06569472",
+      "BriefTitle": "Clinical Trial of CD19-targeted CAR-T Therapy for Refractory Juvenile Dermatomyositis",
+      "BriefSummary": "This is a Phase I clinical trial to evaluate the efficacy and safety of CD19-targeted CAR-T in the treatment of refractory juvenile dermatomyositis (RJDM).The experiment was divided into two phases: dose exploration (Part A) and dose extension (Part B).",
+      "Conditions": "Juvenile Dermatomyositis",
+      "Interventions": "CD19-targetd CAR-T",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chongqing Precision Biotech Co., Ltd",
+      "EnrollmentCount": 10,
+      "StartDate": "2024-07-02T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IIM",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07085676",
+      "BriefTitle": "Phase 1 Study of HBI0101 CAR-T in Refractory B-Cell Autoimmune Diseases",
+      "BriefSummary": "A Phase 1 study of HBI0101 BCMA-CART in B-Cell Mediated Autoimmune Rheumatic Diseases. The goal of the study is evaluation of safety and identification of the maximum HBI0101 CART dose that may be administered safely to patients with B-cell mediated autoimmune disease.",
+      "Conditions": "Systemic Lupus Erythematosus (SLE)|Systemic Sclerosis (SSc)|Idiopathic Inflammatory Myopathy (IIM)|Rheumatoid Arthritis (RA)",
+      "Interventions": "HBI0101 CART",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Polina Stepensky",
+      "EnrollmentCount": 60,
+      "StartDate": "2024-09-01T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "BCMA",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07361094",
+      "BriefTitle": "Autologous CD19/BCMA Dual-Target CAR-T for Relapsed/Refractory Autoimmune Diseases",
+      "BriefSummary": "Autoimmune diseases occur when the immune system mistakenly attacks the body's own tissues, leading to chronic inflammation and damage to organs such as the kidneys, lungs, muscles, nerves, or blood cells. Although many treatments are available, some patients do not respond adequately or experience repeated disease flares despite long-term therapy. New treatment approaches are therefore needed for patients with relapsed or refractory autoimmune diseases. This study is an exploratory clinical trial designed to evaluate the safety and potential benefits of a novel cell-based therapy called autologous CD19-BCMA dual-target CAR T-cell therapy. This treatment uses a patient's own immune cells, which are collected from the blood, modified in the laboratory to recognize specific immune cells involved in autoimmune disease, and then infused back into the patient. The study includes adult patients with certain relapsed or refractory autoimmune diseases, such as systemic lupus erythematosus, systemic sclerosis, inflammatory muscle diseases, Sj\u00f6gren's syndrome, autoimmune hemolytic anemia, and multiple sclerosis. After cell collection and preparative treatment, participants will receive a single infusion of the investigational CAR T-cell therapy and will be closely monitored for safety. The main purpose of this study is to better understand the safety of this treatment, including possible side effects. The study will also explore how the disease responds to treatment over time. Participants will be followed for up to two years after treatment to assess safety and clinical outcomes. The results of this study may help researchers better understand whether this type of cell therapy could be a feasible treatment option for patients with difficult-to-treat autoimmune diseases in the future.",
+      "Conditions": "Relapsed/Refractory Systemic Lupus Erythematosus|Relapsed/Refractory Systemic Sclerosis|Relapsed/Refractory Idiopathic Inflammatory Myopathies|Relapsed/Refractory sj\u00f6gren's Syndrome|Relapsed/Refractory Autoimmune Hemolytic Anemia|Relapsed/Refractory Multiple Sclerosis",
+      "Interventions": "Autologous CD19-BCMA Dual-Target CAR T-Cell Therapy",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Beijing Boren Hospital",
+      "EnrollmentCount": 12,
+      "StartDate": "2025-11-06T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07413835",
+      "BriefTitle": "Efficacy and Safety of HN2302 in Refractory Myasthenia Gravis(MG)",
+      "BriefSummary": "This is an open label, single arm study, to evaluate the safety , tolerability and preliminary efficacy of HN2302 for refractory myasthenia gravis.",
+      "Conditions": "Refractory Myasthenia Gravis",
+      "Interventions": "HN2302 Injection",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "The Affiliated Hospital of Xuzhou Medical University",
+      "EnrollmentCount": 6,
+      "StartDate": "2026-03-17T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "Other_or_unknown",
+        "ProductType": "In vivo",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07152223",
+      "BriefTitle": "Clinical Study on the Safety and Efficacy of CD19-BCMA CAR-T Cell Therapy for Connective Tissue Diseases",
+      "BriefSummary": "This study is a single-arm, single-center Investigator-Initiated Trial (IIT) designed to evaluate the safety, pharmacokinetic profile, and preliminary efficacy of CD19-BCMA CAR-T cells in subjects diagnosed with connective tissue diseases.",
+      "Conditions": "Connective Tissue Diseases",
+      "Interventions": "CAR-T",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Guangzhou Bio-gene Technology Co., Ltd",
+      "EnrollmentCount": 20,
+      "StartDate": "2025-08-30T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "CTD_other",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07275736",
+      "BriefTitle": "A Study of CNCT19 in the Treatment of Relapsed or Refractory Neurological Autoimmune Diseases",
+      "BriefSummary": "This study is a single-arm, open-label, non-randomized clinical trial aimed at evaluating the safety, tolerability and preliminary efficacy of CNCT19 cell injection in the treatment of patients with relapsed/refractory Neurological Autoimmune Diseases.",
+      "Conditions": "Neurological Autoimmune Diseases",
+      "Interventions": "CNCT19 cell injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Juventas Cell Therapy Ltd.",
+      "EnrollmentCount": 18,
+      "StartDate": "2025-03-01T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07266337",
+      "BriefTitle": "CD19/BCMA CAR-T for SLE",
+      "BriefSummary": "The purpose of this clinical trial is to learn if CD19/BCMA CAR-T works to treat refractory SLE in adults. It will also learn about the safety and efficacy of the CD19/BCMA CAR-T cell product.\n\nThe main questions it aims to answer are:\n\n1. What CAR-T-related adverse events (AEs) occur within 3 months after the CAR-T cell infusion?\n2. Which dose level is the optimal biological dose (OBD)?\n3. What is the the changes of disease activity status, proportion of patients achieving DORIS remission, percentage of participants achieving maintenance of drug-free DORIS remission, proportion of patients achieving SRI-4 remission, percentage of participants achieving maintenance of LLDAS?\n\nParticipants will:\n\n1. Receive CD19/BCMA CAR-T cells infusion on Day 0.\n2. Be hospitalized for at least 7 days post-infusion for close safety monitoring and remain within 2 hours of the treatment facility for at least 28 days.\n3. Visit the clinic at Day 14, Day 28, month 3, month 6, month 9, month 12, month 18 and month 24 after CAR-T cells infusion.",
+      "Conditions": "SLE - Systemic Lupus Erythematosus",
+      "Interventions": "CD19/BCMA CAR T-cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Chengdu Ucello Biotechnology Co., Ltd.",
+      "EnrollmentCount": 24,
+      "StartDate": "2025-12-10T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06797024",
+      "BriefTitle": "JY231 Injection for the Treatment of Relapsed/Refractory Neurologic Immune Disorders",
+      "BriefSummary": "his study is an investigator-initiated single center, single arm clinical study with a target population of patients with relapsed/refractory neurologic immune disorders. It is an early exploratory clinical study of the safety, tolerability and initial efficacy of JY231 injection in the treatment of relapsed/refractory neurologic immune disorders.",
+      "Conditions": "Autoimmune Diseases of the Nervous System",
+      "Interventions": "JY231 Injection",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Tongji Hospital",
+      "EnrollmentCount": 20,
+      "StartDate": "2025-02-28T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "In vivo",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06255028",
+      "BriefTitle": "A Study of CNTY-101 in Participants With Refractory B Cell-mediated Autoimmune Diseases",
+      "BriefSummary": "CALiPSO-1 is a Phase 1, multi-centre, dose-confirmation study to evaluate the safety and efficacy of CNTY-101 in participants with refractory B cell-mediated autoimmune diseases including those with moderate to severe systemic lupus erythematosus (SLE) with or without lupus nephritis (LN), idiopathic inflammatory myopathies (IIM), and diffuse cutaneous systemic sclerosis (DcSSc).",
+      "Conditions": "Systemic Lupus Erythematosus|Lupus Nephritis|Idiopathic Inflammatory Myopathies|Diffuse Cutaneous Systemic Sclerosis",
+      "Interventions": "CNTY-101|IL-2|Lymphodepleting Chemotherapy",
+      "Phase": "PHASE1",
+      "OverallStatus": "ACTIVE_NOT_RECRUITING",
+      "LeadSponsor": "Century Therapeutics, Inc.",
+      "EnrollmentCount": 6,
+      "StartDate": "2025-02-06T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06193889",
+      "BriefTitle": "KYSA-6: A Study of Anti-CD19 Chimeric Antigen Receptor T-Cell Therapy, in Patients With Generalized Myasthenia Gravis",
+      "BriefSummary": "A Study of the Anti-CD 19 Chimeric Antigen Receptor T Cell Therapy for Patients with Myasthenia Gravis",
+      "Conditions": "Myasthenia Gravis|Generalized Myasthenia Gravis",
+      "Interventions": "KYV-101|Standard lymphodepletion regimen|Standard of Care Treatment",
+      "Phase": "PHASE2|PHASE3",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Kyverna Therapeutics",
+      "EnrollmentCount": 66,
+      "StartDate": "2024-08-28T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07193667",
+      "BriefTitle": "CAR-T in Subjects With Relapsed/Refractory Autoimmune Disease",
+      "BriefSummary": "In this study, CD19 CAR-T cells were administered to patients with relapsed/refractory autoimmune diseases. This study intends to use retroviral vector-based tandem CAR-T cells targeting CD19 to treat autoimmune disease. The CAR-T cells were provided by Shenzhen Cell Valley. A study published in the New England Journal of Medicine provides strong evidence for the therapeutic potential of CD19 CAR-T therapy in autoimmune diseases. The study enrolled 15 participants, including eight with severe SLE, three with idiopathic inflammatory myositis, and four with systemic sclerosis. The median follow-up was 15 months (4 to 29 months). Data from the clinical trial showed that all patients with SLE had a remission of DORIS, all patients with idiopathic inflammatory myositis had an ACR-EULAR major clinical response, all patients with systemic sclerosis had a decrease in the EUSTAR activity index score, and all patients discontinued immunosuppressive therapy completely. The investigators look forward to expanding the use of CAR-T cells in relapsed/refractory autoimmune diseases through this safety and efficacy clinical study and greatly enhancing the quality of life for these patients.",
+      "Conditions": "Relapsed/Refractory Autoimmune Diseases",
+      "Interventions": "CD19 CAR-T cells were administered to patients with relapsed/refractory autoimmune diseases",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "ShenZhen Cell Valley",
+      "EnrollmentCount": 3,
+      "StartDate": null,
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06414135",
+      "BriefTitle": "Relmacabtagene Autoleucel for the Treatment of Systemic Sclerosis",
+      "BriefSummary": "Relma-cel is a product containing CD19-CAR-transduced T cells. The purpose of this study is to evaluate the safety of Relma-cel at different dose levels in patients with early diffuse systemic sclerosis. Efficacy will be explored too. If enrolled, participants will undergo leukapheresis, lymphodepleting chemotherapy and administration of Relma-cel.",
+      "Conditions": "Systemic Sclerosis",
+      "Interventions": "Relma-cel",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Liangjing Lu",
+      "EnrollmentCount": 6,
+      "StartDate": "2024-06-12T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SSc",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07298590",
+      "BriefTitle": "An Exploratory Clinical Study on the Safety and Efficacy of CD19/BCMA CAR-NK in the Treatment of Relapsed and Refractory IgG4-related Disease",
+      "BriefSummary": "A single arm, open-label pilot study is designed to determine the safety and effectiveness of CD19/BCMA CAR NK cells (KN5601) in patients with IgG4 related diseases.",
+      "Conditions": "IgG4 Related Disease",
+      "Interventions": "CD19/BCMA CAR NK",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Changhai Hospital",
+      "EnrollmentCount": 18,
+      "StartDate": "2025-12-30T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IgG4-RD",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07085104",
+      "BriefTitle": "A Study to Investigate the Safety and Preliminary Efficacy of ALLO-329, an Allogeneic CAR T-cell Therapy, in Adults With Autoimmune Disease",
+      "BriefSummary": "This is a first-in-human, single-arm, open-label study evaluating the safety, tolerability, and preliminary efficacy of ALLO-329 in adults with autoimmune diseases: systemic lupus erythematosus (SLE) with and without renal involvement, idiopathic inflammatory myopathy (IIM), and systemic sclerosis (SSc).The purpose of this trial is to evaluate the safety and tolerability of ALLO-329, an allogeneic anti-CD19, anti-CD70 dual chimeric antigen receptor (CAR) T cell therapy, in adults with autoimmune disorders, provide initial evidence of biological activity and clinical response to the treatment and determine the recommended Phase 2 regimen (RP2R).",
+      "Conditions": "Systemic Lupus Erythematosus (With and Without Nephritis)|Idiopathic Inflammatory Myopathy|Systemic Sclerosis",
+      "Interventions": "ALLO-329|Cyclophosphamide",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Allogene Therapeutics",
+      "EnrollmentCount": 66,
+      "StartDate": "2025-11-13T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07412210",
+      "BriefTitle": "Safety and Efficacy of ES-NK Cell Injection in the Treatment of Refractory Lupus Nephritis: an Early Clinical Study",
+      "BriefSummary": "This is a single-arm, open-label, dose-escalation clinical trial. The entire trial is preliminarily expected to enroll 5 to 9 subjects.\n\nThe initial plan is to explore three dose groups: 2.5\u00d710\u2077, 7.5\u00d710\u2077, and 2.5\u00d710\u2078 cells/kg, with 3 subjects in each group. During the trial, based on a comprehensive assessment by the Safety Review Committee (SRC), the dose, dosing frequency, or dosing interval may be adjusted or increased.\n\nIn the dose-escalation phase, for the same dose group, one subject will be enrolled first. After obtaining at least 4 weeks of safety data, and upon the investigator's assessment confirming that the safety and tolerability risks are controllable, the second and third subjects can be enrolled. If the efficacy and safety data of the first subject in a dose group, based on the investigator's comprehensive judgment, indicate a significantly insufficient pharmacological effect, the study may proceed directly to the next dose group.\n\nBefore proceeding to each subsequent dose group, the SRC must evaluate the safety and pharmacodynamic data from the previous dose group for at least 4 weeks. Enrollment for the next group can only begin after the SRC confirms that the safety and tolerability risks are controllable and that the next dose level remains appropriate. The dose escalation will be determined based on safety data, combined with pharmacodynamic and efficacy data.",
+      "Conditions": "Systemic Lupus Erythenlatosus Nephritis",
+      "Interventions": "AXA-NK02",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Shanghai Jiao Tong University School of Medicine",
+      "EnrollmentCount": 9,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "Other_or_unknown",
+        "ProductType": "Unclear",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06106906",
+      "BriefTitle": "A Clinical Study of CD19 CAR-T in Active Systemic Lupus Erythematosus",
+      "BriefSummary": "The purpose of the study is to explore the safety and efficacy of CD19 CAR-T in active systemic lupus erythematosus.",
+      "Conditions": "Systemic Lupus Erythematosus",
+      "Interventions": "CD19 CAR-T cell infusion",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 15,
+      "StartDate": "2024-06-19T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07490041",
+      "BriefTitle": "Exploratory Clinical Study on the Safety and Efficacy of Anti- CD19/BCMA CAR-NK Cell Injection for the Treatment of Refractory Pediatric Rheumatic Diseases",
+      "BriefSummary": "A single arm, open-label pilot study is designed to determine the safety and effectiveness of anti-CD19/BCMA CAR-NK cell injection in patients with refractory pediatric rheumatic diseases.",
+      "Conditions": "Rheumatic Diseases|Pediatric Rheumatological Condition (i.e., Arthritis, SLE, Kawasaki's Disaese)|Systemic Lupus Erythematosus (SLE)|Connective Tissue Disease-associated Interstitial Lung Disease",
+      "Interventions": "KN5601",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "The Children's Hospital of Zhejiang University School of Medicine",
+      "EnrollmentCount": 36,
+      "StartDate": "2026-03-19T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "CTD_other",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07274059",
+      "BriefTitle": "Allogeneic UCB-derived CAR-T for SLE",
+      "BriefSummary": "The purpose of this clinical trial is to learn if allogeneic, umbilical cord blood-derived chimeric antigen receptor T-cell (UCAR-T) targeting CD19 and BCMA works to treat refractory SLE in adults. It will also learn about the safety and efficacy of the UCAR-T cell product.",
+      "Conditions": "SLE - Systemic Lupus Erythematosus",
+      "Interventions": "allogeneic umbilical cord blood-derived CAR-T targeting CD19 and BCMA",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chengdu Ucello Biotechnology Co., Ltd.",
+      "EnrollmentCount": 48,
+      "StartDate": "2025-03-26T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07038447",
+      "BriefTitle": "A Study of KITE-363 in Participants With Refractory Autoimmune Diseases",
+      "BriefSummary": "This study will have two Phases: Phase 1a and Phase 1b. The goal of this clinical study is to learn more about the study drug KITE-363, to establish dosing, tolerability, safety, and preliminary efficacy of KITE-363 in participants with refractory autoimmune diseases.\n\nThe primary objectives of this study are:\n\nPhase 1a: To evaluate the safety and tolerability of KITE-363 in participants with autoimmune disease. To determine the recommended dose for Phase 1b.\n\nPhase 1b: To evaluate the safety and efficacy of KITE-363 in participants with autoimmune disease.",
+      "Conditions": "Systemic Lupus Erythematosus|Lupus Nephritis|Systemic Sclerosis|Idiopathic Inflammatory Myopathy",
+      "Interventions": "Cyclophosphamide|Fludarabine|KITE-363",
+      "Phase": "PHASE1",
+      "OverallStatus": "ENROLLING_BY_INVITATION",
+      "LeadSponsor": "Kite, A Gilead Company",
+      "EnrollmentCount": 52,
+      "StartDate": "2025-07-02T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06711146",
+      "BriefTitle": "Safety and Efficacy of Metabolically Armed CD19 CAR-T Cells (Meta10-19) in the Treatment of Moderate to Severe Active SLE Clinical Research",
+      "BriefSummary": "A Study of Metabolically Armed CD19 CAR-T Cells Therapy for Patients With Moderate to Severe Active Systemic Lupus Erythematosus",
+      "Conditions": "Systemic Lupus Erythematosus",
+      "Interventions": "Metabolically Armed CD19 CAR-T cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 36,
+      "StartDate": "2024-12-24T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06277427",
+      "BriefTitle": "Refractory ANCA Associated Vasculitis and Lupus Nephritis Treated With BCMA-targeting CAR-T Cells",
+      "BriefSummary": "Lupus nephritis (LN) and ANCA-associated vasculitis are severe autoimmune diseases, which may lead to the death of patients, particularly when they are refractory to the conventional therapeutic agents. Based on the current knowledge, the autoantibodies against self-antigens may exert important pathological roles in the pathogenesis of both LN and ANCA-associated vasculitis, of which the origins are primarily plasmablasts and plasma cells. BCMA is the molecule expressed on memory B cells, plasmablasts and plasma cells, and therefore is an ideal target for the elimination of potential pathogenic antibody secreting cells. Chimeric antigen receptor (CAR) T cells against BCMA may provide a novel therapeutic way for the refractory LN and ANCA-associated vasculitis patients to eliminate the pathogenic autoantibody-secreting cells. In this study, the safety and efficacy of a novel CAR-T cell therapy using PRG-1801 cells, are evaluated in patients with refractory LN and ANCA-associated vasculitis.",
+      "Conditions": "Lupus Nephritis|ANCA Associated Vasculitis",
+      "Interventions": "PRG-1801 \uff08CAR-T against BCMA\uff09",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Lingli Dong",
+      "EnrollmentCount": 24,
+      "StartDate": "2024-02-05T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "BCMA",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07339540",
+      "BriefTitle": "the Safety and Efficacy of Targeted BCMA In Vivo LV Injection for Recurrent or Refractory Autoimmune Diseases",
+      "BriefSummary": "This study is designed as a single arm, open label, single center clinical trial to evaluate the safety, tolerability, efficacy, pharmacokinetic or pharmacodynamic characteristics of the investigational drug V001-BCMA in autoimmune disease.",
+      "Conditions": "Recurrent or Refractory Systemic Lupus Erythematosus|Recurrent or Refractory IgG4 Related Diseases|Recurrent or Refractory Systemic Sclerosis|Recurrent or Refractory Idiopathic Inflammatory Myopathy|Recurrent or Refractory ANCA Associated Vasculitis",
+      "Interventions": "V001-BCMA",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Tongji Hospital",
+      "EnrollmentCount": 45,
+      "StartDate": "2025-11-04T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "BCMA",
+        "ProductType": "In vivo",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT05828225",
+      "BriefTitle": "Evaluate the Safety and Efficacy of CAR-T Cells in the Treatment of Refractory Myasthenia Gravis",
+      "BriefSummary": "This is a single-arm, open-label, single-center, phase I study. The primary objective is to evaluate the safety of CD19 CAR-T therapy for patients with refractory myasthenia gravis, and to evaluate the pharmacokinetics of CD19 CAR-T in patients.",
+      "Conditions": "Myasthenia Gravis",
+      "Interventions": "CD19 CAR-T cells injection",
+      "Phase": "PHASE1",
+      "OverallStatus": "UNKNOWN",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 9,
+      "StartDate": "2023-04-30T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07265206",
+      "BriefTitle": "A Study of HY001N in the Treatment of Relapsed or Refractory Neurological Autoimmune Diseases",
+      "BriefSummary": "This study is a single-arm, open-label, non-randomized clinical trial aimed at evaluating the safety, tolerability and preliminary efficacy of HY001N cell injection in the treatment of patients with relapsed/refractory Neurological Autoimmune Diseases.",
+      "Conditions": "Neurological Autoimmune Diseases",
+      "Interventions": "HY001N cell injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Juventas Cell Therapy Ltd.",
+      "EnrollmentCount": 15,
+      "StartDate": "2025-12-30T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "Other_or_unknown",
+        "ProductType": "Unclear",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06794008",
+      "BriefTitle": "BCMA-CD19 CAR-T Therapy for Refractory Autoimmune Diseases",
+      "BriefSummary": "The objective of this study is to evaluate the efficacy and safety of BCMA/CD19 chimeric antigen receptor (CAR)-modified T cells in the treatment of autoimmune diseases.",
+      "Conditions": "Systemic Lupus Erythematosus|Inflammatory Myopathy|Systemic Sclerosis (SSc)|ANCA-associated Vasculitis|IgG4-Related Diseases|Antiphospholipid Syndrome|Acquired Thrombotic Thrombocytopenic Purpura|Behcet Disease|Sjogren Syndrome",
+      "Interventions": "BCMA-CD19 CAR-T therapy",
+      "Phase": "PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Peking University People's Hospital",
+      "EnrollmentCount": 50,
+      "StartDate": "2024-12-26T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06464679",
+      "BriefTitle": "An Exploratory Clinical Study of CD19 CAR NK Cell Injection for the Treatment of Relapsed/Refractory Autoimmune Diseases",
+      "BriefSummary": "A single arm, open-label pilot study is designed to determine the safety and effectiveness of CD19 CAR NK cells in patients with autoimmune diseases. 36-72 patients are planned to be enrolled in the dose-escalation trial. The primary objective of the study was to evaluate the safety and feasibility of CD19 CAR-NK cells for the treatment of patients with autoimmune diseases. The secondary objective is to evaluate the efficacy of CD19 CAR-NK cells in patients with autoimmune diseases.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "anti-CD19 CAR NK cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Changhai Hospital",
+      "EnrollmentCount": 72,
+      "StartDate": "2024-06-27T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06993493",
+      "BriefTitle": "Autologous CD19CAR-T Therapy for Recurrent/Refractory Autoimmune Diseases",
+      "BriefSummary": "This study is a single center, open label exploratory clinical trial aimed at evaluating the safety and efficacy of autologous CD19 CAR-T therapy in subjects with autoimmune diseases.\n\nThe study will adopt the traditional dose escalation model \"3+3\" design, with three dose groups set up, starting at a dose of 0.5 \u00d7 106 CAR+T cells/kg, to observe DLT, and conduct a 24 month safety and efficacy follow-up after cell infusion to observe the safety of autologous CD19 CAR-T and conduct preliminary efficacy evaluation.\n\nThree dose groups were set up, with dose group 1 as the starting dose, following the traditional 3+3 design rule for a single intravenous infusion:\n\nDose group dosage unit (CAR+T cells/kg) Acceptable dose range Expected sample size (\u00b1 30%, CAR+T cells/kg)\n\n1. 0.5 \u00d7 106 0.4 \u00d7 106\\~0.6 \u00d7 106 3-6 cases\n2. 1.0 \u00d7 106 0.7 \u00d7 106\\~1.3 \u00d7 106 3-6 cases\n3. 2.0 \u00d7 106 1.4 \u00d7 106\\~2.6 \u00d7 106 3-6 cases Dose escalation rule The enrollment starts from dose group 1, and if no DLT occurs in the 3 subjects included, they will be transferred to the next dose group. If one of the three subjects in a certain dose group develops DLT, three additional subjects will be added to the group for cell infusion at the same dose. If there is \u2265 1 case of DLT in the 3 additional cases, it will be reduced to the previous dose group. If there are only 3 subjects in the previous dose group at this time, an additional 3 subjects need to be added for the trial; If there are already 6 subjects in the previous dose group, the trial ends and this dose is the maximum tolerated dose (MTD).\n\nDose escalation is not allowed for the same subject. For safety reasons, the last subject in the previous dose group was observed for at least 28 days after autologous CD19 CAR-T infusion without DLT. The Safety Review Committee (SRC) held a meeting to decide whether to increase to the next dose group.\n\nDuring the dose escalation phase, SRC determines whether to continue increasing the dose or explore more subjects in a previously explored dose group based on the safety, efficacy, and pharmacokinetic (PK) results obtained for each dose group, and determines the recommended dose (RD) for subsequent studies.",
+      "Conditions": "Autoimmune Disease",
+      "Interventions": "CD19 CART",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Beijing Boren Hospital",
+      "EnrollmentCount": 12,
+      "StartDate": "2025-02-20T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06590545",
+      "BriefTitle": "Anti-CD 19 CAR-T Cell Therapy in Patients With ANCA Vasculitis",
+      "BriefSummary": "The goal of this phase I/II clinical trial is to investigate anti-CD 19 chimeric antigen receptor T cell (CAR-T cell) therapy in patients with antineutrophil cytoplasmic antibodies (ANCA) immunoglobulin (IgG) positive ANCA associated vasculitis (AAV).\n\nThe main questions it aims to answer are:\n\n* To assess the safety of anti-CD19 CAR-T cell therapy in subjects with active, treatment refractory, ANCA-IgG-positive AAV\n* To assess the clinical efficacy of anti-CD19 CAR-T cell therapy in subjects with active, treatment refractory ANCA-IgG-positive AAV\n* To assess the ANCA seroconversion rate in subjects with active, treatment refractory ANCA-IgG-positive AAV\n\nParticipants will receive a single dose of KYV-101 i.v., an autologous fully-human anti-CD19 CAR-T cell immunotherapy. Follow-up time is 52 weeks with regular visits at the site.",
+      "Conditions": "ANCA-IgG-positive ANCA Associated Vasculitis",
+      "Interventions": "KYV-101, an autologous fully-human anti-CD19 CAR T-cell immunotherapy",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "David Simon",
+      "EnrollmentCount": 8,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "AAV",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06947460",
+      "BriefTitle": "CD19-BCMA CART Cell Therapy for Refractory SLE-LN, SSc, and pSS-PAH",
+      "BriefSummary": "This is a single-center, open-label, non-randomized, single-arm clinical trial. Patients with refractory lupus neritis (SLE-LN), systemic sclerosis (SSc), and primary Sjogren syndrome combined with pulmonary artery hypertension (pSS-PAH) receive CD19-BCMA CAR T cell therapy. The primary objective is to prospectively assess the safety of CD19-BCMA CAR T cell therapy in patients with SLE-LN, SSc, and pSS-PAH. The primary endpoint is the type and incidence of dose-limiting toxicity (DLT) within 28 days after CD19-BCMA CAR T cell infusion.",
+      "Conditions": "Refractory Lupus Nephritis|Systemic Sclerosis|Primary Sjogren&#39;s Syndrome Combined With Pulmonary Hypertension",
+      "Interventions": "CD19-BCMA CAR-T cells infusion",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Beijing GoBroad Hospital",
+      "EnrollmentCount": 45,
+      "StartDate": "2025-04-18T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06419166",
+      "BriefTitle": "An Exploratory Clinical Study of GC012F Injection for Refractory gMG",
+      "BriefSummary": "This study is a single-arm, open-label early exploratory clinical trial designed to evaluate the safety, tolerability, and preliminary efficacy of GC012F injection in subjects with refractory GMG. Additionally, the study aims to assess the pharmacokinetic (PK), pharmacodynamic (PD) characteristics, and immunogenicity of GC012F injection in subjects.",
+      "Conditions": "Refractory Generalized Myasthenia Gravis",
+      "Interventions": "GC012F injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "WITHDRAWN",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 0,
+      "StartDate": "2024-12-01T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06316791",
+      "BriefTitle": "Exploratory Clinical Study of CNCT19 Anti CD19 Cell Therapy in the Treatment of Refractory Autoimmune Diseases",
+      "BriefSummary": "Exploratory clinical study of CNCT19 anti CD19 cell therapy in the treatment of refractory autoimmune diseases,To evaluate the safety and tolerability of CNCT19 in patients with refractory systemic lupus erythematosus (lupus nephritis, immune thrombocytopenia), refractory ANCA-associated vasculitis, and refractory dermatomyositis on the basis of standard of care.",
+      "Conditions": "Lupus Erythematosus, Systemic",
+      "Interventions": "single dose of CNCT19",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Juventas Cell Therapy Ltd.",
+      "EnrollmentCount": 24,
+      "StartDate": "2021-12-14T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06585514",
+      "BriefTitle": "Anti-CD19 Chimeric Antigen Receptor T Cells for Refractory Systemic Lupus Erythematosus",
+      "BriefSummary": "The goal of this study is to evaluate the safety and efficacy of CD19 CAR T cells in the treatment of Systemic lupus erythematosus (SLE).",
+      "Conditions": "Systemic Lupus Erythematosus (SLE)|Lupus Nephritis (LN)",
+      "Interventions": "CD19 CAR-T cells",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Beijing GoBroad Hospital",
+      "EnrollmentCount": 18,
+      "StartDate": "2024-10-17T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06887985",
+      "BriefTitle": "JY231(JY231) Injection for the Treatment of Refractory Autoimmune Diseases (ADs)",
+      "BriefSummary": "This study is an investigator-initiated single center, single arm clinical study with a target population of patients with Refractory Autoimmune Diseases (ADs). It is an early exploratory clinical study of the safety, tolerability and initial efficacy of JY231 injection in the treatment of Refractory Autoimmune Diseases (ADs).",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "JY231 Injection",
+      "Phase": null,
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "He Huang",
+      "EnrollmentCount": 45,
+      "StartDate": "2025-03-31T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "In vivo",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06871644",
+      "BriefTitle": "Clinical Study of CD7 CAR-T Cells for Relapsed/refractory Autoimmune Diseases",
+      "BriefSummary": "The primary objective was to evaluate the safety of CD7 CAR-T cells for the treatment of subjects with relapsed/refractory AID. CD7 CAR-T cells were infused in a single infusion in subjects who were screened after signing an informed consent form and undergoing single nucleus cell collection and pretreatment, and blood was collected before and after the infusion for pharmacokinetic, pharmacodynamic, immunogenicity, and safety evaluations.",
+      "Conditions": "Systemic Sclerosis - 2013 ACR/EULAR Classification Criteria",
+      "Interventions": "T cell injection targeting CD7 chimeric antigen receptor",
+      "Phase": null,
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "PersonGen BioTherapeutics (Suzhou) Co., Ltd.",
+      "EnrollmentCount": 18,
+      "StartDate": "2025-03-18T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SSc",
+        "TargetCategory": "CD7",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06653556",
+      "BriefTitle": "A Study of LCAR-AIO in Subjects With Relapsed/Refractory Systemic Lupus Erythematosus",
+      "BriefSummary": "This is a prospective, single-arm, open-label, dose-exploration and expansion clinical study of LCAR-AIO in adult subjects with relapsed/refractory systemic lupus erythematosus.",
+      "Conditions": "Systemic Lupus Erythematosus (SLE)",
+      "Interventions": "LCAR-AIO T cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 34,
+      "StartDate": "2025-01-08T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19/CD20 dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06690359",
+      "BriefTitle": "IM19 CAR-T Cell Therapy for IgA Nephropathy Patients and Membranous Nephropathy Patients",
+      "BriefSummary": "IM19 CAR-T cell therapy for IgA nephropathy patients with urinary protein and renal dysfunction, as well as patients with intermediate to high-risk primary membranous nephropathy",
+      "Conditions": "IgA Nephropathy|Membranous Nephropathy",
+      "Interventions": "IM19 chimeric antigen receptor T cell injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Beijing Immunochina Medical Science & Technology Co., Ltd.",
+      "EnrollmentCount": 12,
+      "StartDate": "2024-12-13T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06220201",
+      "BriefTitle": "A Study to Evaluate the Safety, Tolerability, Efficacy, and Drug Levels of CC-97540 in Participants With Relapsing Forms of Multiple Sclerosis, Progressive Forms of Multiple Sclerosis or Refractory Myasthenia Gravis (MG) (Breakfree-2)",
+      "BriefSummary": "The purpose of this study is to evaluate the safety, tolerability, efficacy, and drug levels of CC-97540 in participants with Relapsing Forms of Multiple Sclerosis (RMS), Progressive Forms of Multiple Sclerosis (PMS) or Refractory Myasthenia Gravis (MG).",
+      "Conditions": "Multiple Sclerosis|Myasthenia Gravis",
+      "Interventions": "CC-97540|Cyclophosphamide|Fludarabine",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Juno Therapeutics, Inc., a Bristol-Myers Squibb Company",
+      "EnrollmentCount": 120,
+      "StartDate": "2024-03-28T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06056921",
+      "BriefTitle": "Safety and Efficacy of CD19 Targeted CAR-T Therapy for Refractory Autoimmune Disease",
+      "BriefSummary": "This is a single arm study to evaluate the efficacy and safety of CD19 targeted CAR-T cells therapy for patients with Refractory Autoimmune Disease",
+      "Conditions": "SLE (Systemic Lupus)|Sjogren's Syndrome|Systemic Scleroderma|Dermatomyositis|Anti-Neutrophil Cytoplasmic Antibody-Associated Vasculitis",
+      "Interventions": "CD19 targeted CAR-T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chongqing Precision Biotech Co., Ltd",
+      "EnrollmentCount": 24,
+      "StartDate": "2023-08-31T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07549698",
+      "BriefTitle": "Safety and Preliminary Efficacy of CTX112 in Adult Participants With Relapsed/Refractory Hematologic Autoimmune Disease",
+      "BriefSummary": "This is a single-arm, open-label, multicenter, ascending dose Phase 1/2 trial evaluating the safety and preliminary efficacy of CTX112 or Zugocabtagene geleucel (zugo-cel) in adult participants with relapsed/refractory primary Immune Thrombocytopenia (ITP) and relapsed/refractory primary Warm Autoimmune Hemolytic Anemia (wAIHA).",
+      "Conditions": "Warm Autoimmune Hemolytic Anemia (WAIHA)|ITP - Immune Thrombocytopenia|Warm Autoimmune Hemolytic Anemia|Immune Thrombocytopenic Purpura",
+      "Interventions": "CTX112",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "CRISPR Therapeutics AG",
+      "EnrollmentCount": 60,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07355972",
+      "BriefTitle": "Safety, Efficacy and Cellular Metabolic Dynamics of CT1195E in Patients With Refractory / Progressive SSC",
+      "BriefSummary": "This study is a single arm, open label, exploratory dose escalation clinical study to evaluate the safety, efficacy, and cellular metabolic dynamics of ct1195e cells in patients with SSc.\n\nThe study was divided into dose escalation phase and dose expansion phase.",
+      "Conditions": "SSc-Systemic Sclerosis",
+      "Interventions": "CAR-T Therapy",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 12,
+      "StartDate": "2026-01-16T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SSc",
+        "TargetCategory": "CD19/CD20 dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06839976",
+      "BriefTitle": "CD19-Directed Chimeric Antigen Receptor Autologous T Cells (CART19) for Lupus",
+      "BriefSummary": "This is a single-center, single-arm, open-label phase 1/2 study of CART19 in children and young adults with refractory Systemic lupus erythematosus (SLE), including both patients diagnosed with lupus nephritis (LN) and patients with non-renal Systemic lupus erythematosus (SLE).\n\nPhase 1 will evaluate the safety of CART19 in 6-12 patients with Systemic lupus erythematosus (SLE). There is no planned dose escalation, but a dose de-escalation will be made based on the incidence of Dose Limiting Toxicities. Phase 2 will evaluate the efficacy and further evaluate the safety of CART19 in this population.",
+      "Conditions": "SLE|Systemic Lupus Erythematosus (SLE)|CAR T Cell|CART19|Cell Therapy|Lupus|Lupus Nephritis (LN)",
+      "Interventions": "CART19",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Children's Hospital of Philadelphia",
+      "EnrollmentCount": 24,
+      "StartDate": "2025-05-06T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06661811",
+      "BriefTitle": "A Study of CAR-T Cells Targeting Autoimmune Diseases",
+      "BriefSummary": "The purpose of this study is to assess the safety and efficacy of CAR-T cell therapy in patients with autoimmune disease.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "CAR-T",
+      "Phase": null,
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Beijing Boren Hospital",
+      "EnrollmentCount": 12,
+      "StartDate": "2024-11-15T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CAR-T_unspecified",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07333677",
+      "BriefTitle": "In Vivo CAR-T for Refractory Graves' Disease",
+      "BriefSummary": "Graves' disease is an autoimmune thyroid disorder characterized by the production of autoantibodies against the thyroid-stimulating hormone receptor (TRAb), leading to excessive thyroid hormone secretion and systemic manifestations. A subset of patients develop refractory disease, failing to achieve durable remission despite prolonged antithyroid therapy.\n\nThis study aims to evaluate the safety and efficacy of HN2301, an in vivo CAR-T therapy in which host T lymphocytes are engineered and transformed to functional CAR-T cells via CD8 antibody-coated LNP delivery of CD19 CAR-mRNA. Participants with refractory Graves' disease will receive three to five administrations of HN2301 and will be regularly monitored for changes in thyroid function, TRAb levels, clinical response, and treatment-related adverse events. The study will provide preliminary evidence on whether HN2301 can induce sustained remission of refractory Graves' disease.",
+      "Conditions": "Graves' Disease",
+      "Interventions": "In Vivo CAR-T Therapy",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Shanghai Zhongshan Hospital",
+      "EnrollmentCount": 5,
+      "StartDate": "2026-01-29T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "In vivo",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06965309",
+      "BriefTitle": "Efficacy and Safety of HN2301 in Refractory Myasthenia Gravis(MG)",
+      "BriefSummary": "This is an investigator-initiated trial designed to evaluate the safety, and efficacy of HN2301 in refractory myasthenia gravis",
+      "Conditions": "Refractory Myasthenia Gravis",
+      "Interventions": "HN2301 injection",
+      "Phase": null,
+      "OverallStatus": "TERMINATED",
+      "LeadSponsor": "Shenzhen MagicRNA Biotechnology Co., Ltd",
+      "EnrollmentCount": 9,
+      "StartDate": "2026-01-19T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "Other_or_unknown",
+        "ProductType": "In vivo",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06154252",
+      "BriefTitle": "RESET-Myositis: An Open-Label Study to Evaluate the Safety and Efficacy of CABA-201 in Subjects With Active Idiopathic Inflammatory Myopathy or Juvenile Idiopathic Inflammatory Myopathy",
+      "BriefSummary": "RESET-Myositis: Open-Label Study to Evaluate the Safety and Efficacy of CABA-201 in Subjects with Active Idiopathic Inflammatory Myopathy or Juvenile Idiopathic Inflammatory Myopathy",
+      "Conditions": "Idiopathic Inflammatory Myopathy|Dermatomyositis|Anti-Synthetase Syndrome|Immune-Mediated Necrotizing Myopathy|Juvenile Dermatomyositis|Juvenile Polymyositis|Juvenile Idiopathic Inflammatory Myopathy (JIIM)|Juvenile Myositis",
+      "Interventions": "CABA-201 following preconditioning with fludarabine and cyclophosphamide",
+      "Phase": "PHASE2|PHASE3",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Cabaletta Bio",
+      "EnrollmentCount": 74,
+      "StartDate": "2023-12-20T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IIM",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07331467",
+      "BriefTitle": "Study of Ultra-Fast CD19 CAR-T Therapy for Refractory SLE",
+      "BriefSummary": "This is an investigator-initiated trial aimed at assessing the safety and efficacy of ultra-fast autologous CD19-targeted CAR-T cells in the treatment of refractory systemic lupus erythematosus.",
+      "Conditions": "Systemic Lupus Erythematosus",
+      "Interventions": "CD19 CAR-T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chongqing Precision Biotech Co., Ltd",
+      "EnrollmentCount": 18,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06920446",
+      "BriefTitle": "UCAR T-cell Therapy Targeting CD19/BCMA in Patients With r/r Autoimmune Hemolytic Anemia",
+      "BriefSummary": "This is an open label, single-site, dose-escalation study in up to 18 participants with relapsed or refractory Autoimmune hemolytic anemia. This study aims to evaluate the safety and efficacy of the treatment with universal CD19/BCMA CAR T-cells.",
+      "Conditions": "Relapsed / Refractory Autoimmune Hemolytic Anemia",
+      "Interventions": "UCAR T-cell group",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 18,
+      "StartDate": "2025-04-03T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07305116",
+      "BriefTitle": "CAR T-cell Therapy Targeting CD19 and BCMA in Patients With B Cell Mediated Autoimmune Disease",
+      "BriefSummary": "CAR T-cell Therapy Targeting CD19 and BCMA in Patients With B cell mediated autoimmune disease.",
+      "Conditions": "Autoimmune Diseases|Systemic Lupus Erthematosus (SLE)|Multi-Drug Resistant Nephrotic Syndrome|IgA Nephropathy (IgAN)|Systemic Sclerosis (SSc)|ANCA Associated Systemic Vasculitis",
+      "Interventions": "UCAR T-cell",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "The Children's Hospital of Zhejiang University School of Medicine",
+      "EnrollmentCount": 15,
+      "StartDate": "2025-12-01T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07033299",
+      "BriefTitle": "The Safety, Efficacy, and Cellular Metabolic Kinetics of CT1192 in Treating Patients With Anti Neutrophil Cytoplasmic Antibody Associated Vasculitis",
+      "BriefSummary": "A clinical study exploring the safety, efficacy, and cellular metabolic kinetics of universal CD19/20 CAR-T cell injection in anti neutrophil cytoplasmic antibody associated vasculitis.\n\nThis study is a single arm, open label, exploratory dose escalation clinical trial aimed at evaluating the safety, efficacy, and cellular metabolic dynamics of CT1192 cells in patients with ANCA associated vasculitis.",
+      "Conditions": "ANCA Associated Vasculitis (AAV)",
+      "Interventions": "CAR-T Therapy",
+      "Phase": "PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 12,
+      "StartDate": "2025-07-01T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "AAV",
+        "TargetCategory": "CD19/CD20 dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06762119",
+      "BriefTitle": "A Study of CAR-T Cells in Subjects with Autoimmune Diseases",
+      "BriefSummary": "The purpose of this study is to assess the safety and efficacy of CAR-T cell therapy in Subjects with autoimmune diseases.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "CAR-T cell",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 6,
+      "StartDate": "2025-01-10T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CAR-T_unspecified",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06465147",
+      "BriefTitle": "REACT-01: Reversing Autoimmunity Through Cell Therapy",
+      "BriefSummary": "This is a phase 1, open-label, non-randomized study enrolling pediatric and young adult research participants with treatment-refractory Systemic Lupus Erythematosus (SLE), to examine the safety, feasibility, and efficacy of administering T cell products derived from peripheral blood mononuclear cells (PBMC) that have been genetically modified to express CD19 specific chimeric antigen receptor (CAR)\n\nA child or young adult meeting all eligibility criteria and meeting none of the exclusion criteria will have their T cells collected. The T cells will then be bioengineered into a CAR T cell that targets circulating and tissue residing B cells.",
+      "Conditions": "Systemic Lupus Erythematosus",
+      "Interventions": "SCRI-CAR19v3",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Seattle Children's Hospital",
+      "EnrollmentCount": 12,
+      "StartDate": "2024-12-16T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07389499",
+      "BriefTitle": "A Clinical Study Evaluating the Safety and Efficacy of GT719 Universal Cell Injection in the Treatment of Immune-mediated Kidney Diseases",
+      "BriefSummary": "This study is a single-arm, open-label, dose-escalation and dose-expansion clinical trial, divided into two phases: the first phase is the dose-escalation phase, and the second phase is the dose-expansion phase. In the dose-escalation phase, approximately 9-18 adult participants with immune-mediated kidney diseases are planned to be enrolled and treated with GT719 universal cell injection. The objectives of this phase are to evaluate the safety and tolerability of the product, determine the recommended dose (RD) for subsequent studies, conduct a preliminary assessment of its clinical efficacy, and investigate the pharmacokinetic and pharmacodynamic characteristics. Upon completion of the dose-escalation phase, after evaluation by investigators and collaborators, an appropriate dose will be selected for the dose-expansion phase. An additional 12 participants will be enrolled to fully assess the safety and efficacy of the product.",
+      "Conditions": "IgA Nephropathy (IgAN)|Membranous Nephropathy|ANCA-associated Vasculitis (AAV)/ANCA-associated Glomerulonephritis (AAGN)|Refractory Podocytopathy|Proliferative Glomerulonephritis With Monoclonal Immunoglobulin Deposits",
+      "Interventions": "CD19-targeted iNKT Cell Injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Grit Biotechnology",
+      "EnrollmentCount": 30,
+      "StartDate": "2026-05-30T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07413341",
+      "BriefTitle": "A Clinical Study of TI-0032-III Injection in Patients With Relapsed and Refractory Autoimmune Diseases",
+      "BriefSummary": "This is an open-label, dose escalation study in patients with relapsed and refractory autoimmune diseases. Study drug, TI-0032-III injection, is composed of lipid nanoparticles (LNPs) targeting T cells that encapsulate circular RNA encoding the CD19 chimeric antigen receptor (CAR), which is a therapeutic biological product. It is clinically intended for the treatment of various relapsed and refractory B cell-related autoimmune diseases, such as systemic lupus erythematosus, sj\u00f6gren's syndrome, systemic sclerosis, idiopathic inflammatory myositis, and antiphospholipid syndrome.",
+      "Conditions": "Systemic Lupus Erythematosus (SLE)|Sjogren's Syndrome (SS)|Systemic Sclerosis (SSc)|Inflammatory Myopathy|ANCA Associated Systemic Vasculitis",
+      "Interventions": "TI-0032-III injection",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Therorna",
+      "EnrollmentCount": 12,
+      "StartDate": "2026-01-22T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "In vivo",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07072884",
+      "BriefTitle": "GC012F in Patients With Autoimmune Diseases",
+      "BriefSummary": "This is an open-label, early exploratory main clinical study to evaluate the safety and efficacy of GC012F Injection in subjects with autoimmune diseases (AID), as well as to assess its pharmacokinetic (PK) and pharmacodynamic (PD) profiles.",
+      "Conditions": "Systemic Sclerosis (SSc)|Idiopathic Inflammatory Myopathy (IIM)",
+      "Interventions": "GC012F injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Qiong Fu",
+      "EnrollmentCount": 15,
+      "StartDate": "2025-08-18T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07517536",
+      "BriefTitle": "CHT105 for the Treatment of Refractory Lupus Nephritis",
+      "BriefSummary": "Systemic lupus erythematosus (SLE) is the most common systemic autoimmune disease in China. The kidneys are the organ most frequently affected in SLE and a major cause of mortality among SLE patients. Currently, cell-based therapy has emerged as an innovative treatment approach for SLE. CHT105 injection is an allogeneic chimeric antigen receptor T (CAR-T) cell product derived from healthy donors' T cells, which are transduced with a lentiviral vector encoding an anti-CD19/CD70 CAR. This engineered T-cell product effectively recognizes and eliminates immune cells expressing CD19 and/or CD70 antigens-including autoreactive T and B cells-and holds promise as a novel therapeutic option for patients with refractory lupus nephritis (LN).\n\nThis study is a clinical trial evaluating the safety and preliminary efficacy of CHT105 injection-a CD19/CD70-targeting allogeneic CAR-T cell product-in adult patients with relapsed or refractory LN. Eligible participants will first undergo lymphodepleting preconditioning. Following confirmation of eligibility per standard infusion criteria, participants will receive a single intravenous infusion of CHT105 on Day 0 (D0). After CHT105 infusion, participants will undergo a 52-week short-term follow-up and up to a 15-year long-term follow-up.",
+      "Conditions": "Systemic Lupus Erythematosus|Lupus Nephritis",
+      "Interventions": "anti-CD19/70 CAR T cells (CHT105)",
+      "Phase": null,
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "The Affiliated Nanjing Drum Tower Hospital of Nanjing University Medical School",
+      "EnrollmentCount": 14,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT05085418",
+      "BriefTitle": "A Study of CD19/BCMA Chimeric Antigen Receptor T Cells Therapy for Patients With Refractory Immune Nephritis",
+      "BriefSummary": "A Study of CD19/BCMA Chimeric Antigen Receptor T Cells Therapy for Patients With Refractory Immune Nephritis",
+      "Conditions": "Immune Nephritis|Autoimmune Diseases|Lupus Nephritis",
+      "Interventions": "Assigned Interventions CD19/BCMA CAR T-cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "UNKNOWN",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 9,
+      "StartDate": "2021-11-05T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06785519",
+      "BriefTitle": "CD19/BCMA CAR-T Cell Therapy for Refractory/Relapsed Lupus Nephritis",
+      "BriefSummary": "A Clinical Study of the Safety and Efficacy of CD19/BCMA CAR-T Cell Therapy for Refractory/Relapsed Lupus Nephritis.",
+      "Conditions": "Lupus Nephritis",
+      "Interventions": "CD19/BCMA Lupus Nephritis Targeted CAR T-cells injection",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "He Huang",
+      "EnrollmentCount": 9,
+      "StartDate": "2025-01-31T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07470151",
+      "BriefTitle": "Clinical Study of EVM18001 in the Treatment of Refractory Autoimmune Diseases",
+      "BriefSummary": "A FIH, single arm, open-label, Investigator Initiated Trial (IIT) study to evaluate the safety and tolerability of EVM18001 in the treatment of active refractory autoimmune diseases (SLE, MG, and SSc), and determine the recommended dose for subsequent treatment. At the same time, the PK/PD characteristics of EVM18001 will be evaluated, preliminary efficacy will be observed, and related biomarkers and immunogenicity will be explored.",
+      "Conditions": "System Lupus Erythematosus(SLE)|Scleroderma|Myasthenia Gravis (MG)",
+      "Interventions": "EVM18001 Injection",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 12,
+      "StartDate": "2026-03-12T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CAR-T_unspecified",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06297408",
+      "BriefTitle": "Relma-cel for Moderate to Severe Active Systemic Lupus Erythematosus",
+      "BriefSummary": "To assess the safety tolerability pharmacokinetics and pharmacodynamics of Relma-cel in moderate or severe active systemic lupus erythematosus (SLE) subjects in China.",
+      "Conditions": "Systemic Lupus Erythematosus",
+      "Interventions": "Relma-cel",
+      "Phase": "PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Shanghai Ming Ju Biotechnology Co., Ltd.",
+      "EnrollmentCount": 24,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06519565",
+      "BriefTitle": "Safety and Efficacy of PRG-1801 in Recurrent/Refractory Primary Immune Thrombocytopenia (ITP)",
+      "BriefSummary": "This is a single center, open-label, 3+3 dose escalation, early phase 1 study to evaluate the safety, tolerability, and preliminary efficacy of PRG-1801 for patients with relapsed/refractory immune thrombocytopenia (ITP).",
+      "Conditions": "Immune Thrombocytopenia",
+      "Interventions": "PRG-1801",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 6,
+      "StartDate": "2024-08-20T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "BCMA",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07048197",
+      "BriefTitle": "A Study to Assess Safety, Cellular Kinetics and Exploratory Efficacy of Rapcabtagene Autoleucel in Rheumatoid Arthritis and Sjogren's Disease",
+      "BriefSummary": "A study to assess safety, cellular kinetics and exploratory efficacy of rapcabtagene autoleucel in rheumatoid arthritis and Sjogren's disease",
+      "Conditions": "Rheumatoid Arthritis (RA) and Sj\u00f6gren's Disease (SjD)",
+      "Interventions": "Rapcabtagene autoleucel",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Novartis Pharmaceuticals",
+      "EnrollmentCount": 27,
+      "StartDate": "2025-06-20T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07295847",
+      "BriefTitle": "A Study of AZD0120 in Autoimmune Diseases",
+      "BriefSummary": "This trial is a Phase 1b, open-label, multi-center, clinical study of AZD0120, a BCMA/CD19 dual targeting CAR+ T-cell therapy, to evaluate the safety and tolerability in adult participants with systemic sclerosis (SSc), idiopathic inflammatory myopathies (IIM), or difficult-to-treat rheumatoid arthritis (D2T RA).",
+      "Conditions": "Systemic Sclerosis|Idiopathic Inflammatory Myopathies|Rheumatoid Arthritis",
+      "Interventions": "AZD0120",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "AstraZeneca",
+      "EnrollmentCount": 27,
+      "StartDate": "2026-01-09T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07423572",
+      "BriefTitle": "Clinical Study of Anti-CD19/BCMA Universal Chimeric Antigen Receptor T Cells (UCAR-T) in the Treatment of Refractory Idiopathic Membranous Nephropathy (IMN)",
+      "BriefSummary": "A single arm, open-label pilot study is designed to determine the safety and effectiveness of anti-CD19/BCMA Universal Chimeric Antigen Receptor T Cells (UCAR-T) in the Treatment of Refractory Idiopathic Membranous Nephropathy (IMN)",
+      "Conditions": "Refractory Idiopathic Membranous Nephropathy",
+      "Interventions": "CD19/BCMA-Targeted Universal Chimeric Antigen Receptor T Cells (UCAR-T) infusing",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "The First Affiliated Hospital of Zhejiang Chinese Medical University",
+      "EnrollmentCount": 18,
+      "StartDate": "2026-02-28T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06826430",
+      "BriefTitle": "Inaticabtagene Autoleucel Injection in the Treatment of Refractory Systemic Lupus Erythematosus-related Immune Thrombocytopenia",
+      "BriefSummary": "This is a single-arm, open-label\uff0cphase I clinical study to evaluate the safety and tolerability of Inaticabtagene Autoleucel Injection in treatment of refractory systemic lupus erythematosus-related immune thrombocytopenia.",
+      "Conditions": "Autoimmune Thrombocytopenia",
+      "Interventions": "Inaticabtagene autoleucel Injection",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Juventas Cell Therapy Ltd.",
+      "EnrollmentCount": 12,
+      "StartDate": "2025-03-01T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06298019",
+      "BriefTitle": "Study of KYV-101 Anti-CD19 CAR T Therapy in Adult Dermatomyositis",
+      "BriefSummary": "The goal of this clinical trial is to characterize to understand the effects of a type of cell therapy called Chimeric Antigen Receptor T lymphocyte (CAR T) therapy in adult patients with the autoimmune disease dermatomyositis. This study will utilize a technology that modifies a type of white blood cell called the cytotoxic T lymphocyte-this T cell normally functions in the immune system to kill infected or potentially harmful cells in the body. In CAR T therapy, the patients' white blood cells are harvested and the cytotoxic T cells are isolated and modified such that they are programmed to kill any cell that has a protein structure called \"CD19\" on its outer surface (membrane). Since the CD19 protein is only present on a type of white blood cell called the B lymphocyte, when these \"re-engineered\" cytotoxic T lymphocytes are then given back to the patient (by an infusion), these cells will seek out and kill essentially all of the patient's B cells. B cells are an important part of a person's immune system and have many functions, including the production of antibodies. It is thought that, in dermatomyositis and other autoimmune diseases, a tiny subset of these B cells plays a large role in making autoantibodies (antibodies directed against the patient's own tissues) and causing disease. The idea is that the therapy will \"wipe out\" all/most of the B cells in the patient so that they can make an entirely new set of B cells to recreate a functional immune system without the autoimmune disease.\n\nThe main questions the study intends to answer are:\n\n* Understanding how well patients tolerate undergoing this therapy in terms of side effects;\n* Getting an early idea if this therapy can help certain aspects of the autoimmune disease, including inflammation in the skin, muscles, and lungs;",
+      "Conditions": "Dermatomyositis",
+      "Interventions": "KYV-101",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Stanford University",
+      "EnrollmentCount": 21,
+      "StartDate": "2024-08-02T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IIM",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06897930",
+      "BriefTitle": "A Study to Investigate the Safety, Tolerability, and Efficacy of AZD0120 in Adults With Refractory SLE",
+      "BriefSummary": "This is a Phase 1b/2, single-arm, open-label, multi-center, clinical study of AZD0120, a CD19/BCMA dual CAR T cell therapy, to evaluate the safety, tolerability, and efficacy in adult participants with refractory Systemic Lupus Erythematosus.",
+      "Conditions": "Lupus Erythematosus, Systemic",
+      "Interventions": "AZD0120|Cyclophosphamide|Fludarabine",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "AstraZeneca",
+      "EnrollmentCount": 150,
+      "StartDate": "2025-04-21T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07148791",
+      "BriefTitle": "Exploratory Study of Anti-BCMA-CD19 CAR-T Cell Therapy in Relapsed or Refractory IgG4-Related Disease",
+      "BriefSummary": "The goal of this clinical trial is to test the safety and potential benefit of a new immune cell therapy called anti-BCMA-CD19 CAR-T cells in adults (18-75 years) with IgG4-related disease (IgG4-RD) that has come back or not improved after standard treatments such as glucocorticoids or rituximab.\n\nThe main questions this study aims to answer are:\n\n* What medical problems (side effects) occur after receiving anti-BCMA-CD19 CAR-T cell therapy?\n* Does anti-BCMA-CD19 CAR-T cell therapy improve IgG4-RD disease activity scores at 12 weeks and 26 weeks?\n\nParticipants will:\n\n* Have their own blood immune cells collected by a procedure called leukapheresis\n* Receive short-term chemotherapy to prepare the immune system\n* Receive one intravenous infusion of anti-BCMA-CD19 CAR-T cells\n* Return for regular clinic visits over 26 weeks for safety checks, blood tests, and imaging\n* May be followed for up to one year in total",
+      "Conditions": "IgG4 Related Disease|B-cell Mediated Autoimmune Disorders",
+      "Interventions": "Anti-BCMA-CD19 CAR-T cells",
+      "Phase": "PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chinese PLA General Hospital",
+      "EnrollmentCount": 9,
+      "StartDate": "2025-09-05T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "IgG4-RD",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07059169",
+      "BriefTitle": "CAR-T Therapy for Refractory Autoimmune Diseases",
+      "BriefSummary": "This study is an investigator-initiated single center, single arm clinical study with a target population of patients with refractory autoimmune diseases. It is an early exploratory clinical study of the safety, tolerability and initial efficacy of CD19 CAR-T in the treatment of refractory autoimmune diseases.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "JY231 (JY231 injection)",
+      "Phase": null,
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "LiangZou",
+      "EnrollmentCount": 20,
+      "StartDate": "2025-08-04T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "In vivo",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06377228",
+      "BriefTitle": "A Study of TAK-007 in Adults With Refractory Lupus Nephritis (LN) or Refractory Systemic Sclerosis (SSc)",
+      "BriefSummary": "The main aim of the trial is to learn how well adults with refractory lupus nephritis (LN) or refractory systemic sclerosis (SSc) tolerate TAK-007 and to check for side effects (adverse events).\n\nOther aims are to learn how effective treatment with TAK-007 is in adults with refractory LN or refractory SSc, what effects TAK-007 has on the human body, and whether participants will produce antibodies against TAK-007.",
+      "Conditions": "Refractory Lupus Nephritis|Refractory Systemic Sclerosis",
+      "Interventions": "Chemotherapy Agents|TAK-007",
+      "Phase": "PHASE1",
+      "OverallStatus": "WITHDRAWN",
+      "LeadSponsor": "Takeda",
+      "EnrollmentCount": 0,
+      "StartDate": "2025-06-13T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07441525",
+      "BriefTitle": "UCAR-T Targeting CD19/BCMA in Subjects With Autoantibody-Mediated Autoimmune Benign Hematological Diseases",
+      "BriefSummary": "This is a single-arm, open-label, investigator-initiated trial (IIT) designed to evaluate the safety, tolerability, pharmacokinetics (PK), pharmacodynamics (PD), and efficacy of RD06-05 in subjects with autoantibody-mediated autoimmune hematological diseases. The enrolled population consists of patients with active autoimmune hematological diseases, including primary immune thrombocytopenic purpura (ITP), autoimmune hemolytic anemia (AIHA), and Evans syndrome.\n\nThis study sets two dose groups: 6 \u00d7 10\u2076 CAR\u207aT cells/kg and 10 \u00d7 10\u2076 CAR\u207aT cells/kg, with the initial dose being 6 \u00d7 10\u2076 CAR\u207aT cells/kg. To reduce efficacy risks, the dose may be escalated to 10 \u00d7 10\u2076 CAR\u207aT cells/kg following evaluation and recommendation by the Safety Review Committee (SRC). The SRC's recommendation on dose escalation will be based on a comprehensive assessment of all available safety, pharmacokinetic (PK), pharmacodynamic (PD), and preliminary efficacy data.",
+      "Conditions": "Autoimmune Hemolytic Anemia|Primary Immune Thrombocytopenic Purpura|Evans Syndrome",
+      "Interventions": "CART Infusion",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Union Hospital, Tongji Medical College, Huazhong University of Science and Technology",
+      "EnrollmentCount": 27,
+      "StartDate": "2026-02-03T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07049081",
+      "BriefTitle": "A Study of LUCAR-G79 in Subjects With Relapsed/Refractory Autoimmune Diseases",
+      "BriefSummary": "This is a prospective, single-arm, open-label and dose-escalation Investigator Initialed study to evaluate LUCAR-G79 in adult subjects with relapsed/refractory autoimmune diseases.",
+      "Conditions": "Relapsed/Refractory Autoimmune Diseases",
+      "Interventions": "LUCAR-G79 T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Nanjing Legend Biotech Co.",
+      "EnrollmentCount": 42,
+      "StartDate": "2025-07-17T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CAR-T_unspecified",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT07184450",
+      "BriefTitle": "Clinical Study of BCMA/CD70-targeted CAR-T Therapy for Refractory Pediatric Rheumatic Diseases",
+      "BriefSummary": "This is an investigator-initiated trial to evaluate the efficacy and safety of BCMA/CD70-targeted CAR-T in the treatment of refractory pediatric rheumatic diseases.",
+      "Conditions": "Juvenile Dermatomyositis (JDM)|Polyarticular Juvenile Idiopathic Arthritis|Systemic Sclerosis (SSc)|Primary Sjogren&#39;s Syndrome",
+      "Interventions": "BCMA/CD70-targetd CAR-T",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Chongqing Precision Biotech Co., Ltd",
+      "EnrollmentCount": 11,
+      "StartDate": "2025-09-01T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "BCMA/CD70 dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06152172",
+      "BriefTitle": "CARTIMMUNE: Study of Patients With Autoimmune Diseases Receiving KYV-101",
+      "BriefSummary": "The purpose of this study is to assess the safety, tolerability, and clinical activity of KYV 101 (a fully-human anti-CD19 CAR T-cell therapy) in adult subjects with B cell-driven autoimmune diseases. The trial anticipates enrolling participants to reach a maximum of 24 participants who will receive 1 dose of KYV-101 and will be followed for 2 years.",
+      "Conditions": "Idiopathic Inflammatory Myopathies|Diffuse Cutaneous Systemic Sclerosis|SLE Nephritis|ANCA Associated Vasculitis",
+      "Interventions": "Cyclophosphamide|Fludarabine|KYV-101",
+      "Phase": "PHASE1",
+      "OverallStatus": "ACTIVE_NOT_RECRUITING",
+      "LeadSponsor": "David Porter",
+      "EnrollmentCount": 24,
+      "StartDate": "2024-08-05T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06375993",
+      "BriefTitle": "A Phase 1 Study of Prulacabtagene Leucel (Prula-cel, Formerly ADI-001) in Autoimmune Disease",
+      "BriefSummary": "ADI-202300103 is a phase 1 multicenter, open label, dose finding and dose expansion, safety/efficacy study in patients with autoimmune disease. The study will consist of different periods including screening, lymphodepletion, treatment, and follow-up",
+      "Conditions": "Lupus Nephritis|Autoimmune Diseases|Systemic Sclerosis (SSc)|Systemic Lupus Erythematosus (SLE)|ANCA-Associated Vasculitis (AAV)|Idiopathic Inflammatory Myopathies|Stiff Person Syndrome",
+      "Interventions": "ADI-001|Cyclophosphamide|Fludarabine",
+      "Phase": "PHASE1",
+      "OverallStatus": "ENROLLING_BY_INVITATION",
+      "LeadSponsor": "Adicet Therapeutics",
+      "EnrollmentCount": 180,
+      "StartDate": "2024-11-10T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD20",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06342960",
+      "BriefTitle": "KYSA-3: A Study of Anti-CD19 Chimeric Antigen Receptor T-Cell (CD19 CAR T) Therapy, in Subjects With Refractory Lupus Nephritis",
+      "BriefSummary": "A Study of Anti-CD19 Chimeric Antigen Receptor T Cell Therapy for Subjects With Refractory Lupus Nephritis",
+      "Conditions": "Lupus Nephritis|Lupus Nephritis - WHO Class III|Lupus Nephritis - WHO Class IV",
+      "Interventions": "KYV-101 anti-CD19 CAR-T cell therapy|Standard lymphodepletion regimen",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "ACTIVE_NOT_RECRUITING",
+      "LeadSponsor": "Kyverna Therapeutics",
+      "EnrollmentCount": 2,
+      "StartDate": "2022-12-01T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SLE",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT05828212",
+      "BriefTitle": "Evaluate the Safety and Efficacy of CAR-T Cells in the Treatment of R/R Neuromyelitis Optica",
+      "BriefSummary": "This is a single-arm, open-label, single-center, phase I study. The primary objective is to evaluate the safety of CD19 CAR-T therapy for patients with relapsed or refractory Neuromyelitis Optica, and to evaluate the pharmacokinetics of CD19 CAR-T in patients.",
+      "Conditions": "Neuromyelitis Optica",
+      "Interventions": "CAR-T cells injection",
+      "Phase": "PHASE1",
+      "OverallStatus": "COMPLETED",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 9,
+      "StartDate": "2023-05-15T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06508346",
+      "BriefTitle": "Study of Therapeutic Efficacy of Anti-CD19 CAR-T Cells in Children With Refractory Refractory AAV",
+      "BriefSummary": "This is an investigator-initiated trial aimed at assessing the safety and efficacy of anti-CD19 CAR-T cells in the treatment of childhood-onset refractory ANCA-Associated Vasculitis.",
+      "Conditions": "ANCA Associated Vasculitis|CAR-T Cell Therapy",
+      "Interventions": "anti-CD19-CAR-T cells",
+      "Phase": "Unknown",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "The Children's Hospital of Zhejiang University School of Medicine",
+      "EnrollmentCount": 12,
+      "StartDate": "2024-08-01T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "AAV",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06622694",
+      "BriefTitle": "CD7 CAR T Cells (RD13-02) in the Treatment of Relapsed/Refractory Severe Aplastic Anemia",
+      "BriefSummary": "This trial is exploratory research aimed at evaluating the safety, tolerability, pharmacokinetics, pharmacodynamics, and efficacy of RD13-02, a universal CD7 CAR T therapy, in subjects with relapsed/refractory severe aplastic anemia (SAA)",
+      "Conditions": "Severe Aplastic Anemia|Relapse|Refractory|CAR T-cell Therapy",
+      "Interventions": "RD13-02",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Institute of Hematology & Blood Diseases Hospital, China",
+      "EnrollmentCount": 15,
+      "StartDate": "2025-06-19T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD7",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT05263817",
+      "BriefTitle": "A Clinical Study of CD19/BCMA CAR-T Cells in the Treatment of Refractory POEMS Syndrome, Amyloidosis, Autoimmune Hemolytic Anemia, and Vasculitis",
+      "BriefSummary": "A Clinical Study on the Safety and Effectiveness of CD19/BCMA Chimeric Antigen Receptor T Cells in the Treatment of Refractory POEMS Syndrome, Amyloidosis, Autoimmune Hemolytic Anemia, and Vasculitis",
+      "Conditions": "POEMS Syndrome|Amyloidosis|Autoimmune Hemolytic Anemia|Vasculitis",
+      "Interventions": "CD19/BCMA CAR T-cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "UNKNOWN",
+      "LeadSponsor": "Zhejiang University",
+      "EnrollmentCount": 75,
+      "StartDate": "2021-10-08T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06792344",
+      "BriefTitle": "Clinical Study of CD19 CAR-T in the Treatment of Refractory Systemic Sclerosis",
+      "BriefSummary": "This is an investigator-initiated trial aimed at assessing the safety and efficacy of anti-CD19 CAR-T cells in the treatment of childhood-onset systemic sclerosis",
+      "Conditions": "Systemic Sclerosis (SSc)",
+      "Interventions": "anti-CD19 CAR-T cells",
+      "Phase": "PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "The Children's Hospital of Zhejiang University School of Medicine",
+      "EnrollmentCount": 12,
+      "StartDate": "2024-12-15T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "SSc",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT06617793",
+      "BriefTitle": "An Open-label Study to Assess the Safety, Efficacy, and Cellular Kinetics of YTB323 in Relapsing Multiple Sclerosis",
+      "BriefSummary": "This is an open-label, multi-center, non-confirmatory study to assess the safety, efficacy, and cellular kinetics of YTB323 in approximately 28 participants with Relapsing Multiple Sclerosis (RMS) with breakthrough disease activity during previous treatment with a highly efficacious therapy (BD-HET). The study design utilizes an ascending single dose design consisting of 3 sentinel cohorts followed by an expansion cohort.",
+      "Conditions": "Relapsing Multiple Sclerosis",
+      "Interventions": "rapcabtagene autoleucel (YTB323)",
+      "Phase": "PHASE1|PHASE2",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "Novartis Pharmaceuticals",
+      "EnrollmentCount": 28,
+      "StartDate": "2025-02-24T00:00:00",
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19",
+        "ProductType": "Autologous",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Industry"
+      }
+    },
+    {
+      "NCTId": "NCT06318533",
+      "BriefTitle": "A Clinical Study of CD19 CAR NK Cells for the Treatment of Relapsed/Refractory B-cell Related Autoimmune Diseases",
+      "BriefSummary": "A single arm, open-label pilot study is designed to determine the safety and effectiveness of anti-CD19 CAR NK cells (KN5501) in patients with relapsed/refractory B-cell related autoimmune diseases.15 patients are planned to be enrolled in the dose-escalation trial (6\u00d710\\^9 cells, 9\u00d710\\^9 cells). The primary objective of the study is to evaluation of the safety and feasibility of KN5501 for the treatment of relapsed/refractory B-cell related autoimmune diseases. The secondary objective is to evaluate the effectiveness of KN5501 for the treatment of relapsed/refractory B-cell related autoimmune diseases. The exploratory objective is to evaluate expansion, persistence and ability to deplete CD19 positive B cells of KN5501 in patients with relapsed/refractory B-cell related autoimmune diseases.",
+      "Conditions": "Autoimmune Diseases",
+      "Interventions": "anti-CD19 CAR NK cells",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "RECRUITING",
+      "LeadSponsor": "YANRU WANG",
+      "EnrollmentCount": 15,
+      "StartDate": "2024-03-13T00:00:00",
+      "TrialDesign": "Basket/Multidisease",
+      "_pipeline": {
+        "DiseaseEntity": "Basket/Multidisease",
+        "TargetCategory": "CD19",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Basket/Multidisease",
+        "SponsorType": "Academic"
+      }
+    },
+    {
+      "NCTId": "NCT07392528",
+      "BriefTitle": "Universal Chimeric Antigen Receptor T-Cell \uff08UCAR T-cell\uff09 Therapy Targeting CD19/ BCMA\uff08QT-019C\uff09 in Patients With r/ r Neurological Autoimmune Diseases",
+      "BriefSummary": "This is an open label, single-site, dose-escalation study in up to 15 participants with relapsed or refractory Neurological Autoimmune Diseases. This study aims to evaluate the safety and efficacy of the treatment with universal CD19/BCMA CAR T-cells\uff08QT-019C\uff09.",
+      "Conditions": "Neuromyelitis Optica Spectrum Disorders|Multiple Sclerosis|Myasthenia Gravis",
+      "Interventions": "QT-019C",
+      "Phase": "EARLY_PHASE1",
+      "OverallStatus": "NOT_YET_RECRUITING",
+      "LeadSponsor": "Tianjin Huanhu Hospital",
+      "EnrollmentCount": 15,
+      "StartDate": null,
+      "TrialDesign": "Single disease",
+      "_pipeline": {
+        "DiseaseEntity": "Other immune-mediated",
+        "TargetCategory": "CD19/BCMA dual",
+        "ProductType": "Allogeneic/Off-the-shelf",
+        "TrialDesign": "Single disease",
+        "SponsorType": "Academic"
+      }
+    }
+  ],
+  "sha256": "244262e20ffd4263c282be5bd8ad97f3ce594ef28f7f41be26b734646d2bd8ab"
+}
