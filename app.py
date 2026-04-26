@@ -4575,7 +4575,10 @@ with tab_pub:
         "1",
         "Temporal trends by disease entity",
         (
-            f"Annual trial starts by disease entity, {_yr_display_min}–{_yr_display_max}."
+            f"New trial starts per year, {_yr_display_min}–{_yr_display_max}, "
+            f"stacked by primary disease entity. Years before the first ≥"
+            f"{_FIG1_LEADING_MIN}-trial year are trimmed; trials without a "
+            "reported start year are excluded from this panel only."
             if _yr_display_min is not None
             else "Annual trial starts by disease entity."
         ),
@@ -4740,7 +4743,9 @@ with tab_pub:
     # Fig 2 — Phase distribution
     # ------------------------------------------------------------------
     _pub_header("2", "Distribution of clinical trial phases",
-                "Horizontal bars by phase, split by sponsor sector (Academic vs Industry).")
+                "Trial count per phase, split by sponsor sector. Phases "
+                "with zero trials in the filtered set are dropped; trials "
+                "without a reported phase are aggregated under 'Unknown'.")
 
     phase_counts = (
         df_filt.groupby("PhaseOrdered", observed=False).size().reset_index(name="Trials")
@@ -4819,7 +4824,11 @@ with tab_pub:
     # Fig 3 — Geographic distribution
     # ------------------------------------------------------------------
     _pub_header("3", "Global distribution of trial sites",
-                "Choropleth of trial counts by country, with leading countries shown below.")
+                "Trial counts per country across the filtered set. "
+                "Multi-country trials count once per listed country. "
+                "Trials whose CT.gov locations module is empty (no country "
+                "registered) are excluded from 3a / 3b but retained in "
+                "the rest of the dashboard.")
 
     geo_vals = split_pipe_values(df_filt["Countries"])
     if geo_vals:
@@ -4916,7 +4925,11 @@ with tab_pub:
     # Fig 4 — Trial enrollment
     # ------------------------------------------------------------------
     _pub_header("4", "Trial enrollment landscape",
-                "Distribution and median planned enrollment, with subgroup comparisons by phase, geography, and sponsor type.")
+                "Distribution of planned enrollment (4a) and per-phase "
+                "median + IQR (4b). Trials with planned enrollment > 1,000 "
+                "patients are excluded from the 4a histogram only — they "
+                "compress the typical early-phase distribution — but are "
+                "included in every summary statistic above and in 4b.")
 
     df_enroll = df_filt.copy()
     df_enroll["EnrollmentCount"] = pd.to_numeric(df_enroll["EnrollmentCount"], errors="coerce")
@@ -5248,7 +5261,11 @@ with tab_pub:
     # Fig 5 — Disease distribution
     # ------------------------------------------------------------------
     _pub_header("5", "Disease entity distribution",
-                "Two panels: number of trials per disease (left) and total planned patients per disease (right). Basket and multi-disease trials are attributed to each enrolled disease.")
+                "Trials per disease (left) and total planned patients per "
+                "disease (right). Basket / multi-disease trials are "
+                "attributed to every enrolled disease — so a basket trial "
+                "of SLE + SSc + IIM appears once in each of those three "
+                "disease bars.")
 
     _dis_vals = split_pipe_values(df_filt["DiseaseEntities"])
     disease_counts = (
@@ -5365,7 +5382,12 @@ with tab_pub:
     # preserved in the CSV export for downstream use.)
     # ------------------------------------------------------------------
     _pub_header("6", "Antigen target distribution",
-                "Trials by primary CAR antigen target. Cell-therapy platforms (CAR-NK, CAR-Treg, CAAR-T, CAR-γδ T) are shown in Figure 7.")
+                "Trials by primary CAR antigen target. Dual-target combos "
+                "(CD19/BCMA, CD19/CD20, etc.) are first-class categories "
+                "rather than aggregating into the single antigens. Cell-"
+                "therapy platforms (CAR-NK, CAR-Treg, CAAR-T, CAR-γδ T) "
+                "live in Figure 7 — those are construct families, not "
+                "antigens.")
 
     # CAR-NK / CAR-Treg / CAAR-T / CAR-γδ T are cell therapy platforms, not antigen targets —
     # they belong in the modality figure (Fig 7). Exclude them here.
@@ -5494,7 +5516,12 @@ with tab_pub:
     # Fig 7 — Cell-therapy modality: overall distribution and evolution
     # ------------------------------------------------------------------
     _pub_header("7", "Cell-therapy modality — distribution and evolution",
-                "Trials grouped by cell-therapy platform (CAR-T autologous / allogeneic, CAR-NK, CAR-Treg, in vivo CAR, other); cumulative and over time.")
+                "Trials grouped by platform (Auto CAR-T / Allo CAR-T / "
+                "CAR-NK / CAR-Treg / CAAR-T / CAR-γδ T / in vivo CAR / "
+                "unclear). 7a is the cumulative bar across the full "
+                "filtered set; 7b breaks the same population down by "
+                "trial start year so the temporal emergence of allogeneic "
+                "and non-CAR-T platforms is visible.")
 
     df_innov = df_filt[df_filt["StartYear"].notna()].copy()
     df_innov["StartYear"] = df_innov["StartYear"].astype(int)
@@ -5660,11 +5687,16 @@ with tab_pub:
     st.markdown(
         f'<p class="small-note" style="color:{THEME["muted"]}">'
         "Each cell is one (antigen × modality) combination across the "
-        "filtered dataset. Colour encodes trial count; cell annotation "
-        "shows count plus the most-advanced phase reached. Saturated cells "
-        "(CD19 × Auto CAR-T) reveal where the field has consolidated; "
-        "single-modality antigens (BAFF, CD6) are research opportunities; "
-        "white cells are unstudied combinations.</p>",
+        "filtered set. Colour encodes <em>log(trial count + 1)</em> so "
+        "single-trial cells stay legible alongside cells with 80+ trials. "
+        "Annotation reads "
+        '"<strong>n</strong>·<em>P-label</em>" where <em>P-label</em> is '
+        "the most-advanced phase reached among those trials (P1 / P1/2 / "
+        "P2 / EP1 short forms; suffix omitted when CT.gov did not record "
+        "any phase for the cell's trials). White cells are unstudied "
+        "combinations — the field's research agenda. Antigens are sorted "
+        "by trial count descending; the catch-all 'Other_or_unknown' / "
+        "'CAR-T_unspecified' targets are excluded.</p>",
         unsafe_allow_html=True,
     )
 
@@ -5808,10 +5840,11 @@ with tab_pub:
         _n_cells_total = _trials_pivot.size
         st.caption(
             f"{_n_cells_filled} of {_n_cells_total} (antigen × modality) "
-            f"cells populated ({100 * _n_cells_filled / max(_n_cells_total, 1):.0f}%). "
-            "Cells annotated with trial count and furthest phase reached. "
-            "Pipeline-unique: combines closed-vocab antigen taxonomy with "
-            "modality classifier; not reproducible from CT.gov free-text alone."
+            f"combinations have at least one trial "
+            f"({100 * _n_cells_filled / max(_n_cells_total, 1):.0f}% of the "
+            f"matrix). Pipeline-unique: combines the closed-vocab antigen "
+            "taxonomy with the modality classifier; the matrix shape is "
+            "not reconstructable from CT.gov free-text alone."
         )
 
         # Long-format CSV for the data download
@@ -5844,10 +5877,15 @@ with tab_pub:
     )
     st.markdown(
         f'<p class="small-note" style="color:{THEME["muted"]}">'
-        "Each cell counts the basket trials enrolling BOTH diseases. "
-        "Hot cells reveal the field's converged multi-disease designs; "
-        "the triangle is upper-only because (A,B) and (B,A) are the "
-        "same trial cohort.</p>",
+        "Restricted to TrialDesign = Basket/Multidisease. Each cell "
+        "counts the trials enrolling BOTH disease entities. Diagonal "
+        "stays empty (single-disease trials live in Figs 1 / 5); "
+        "lower triangle is omitted because (A,B) and (B,A) describe "
+        "the same trial cohort. Diseases are ordered by basket-"
+        "participation count descending so the dense upper-left is "
+        "the field's hottest co-occurrence cluster. Sentinel labels "
+        "(Basket/Multidisease, Unclassified, Other immune-mediated) "
+        "are excluded from the matrix.</p>",
         unsafe_allow_html=True,
     )
 
@@ -5941,12 +5979,14 @@ with tab_pub:
 
             _top_pair = max(_co.items(), key=lambda kv: kv[1])
             st.caption(
-                f"{len(_basket_df)} basket trials, {len(_co)} distinct "
-                f"disease pairs co-occurring. Top pair: "
-                f"**{_top_pair[0][0]} ⨯ {_top_pair[0][1]}** "
-                f"({_top_pair[1]} trials). Pipeline-unique: requires multi-"
-                "entity classification per trial (DiseaseEntities); "
-                "CT.gov free-text doesn't structure this directly."
+                f"{len(_basket_df)} basket trials in the filtered set, "
+                f"yielding {len(_co)} distinct disease-pair co-occurrences. "
+                f"Top pair: **{_top_pair[0][0]} ⨯ {_top_pair[0][1]}** "
+                f"({_top_pair[1]} trials). Pipeline-unique: requires the "
+                "multi-entity classification stored in the DiseaseEntities "
+                "pipe-joined column; CT.gov's flat Conditions list cannot "
+                "be cross-tabulated this way without the closed-vocab "
+                "taxonomy."
             )
 
             _co_csv = pd.DataFrame(
