@@ -499,3 +499,54 @@ class TestNormalizeDiseaseResult:
         assert ents == ["SLE"]
         assert design == "Single disease"
         assert primary == "SLE"
+
+
+# ---------------------------------------------------------------------------
+# Vocabulary parity (Phase 3 SSOT — strict + fallback maps must stay aligned)
+# ---------------------------------------------------------------------------
+
+class TestVocabularyParity:
+    """The pipeline's strict (high-precision) `_DISEASE_TERMS` and the
+    config's `DISEASE_ENTITIES` (LATE-fallback substring map + closed-vocab
+    enum for the LLM validators) serve different roles, but their KEYS
+    must stay aligned: every entity the strict pass can emit must also be
+    in the config's authoritative map (otherwise validators will reject
+    the label as out-of-vocab and the late-fallback won't recognise the
+    entity either)."""
+
+    def test_strict_and_fallback_keys_match(self):
+        from pipeline import _DISEASE_TERMS
+        from config import DISEASE_ENTITIES
+        strict = set(_DISEASE_TERMS.keys())
+        canonical = set(DISEASE_ENTITIES.keys())
+        only_strict = strict - canonical
+        only_canonical = canonical - strict
+        assert not only_strict, (
+            f"Entities present in pipeline._DISEASE_TERMS but missing from "
+            f"config.DISEASE_ENTITIES: {sorted(only_strict)}. Add them to "
+            f"config.DISEASE_ENTITIES with a full synonym list, or drop them "
+            f"from _DISEASE_TERMS."
+        )
+        assert not only_canonical, (
+            f"Entities present in config.DISEASE_ENTITIES but missing from "
+            f"pipeline._DISEASE_TERMS: {sorted(only_canonical)}. Either add "
+            f"a high-precision strict-match entry, or document why this "
+            f"entity is fallback-only."
+        )
+
+    def test_strict_terms_subset_of_canonical_synonyms(self):
+        """Every strict term should appear (after normalisation) somewhere in
+        the canonical synonym list for that entity. Catches the case where a
+        strict term is added without updating the public synonym list."""
+        from pipeline import _DISEASE_TERMS, _normalize_text
+        from config import DISEASE_ENTITIES
+        for entity, strict_terms in _DISEASE_TERMS.items():
+            if entity not in DISEASE_ENTITIES:
+                continue  # caught by test_strict_and_fallback_keys_match
+            canonical_norm = {_normalize_text(s) for s in DISEASE_ENTITIES[entity]}
+            for st in strict_terms:
+                assert _normalize_text(st) in canonical_norm, (
+                    f"Strict term {st!r} for entity {entity!r} is not in "
+                    f"config.DISEASE_ENTITIES[{entity!r}]. Add it to the "
+                    f"canonical synonym list or remove it from _DISEASE_TERMS."
+                )

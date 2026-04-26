@@ -141,6 +141,13 @@ def _lookup_named_product(text: str, product_dict: dict[str, list[str]]) -> str 
     return None
 
 
+# PRIMARY high-precision disease vocabulary (word-boundary matched). Each
+# entry is a hand-curated short list of canonical / unambiguous variants —
+# deliberately leaner than config.DISEASE_ENTITIES (the LATE-fallback
+# substring-match table) so short tokens don't false-positive on overlapping
+# context. Keys MUST stay aligned with config.DISEASE_ENTITIES (asserted by
+# tests/test_classifier.py::TestVocabularyParity). See config.py for the
+# two-vocabulary design rationale.
 _DISEASE_TERMS = {
     "SLE": ["systemic lupus erythematosus", "lupus nephritis", "sle"],
     "SSc": [

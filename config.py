@@ -26,6 +26,8 @@ DISEASE_ENTITIES = {
     "Sjogren": [
         "sjogren syndrome",
         "sjogren's syndrome",
+        "sjogren disease",
+        "primary sjogren",
         "primary sjogren's syndrome",
         "primary sjogren syndrome",
         "primary sjögren syndrome",
@@ -43,14 +45,17 @@ DISEASE_ENTITIES = {
     "IIM": [
         "idiopathic inflammatory myopathies",
         "idiopathic inflammatory myopathy",
+        "juvenile idiopathic inflammatory myopathy",
         "IIM",
         "dermatomyositis",
         "polymyositis",
         "myositis",
         "immune-mediated necrotizing myopathy",
+        "immune mediated necrotizing myopathy",
         "IMNM",
         "anti-synthetase syndrome",
         "antisynthetase syndrome",
+        "anti synthetase syndrome",
         "inflammatory myopathy",
         "inflammatory myopathies",
         "juvenile dermatomyositis",
@@ -66,6 +71,9 @@ DISEASE_ENTITIES = {
         "ANCA-associated vasculitis",
         "ANCA associated vasculitis",
         "AAV",
+        "GPA",
+        "MPA",
+        "granulomatosis with polyangiitis",
         "microscopic polyangiitis",
         "ANCA-associated glomerulonephritis",
         "antineutrophil cytoplasmic antibody-associated vasculitis",
@@ -81,13 +89,33 @@ DISEASE_ENTITIES = {
         "IgG4 related disease",
         "IgG4-related disease",
         "IgG4-related diseases",
+        "IgG4-RD",
+        "IgG4 RD",
         "recurrent or refractory IgG4 related diseases",
     ],
     "Behcet": [
         "behcet disease",
         "behcet's disease",
     ],
+    "cGVHD": [
+        "chronic graft versus host disease",
+        "chronic graft versus host",
+        "chronic graft-versus-host disease",
+        "chronic graft-vs-host disease",
+        "chronic gvhd",
+        "cgvhd",
+    ],
 }
+# NOTE on the two-vocabulary design (Phase 3 of REVIEW.md / SSOT):
+# `DISEASE_ENTITIES` here is the AUTHORITATIVE full-synonym map per entity,
+# used (a) by validate.py / validate_independent_llm.py as the closed-vocab
+# enum the LLM must emit, and (b) as the LATE-fallback substring-match
+# table inside `pipeline._classify_disease` (synonyms longer than 3 chars).
+# The PRIMARY high-precision word-boundary match table inside pipeline.py
+# (`_DISEASE_TERMS`) is intentionally LEANER — it carries only the canonical
+# / unambiguous variants so short tokens like "lupus" or "ra" don't false-
+# positive on overlapping text. Keys MUST stay aligned across the two maps
+# (asserted by tests/test_classifier.py::TestVocabularyParity).
 
 GENERIC_AUTOIMMUNE_TERMS = [
     "autoimmune disease",
