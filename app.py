@@ -2535,46 +2535,67 @@ with st.sidebar.expander("Data quality / missing classifications", expanded=Fals
         )
 
 # Apply filters
+#
+# Defensive pattern for ALL filters (cross-app sync round 8, ports onc
+# commit 085629a): only narrow when the user has actually picked a
+# subset. The default state of every multiselect is `default=options`,
+# so `len(sel) == len(options)` means the user has NOT narrowed — the
+# user's intent in that case is "don't filter on this", not "filter to
+# trials whose value-for-this-field is non-empty AND in this list".
+#
+# Without this, columns that contain NaN (rheum has Countries=28 NaN,
+# Phase=27 NaN out of 284 trials) silently drop those rows from every
+# chart / table / CSV export EVEN WITH DEFAULT SIDEBAR STATE — because
+# fillna("").str.contains() and PhaseNormalized.isin() both return
+# False for the NaN rows. The "Filtered trials: N" badge no longer
+# matches PRISMA n_included.
+#
+# The `len(sel) < len(options)` guard kills the entire bug class on
+# every filter, including columns that don't currently have NaN but
+# could grow them in a future snapshot.
 mask = pd.Series(True, index=df.index)
 
-if disease_sel:
+if disease_sel and len(disease_sel) < len(disease_options):
     _sel_set = set(disease_sel)
     mask &= df["DiseaseEntities"].fillna("").apply(
         lambda v: any(e.strip() in _sel_set for e in v.split("|"))
     )
 
-if design_sel:
+if design_sel and len(design_sel) < len(design_options):
     mask &= df["TrialDesign"].isin(design_sel)
 
-if phase_sel:
+if phase_sel and len(phase_sel) < len(phase_options):
     selected_phase_norm = [k for k, v in PHASE_LABELS.items() if v in phase_sel]
     mask &= df["PhaseNormalized"].isin(selected_phase_norm)
 
-if target_sel:
+if target_sel and len(target_sel) < len(target_options):
     # Platform-labeled trials (CAR-NK, CAR-Treg, etc.) are not antigen targets;
     # they always pass this filter and are separately controlled by the modality filter.
     mask &= df["TargetCategory"].isin(target_sel) | df["TargetCategory"].isin(_PLATFORM_LABELS)
 
-if status_sel:
+if status_sel and len(status_sel) < len(status_options):
     mask &= df["OverallStatus"].isin(status_sel)
 
-if product_sel:
+if product_sel and len(product_sel) < len(product_options):
     mask &= df["ProductType"].isin(product_sel)
 
-if modality_sel:
+if modality_sel and len(modality_sel) < len(modality_options):
     mask &= df["Modality"].isin(modality_sel)
 
-if country_sel:
+if country_sel and len(country_sel) < len(country_options):
     country_pattern = "|".join([re.escape(c) for c in country_sel])
     mask &= df["Countries"].fillna("").str.contains(country_pattern, case=False, na=False, regex=True)
 
-if age_sel and "AgeGroup" in df.columns:
+if (age_sel and "AgeGroup" in df.columns
+        and len(age_sel) < len(age_options)):
     mask &= df["AgeGroup"].astype(str).isin(age_sel)
 
-if sponsor_sel and "SponsorType" in df.columns:
+if (sponsor_sel and "SponsorType" in df.columns
+        and len(sponsor_sel) < len(sponsor_options)):
     mask &= df["SponsorType"].astype(str).isin(sponsor_sel)
 
-if confidence_sel and "ClassificationConfidence" in df.columns:
+if (confidence_sel and "ClassificationConfidence" in df.columns
+        and len(confidence_sel) < len(confidence_options)):
     mask &= df["ClassificationConfidence"].astype(str).isin(confidence_sel)
 
 _df_filt = df[mask].copy()
@@ -2751,10 +2772,7 @@ with tab_overview:
         st.subheader("Disease hierarchy at a glance")
         st.markdown(
             f'<p class="small-note" style="color:{THEME["muted"]}">Click a wedge to zoom in. '
-            'Inner ring: disease family · middle ring: indication '
-            '(or, for the basket branch, the clinical archetype — '
-            'Pan-rheum / Rheum dual / Rheum+neuro / Rheum+glomerular / '
-            'Neuro multi / Generic) · outer ring: antigen target. '
+            'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
             'Basket / multi-disease trials form their own branch.</p>',
             unsafe_allow_html=True,
         )
@@ -2806,17 +2824,16 @@ with tab_overview:
         if _neuro_mask.any():
             _sb.loc[_neuro_mask, "_L2"] = _sub_text[_neuro_mask].apply(_neuro_disease)
 
-        # Override 3 (highest priority): basket trials get a clinical-
-        # archetype L2 label (Pan-rheum / Rheum dual / Rheum+neuro /
-        # Rheum+glomerular / Neuro multi / Other multi / Generic basket)
-        # so the inner ring (L1=Basket/Multidisease) and middle ring (L2)
-        # don't repeat the same label. Each basket trial maps to exactly
-        # ONE archetype so trial counts stay correct.
+        # Override 3 (highest priority): basket trials always get the
+        # Basket/Multidisease label. (Earlier this branch shipped a
+        # clinical-archetype split here — Pan-rheum / Rheum dual / etc.
+        # — but the result rendered too busy on the live snapshot. The
+        # archetype function is kept in module scope for use elsewhere
+        # if needed; the sunburst keeps the simpler single-label
+        # treatment so the basket branch reads as one clear bucket.)
         _basket_mask = _sb["TrialDesign"].eq("Basket/Multidisease")
         if _basket_mask.any():
-            _sb.loc[_basket_mask, "_L2"] = (
-                _sb[_basket_mask].apply(_basket_archetype, axis=1)
-            )
+            _sb.loc[_basket_mask, "_L2"] = "Basket/Multidisease"
 
         # L3: target with the unclear bucket folded.
         _sb["_L3"] = _fold_unclear_target(_sb["TargetCategory"])
@@ -2865,18 +2882,13 @@ with tab_overview:
                 _dd = _fd[_fd["_L2"] == _dis]
                 # Inside the Other autoimmune family the L2 label is a
                 # sub-family — give it its own colour (neuro = violet,
-                # everything else = slate variants). Inside the
-                # Basket/Multidisease family the L2 label is a clinical
-                # archetype (Pan-rheum / Rheum dual / Generic basket /
-                # …) — slate-tone gradient ordered by archetype density.
-                # All children inherit the L2 colour so the outer ring
-                # reads as one branch.
-                if _fam == "Other autoimmune":
-                    _l2_color = _SUBFAMILY_COLORS.get(_dis, _fam_color)
-                elif _fam == "Basket/Multidisease":
-                    _l2_color = _BASKET_ARCHETYPE_COLORS.get(_dis, _fam_color)
-                else:
-                    _l2_color = _fam_color
+                # everything else = slate variants). All children inherit
+                # the L2 colour so the outer ring reads as one branch.
+                _l2_color = (
+                    _SUBFAMILY_COLORS.get(_dis, _fam_color)
+                    if _fam == "Other autoimmune"
+                    else _fam_color
+                )
                 _dis_id = f"{_fam}/{_dis}"
                 _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
                 _values.append(int(_dd["Trials"].sum()))
