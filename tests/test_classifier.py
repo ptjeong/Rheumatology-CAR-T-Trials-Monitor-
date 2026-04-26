@@ -557,10 +557,16 @@ class TestVocabularyParity:
 # ---------------------------------------------------------------------------
 
 class TestConfidenceFactors:
-    """Tests for the new compute_confidence_factors API. The legacy
-    3-bucket _compute_confidence wrapper is tested separately in
-    TestConfidence (back-compat), so this class covers the richer
-    breakdown that powers the trial-detail rationale UI."""
+    """Tests for the compute_confidence_factors API.
+
+    Schema is UI_DRILLDOWN_SPEC v1.3:
+        {"score": float, "level": str,
+         "factors": {axis: {"score": float, "driver": str}},
+         "drivers": [(axis, driver), ...]}
+
+    The legacy 3-bucket _compute_confidence wrapper is tested separately
+    in TestConfidence (snapshot back-compat).
+    """
 
     def test_llm_override_pins_score_to_one(self):
         from pipeline import compute_confidence_factors
@@ -570,8 +576,10 @@ class TestConfidenceFactors:
         )
         assert out["score"] == 1.0
         assert out["level"] == "high"
-        assert out["factors"]["llm_override"] == 1.0
-        assert any(d[0] == "llm_override" for d in out["drivers"])
+        assert out["factors"]["disease"]["score"] == 1.0
+        assert out["factors"]["target"]["score"] == 1.0
+        assert out["factors"]["product"]["score"] == 1.0
+        assert "LLM" in out["factors"]["disease"]["driver"]
 
     def test_all_explicit_yields_max_score(self):
         from pipeline import compute_confidence_factors
@@ -580,9 +588,9 @@ class TestConfidenceFactors:
             "Autologous", "explicit_autologous",
             "SLE",
         )
-        assert out["factors"]["disease"] == 1.0
-        assert out["factors"]["target"] == 1.0
-        assert out["factors"]["product"] == 1.0
+        assert out["factors"]["disease"]["score"] == 1.0
+        assert out["factors"]["target"]["score"] == 1.0
+        assert out["factors"]["product"]["score"] == 1.0
         assert out["score"] == 1.0
         assert out["level"] == "high"
 
@@ -593,7 +601,7 @@ class TestConfidenceFactors:
             "Autologous", "explicit_autologous",
             "Unclassified",
         )
-        assert out["factors"]["disease"] == 0.0
+        assert out["factors"]["disease"]["score"] == 0.0
         # 2 of 3 axes still strong → score 0.667 → medium under the new model
         assert 0.55 <= out["score"] < 0.85
         assert out["level"] == "medium"
@@ -609,17 +617,46 @@ class TestConfidenceFactors:
             "SLE",
         )
         assert basket["score"] < specific["score"]
-        assert basket["factors"]["disease"] == 0.6
+        assert basket["factors"]["disease"]["score"] == 0.6
 
-    def test_drivers_carry_human_readable_reasons(self):
+    def test_factors_use_nested_schema_per_spec_v1_3(self):
+        """Schema flip from v1.0 (flat float) to v1.3 (nested {score, driver})."""
         from pipeline import compute_confidence_factors
         out = compute_confidence_factors(
             "CD19", "explicit_marker", "Autologous", "explicit_autologous",
             "SLE",
         )
-        axes_in_drivers = {d[0] for d in out["drivers"]}
-        assert axes_in_drivers == {"disease", "target", "product"}
-        for axis, value, reason in out["drivers"]:
-            assert isinstance(reason, str) and reason
+        for axis, info in out["factors"].items():
+            assert isinstance(info, dict), (
+                f"factors[{axis!r}] must be a nested dict per spec v1.3, "
+                f"got {type(info).__name__}: {info!r}"
+            )
+            assert "score" in info and "driver" in info, (
+                f"factors[{axis!r}] missing required keys; got {info!r}"
+            )
+            assert isinstance(info["driver"], str) and info["driver"]
+
+    def test_drivers_are_two_tuples_sorted_by_score(self):
+        """SPEC v1.3: drivers is [(axis, driver), ...] sorted ascending
+        by score (worst first), top 3."""
+        from pipeline import compute_confidence_factors
+        out = compute_confidence_factors(
+            "CAR-T_unspecified", "car_core_fallback",
+            "Autologous", "default_autologous_no_allo_markers",
+            "Basket/Multidisease",
+        )
+        drivers = out["drivers"]
+        assert len(drivers) <= 3
+        for entry in drivers:
+            assert len(entry) == 2, f"driver entry must be 2-tuple, got {entry!r}"
+            axis, driver_text = entry
+            assert isinstance(axis, str) and isinstance(driver_text, str)
+            assert driver_text  # non-empty
+        # Verify sort: each subsequent entry's score is >= previous
+        scores = [out["factors"][axis]["score"] for axis, _ in drivers
+                  if axis in out["factors"]]
+        assert scores == sorted(scores), (
+            "drivers must be sorted ascending by sub-score (worst first)"
+        )
 
 

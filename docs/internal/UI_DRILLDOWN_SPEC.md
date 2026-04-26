@@ -1,8 +1,47 @@
-# Per-trial drilldown UI — canonical spec v1.0
+# Per-trial drilldown UI — canonical spec v1.3
 
 Status: **active** as of 2026-04-26.
 Applies to: `onc-car-t-trials-monitor` AND `rheum-car-t-trials-monitor`.
 Both apps declare conformance to this spec via `_render_trial_drilldown`.
+
+## Visual discipline (v1.3)
+
+Two surfaces, two distinct aesthetic budgets:
+
+**Main public dashboards** — strict NEJM-clean.
+The only emoji permitted is the canonical **🚩** community-flag indicator,
+and only where it conveys that semantic. All other emoji are stripped:
+text labels + unicode arrows (`↗ ↻ ↺ →`). No traffic-light color
+emoji (🟢/🟡/🔴) for confidence — use the text vocabulary
+`{"high": "High", "medium": "Moderate", "low": "Limited"}` plus the
+percentage as the only quantitative indicator.
+
+**Validation app** (rater experience) — sophisticated gamification.
+No emoji either, but indie-game polish through CSS heatmaps
+(GitHub-contributions style), Linear-style stat tiles, and milestone
+messages with methodology context. Reward = useful knowledge, not
+cartoon confetti.
+
+## Schema (v1.3)
+
+`compute_confidence_factors` returns the canonical nested shape:
+
+```python
+{
+  "score":   <composite 0..1>,
+  "level":   <"high" | "medium" | "low">,
+  "factors": {
+      <axis>: {"score": float, "driver": str},
+      ...
+  },
+  "drivers": [(axis, driver), ...]   # 2-tuples, ascending by score, top 3
+}
+```
+
+The flat factor shape (`{axis: float}` + parallel
+`(axis, score, reason)` drivers list) used in v1.0–v1.2 has been
+replaced. UI consumers should tolerate the legacy shape during
+rollover but write the canonical shape.
 
 This spec is the **single source of truth** for the per-trial detail
 card visible whenever a user clicks a trial row in either dashboard.
@@ -166,7 +205,14 @@ multi-factor model lives alongside it as a per-axis read-only enrichment.
 
 ## Versioning
 
-Current version: **v1.0** (2026-04-26).
+Current version: **v1.3** (2026-04-26).
+
+| Version | Change |
+|---|---|
+| v1.0 | Initial spec — 6-section anatomy; flat factor schema. |
+| v1.1 | Schema flip: factors → nested `{axis: {score, driver}}`; drivers → 2-tuples. |
+| v1.2 | Metadata grid column headers ("Disease" / "Product" / "Sponsor"). |
+| v1.3 | Visual discipline — strict NEJM-clean main dashboards (emoji only for 🚩); sophisticated-but-emoji-free validation app. Text confidence vocabulary replaces traffic-light emoji. Refresh actions use text + unicode arrows. |
 
 When this spec changes:
 1. Bump version in this file's header
@@ -180,8 +226,9 @@ field in the metadata grid), bump the minor (v1.1).
 
 ## Reference implementations
 
-- `onc-car-t-trials-monitor` `app.py:_render_trial_drilldown` @ v1.0 conforming
-- `rheum-car-t-trials-monitor` `app.py:_render_trial_drilldown` @ v1.0 conforming.
+- `onc-car-t-trials-monitor` `app.py:_render_trial_drilldown` @ v1.3 conforming
+  (commit `2e221e5`).
+- `rheum-car-t-trials-monitor` `app.py:_render_trial_drilldown` @ v1.3 conforming.
   Rationale dataframe powered by `pipeline.compute_classification_rationale`;
-  per-axis tiles powered by `pipeline.compute_confidence_factors`.
-  Spec-v1.0 port landed 2026-04-26.
+  per-axis tiles powered by `pipeline.compute_confidence_factors` (nested
+  schema). Visual discipline pass landed alongside the schema flip.

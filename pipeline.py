@@ -497,31 +497,60 @@ def compute_confidence_factors(
     disease_entity: str,
     llm_override: bool = False,
 ) -> dict:
-    """Multi-factor confidence breakdown (Phase 3 of REVIEW.md).
+    """Multi-factor confidence breakdown — UI_DRILLDOWN_SPEC v1.3 schema.
 
-    Returns {"score": float, "level": str, "factors": {...}, "drivers": [...]}.
+    Returns:
+        {
+          "score":   <composite 0..1>,        # unweighted mean of factor sub-scores
+          "level":   <"high" | "medium" | "low">,
+          "factors": {
+              "disease": {"score": float, "driver": str},
+              "target":  {"score": float, "driver": str},
+              "product": {"score": float, "driver": str},
+          },
+          "drivers": [(axis, driver), ...]    # 2-tuples sorted ascending by score (worst first), top 3
+        }
+
     Every factor is in [0, 1] and traceable to the source-tag inputs.
-    Composite score is the unweighted mean of disease / target / product
-    factors; LLM override pins score to 1.0. The legacy 3-bucket
-    categorical (high / medium / low) is derived from the score with
-    thresholds at 0.85 and 0.55.
+    Composite score is the unweighted mean of the three axis factors;
+    LLM override pins the composite to 1.0. The legacy 3-bucket categorical
+    (high/medium/low) is derived from the score with thresholds at 0.85
+    and 0.55.
 
-    `drivers` is a short list of (factor, value, reason) tuples explaining
-    each contribution — surfaced in the trial-detail rationale UI.
+    `drivers` surfaces the worst-scoring axes for the trial-detail
+    "What's holding the score down" caption.
+
+    Schema flip from v1.0 (flat factors {axis: float} + parallel
+    (axis, score, reason) drivers list) to v1.3 (nested
+    {axis: {score, driver}} + 2-tuple (axis, driver) drivers list).
+    Aligned with the canonical schema in onc app's
+    compute_confidence_factors per cross-app round 6 brief.
     """
     if llm_override:
+        factors = {
+            "disease": {"score": 1.0, "driver": "Disease entity validated by LLM curator override."},
+            "target":  {"score": 1.0, "driver": "Target validated by LLM curator override."},
+            "product": {"score": 1.0, "driver": "Product type validated by LLM curator override."},
+        }
         return {
             "score": 1.0,
             "level": "high",
-            "factors": {"disease": 1.0, "target": 1.0, "product": 1.0,
-                        "llm_override": 1.0},
-            "drivers": [("llm_override", 1.0,
-                         "Per-trial LLM curator override is in force.")],
+            "factors": factors,
+            "drivers": [("llm_override", "Per-trial LLM curator override is in force.")],
         }
 
     disease_factor = _DISEASE_FACTOR.get(str(disease_entity), 1.0)
     target_factor = _TARGET_FACTOR.get(str(target_source), 0.4)
     product_factor = _PRODUCT_FACTOR.get(str(product_source), 0.4)
+
+    factors = {
+        "disease": {"score": disease_factor,
+                    "driver": f"DiseaseEntity = {disease_entity!r}"},
+        "target":  {"score": target_factor,
+                    "driver": f"TargetSource = {target_source!r}"},
+        "product": {"score": product_factor,
+                    "driver": f"ProductTypeSource = {product_source!r}"},
+    }
 
     score = (disease_factor + target_factor + product_factor) / 3.0
     if score >= _CONFIDENCE_HIGH_CUT:
@@ -531,15 +560,15 @@ def compute_confidence_factors(
     else:
         level = "low"
 
-    drivers = [
-        ("disease", disease_factor, f"DiseaseEntity = {disease_entity!r}"),
-        ("target",  target_factor,  f"TargetSource = {target_source!r}"),
-        ("product", product_factor, f"ProductTypeSource = {product_source!r}"),
-    ]
+    # `drivers`: worst-scoring axes first (lower score = more interesting to surface)
+    drivers = sorted(
+        ((axis, info["driver"], info["score"]) for axis, info in factors.items()),
+        key=lambda t: t[2],
+    )[:3]
+    drivers = [(axis, drv) for axis, drv, _ in drivers]
+
     return {"score": score, "level": level,
-            "factors": {"disease": disease_factor, "target": target_factor,
-                        "product": product_factor},
-            "drivers": drivers}
+            "factors": factors, "drivers": drivers}
 
 
 # Plain-language rationale snippets per source-tag value, surfaced in the

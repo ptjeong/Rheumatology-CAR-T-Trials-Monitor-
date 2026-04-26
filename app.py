@@ -54,7 +54,7 @@ from config import (
 
 st.set_page_config(
     page_title="CAR-T Rheumatology Trials Monitor",
-    page_icon="🧬",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -378,7 +378,10 @@ def _disease_family(
 # (_TARGET_SOURCE_EXPLAINS / _PRODUCT_SOURCE_EXPLAINS) and feed
 # `pipeline.compute_classification_rationale(row)`.
 
-_CONFIDENCE_LEVEL_EMOJI = {"high": "🟢", "medium": "🟡", "low": "🔴"}
+# Spec v1.3 visual discipline: text vocabulary instead of traffic-light
+# emoji. The percentage carries the quantitative signal; the label
+# carries the categorical signal.
+_CONFIDENCE_LEVEL_LABELS = {"high": "High", "medium": "Moderate", "low": "Limited"}
 _CONFIDENCE_FACTOR_LABELS = {
     "disease": "DiseaseEntity",
     "target":  "TargetCategory",
@@ -390,7 +393,7 @@ def _render_classification_rationale(record, *, key_suffix: str = "") -> None:
     """Render the "How was this classified?" expander.
 
     Conforms to UI_DRILLDOWN_SPEC v1.0 §5:
-      a) Composite confidence header (🟢/🟡/🔴 + level + percentage)
+      a) Composite confidence header (label + percentage)
       b) Row of st.metric tiles, one per confidence factor (driver as tooltip)
       c) "What's holding the score down" caption (worst-scoring axes)
       d) Tabular rationale (Axis | Label | Source | Matched terms | Explanation)
@@ -418,48 +421,55 @@ def _render_classification_rationale(record, *, key_suffix: str = "") -> None:
 
         score = float(cf.get("score", 0.0))
         level = str(cf.get("level", "—"))
-        emoji = _CONFIDENCE_LEVEL_EMOJI.get(level, "⚪")
+        label = _CONFIDENCE_LEVEL_LABELS.get(level, level.title() if level else "—")
         st.markdown(
-            f"#### Composite confidence: {emoji} **{level}** "
-            f"({score * 100:.0f}%)"
+            f"#### Composite confidence: **{label}** ({score * 100:.0f}%)"
         )
 
         # ── (b) Per-axis st.metric tiles ──
+        # SPEC v1.3 schema: factors is {axis: {"score": float, "driver": str}}.
+        # Tolerate the legacy flat shape ({axis: float}) for graceful
+        # rollover during the schema flip.
         factors = cf.get("factors", {})
-        # rheum's drivers list is [(short_axis, score, reason), ...]; build
-        # a driver-text lookup keyed by short axis name.
-        driver_map = {
-            axis: reason
-            for axis, _score, reason in cf.get("drivers", [])
-            if isinstance(reason, str)
-        }
         if factors:
             cols = st.columns(len(factors))
-            for col, (axis, value) in zip(cols, factors.items()):
+            for col, (axis, info) in zip(cols, factors.items()):
                 with col:
                     label = _CONFIDENCE_FACTOR_LABELS.get(axis, str(axis).title())
+                    if isinstance(info, dict):
+                        score = float(info.get("score", 0.0))
+                        driver = info.get("driver") or f"Sub-score for {label}."
+                    else:
+                        score = float(info)
+                        driver = f"Sub-score for {label}."
                     st.metric(
                         label,
-                        f"{float(value) * 100:.0f}%",
-                        help=driver_map.get(axis, f"Sub-score for {label}."),
+                        f"{score * 100:.0f}%",
+                        help=driver,
                     )
 
         # ── (c) "What's holding the score down" caption ──
-        worst = sorted(
-            (
-                (axis, sc, reason)
-                for axis, sc, reason in cf.get("drivers", [])
-                if isinstance(sc, (int, float))
-            ),
-            key=lambda t: t[1],
-        )[:3]
+        # SPEC v1.3: drivers is [(axis, driver), ...] sorted ascending by
+        # score (worst first), top 3. Look the score back up from factors
+        # to keep the caption percentages.
+        worst = cf.get("drivers", [])
         if worst:
-            lines = [
-                f"- **{_CONFIDENCE_FACTOR_LABELS.get(axis, axis.title())}** "
-                f"({float(sc) * 100:.0f}%): {reason}"
-                for axis, sc, reason in worst
-            ]
-            st.caption("**What's holding the score down:**\n" + "\n".join(lines))
+            lines = []
+            for entry in worst:
+                if not entry:
+                    continue
+                axis = entry[0]
+                # 2-tuple (v1.3) or 3-tuple (legacy fallback)
+                driver = entry[1] if len(entry) >= 2 else ""
+                info = factors.get(axis, {})
+                score = (
+                    info.get("score") if isinstance(info, dict) else info
+                )
+                label = _CONFIDENCE_FACTOR_LABELS.get(axis, str(axis).title())
+                pct = f"{float(score) * 100:.0f}%" if score is not None else "—"
+                lines.append(f"- **{label}** ({pct}): {driver}")
+            if lines:
+                st.caption("**What's holding the score down:**\n" + "\n".join(lines))
 
         # ── (d) Tabular rationale ──
         try:
@@ -499,7 +509,7 @@ def _render_classification_rationale(record, *, key_suffix: str = "") -> None:
         # ── (e) LLM-override note ──
         if rec_dict.get("LLMOverride"):
             st.info(
-                "🔒 LLM override is in force for this trial — pipeline labels "
+                "LLM override is in force for this trial — pipeline labels "
                 "above were set by the curation loop. See `llm_overrides.json`."
             )
 
@@ -531,7 +541,7 @@ def _render_trial_drilldown(record, *, key_suffix: str = "") -> None:
         # against the live CT.gov record without scrolling.
         _link = (record.get("NCTLink") if hasattr(record, "get") else None) \
             or f"https://clinicaltrials.gov/study/{nct}"
-        st.markdown(f"📎 **[Open on ClinicalTrials.gov ↗]({_link})**")
+        st.markdown(f"**[Open on ClinicalTrials.gov ↗]({_link})**")
 
         # 3. Three-column metadata grid (Disease / Product / Sponsor)
         c1, c2, c3 = st.columns(3)
@@ -568,7 +578,7 @@ def _render_trial_drilldown(record, *, key_suffix: str = "") -> None:
             if record.get("ProductName"):
                 st.markdown(f"**Named product:** {record['ProductName']}")
             if bool(record.get("LLMOverride", False)):
-                st.markdown("🔒 **LLM override applied**")
+                st.markdown("**LLM override applied**")
         with c3:
             st.markdown("##### Sponsor")
             st.markdown(f"**Lead sponsor:** {record.get('LeadSponsor', '—') or '—'}")
@@ -2572,7 +2582,7 @@ _MODERATOR_MODE = _moderator_mode_active()
 _tab_labels = ["Overview", "Geography / Map", "Data", "Deep Dive",
                "Publication Figures", "Methods & Appendix", "About"]
 if _MODERATOR_MODE:
-    _tab_labels.append("⚙ Moderation")
+    _tab_labels.append("Moderation")
 
 _tabs = st.tabs(_tab_labels)
 tab_overview, tab_geo, tab_data, tab_deepdive, tab_pub, tab_methods, tab_about = _tabs[:7]
@@ -3324,21 +3334,24 @@ with tab_data:
                  "Shows that country's cities and site statuses inline.",
         )
     with _c_flag:
-        # Live count of trials with one or more open classification-flag
-        # GitHub issues. Disabled when the count is 0 so the checkbox isn't
-        # a tease (cached 5 minutes via _load_active_flags).
-        _active_flags_for_filter = _load_active_flags()
-        _n_flagged_in_view = (
-            df_filt["NCTId"].isin(_active_flags_for_filter.keys()).sum()
-            if _active_flags_for_filter else 0
-        )
-        _flagged_only = st.checkbox(
-            f"🚩 Flagged only ({_n_flagged_in_view})",
-            key="data_flagged_only",
-            disabled=_n_flagged_in_view == 0,
-            help="Show only trials with one or more open community "
-                 "classification-flag GitHub issues.",
-        )
+        # SPEC v1.3: dropped the "Flagged only" filter (triage lives in the
+        # Moderation tab; the 🚩 BriefTitle prefix already gives at-a-glance
+        # discoverability — onc dropped this in commit a95147b for the same
+        # reason). Replaced with a public refresh-flags button so a rater
+        # who just filed a flag doesn't have to wait the 5-min cache TTL
+        # before the prefix shows up on their trial.
+        st.write("")  # vertical alignment with the search input above
+        if st.button(
+            "Refresh ↻",
+            key="data_refresh_flags",
+            help="Refetch the open classification-flag GitHub issues. "
+                 "Cached 5 minutes by default; use this if you just filed "
+                 "a flag and want the 🚩 indicator to appear immediately.",
+            use_container_width=True,
+        ):
+            _load_active_flags.clear()
+            _load_flag_issue_details.clear()
+            st.rerun()
     _zoom_active = _zoom_country != _ALL_COUNTRIES_LABEL
 
     show_cols = [
@@ -3393,13 +3406,6 @@ with tab_data:
                 mask |= table_df[c].fillna("").astype(str).str.lower().str.contains(q, regex=False)
         table_df = table_df[mask]
         st.caption(f"Search '{search_q}' · {len(table_df)} of {len(df_filt)} filtered trials match")
-
-    # Apply the flagged-only checkbox filter (after the country zoom + search
-    # so the user sees the in-view count, not the global count).
-    if _flagged_only and _active_flags_for_filter:
-        table_df = table_df[
-            table_df["NCTId"].isin(_active_flags_for_filter.keys())
-        ].copy()
 
     # Inline 🚩 prefix on flagged trials' BriefTitle (idempotent; no-op when
     # _load_active_flags() returns {}, e.g. offline / rate-limited / no flags).
@@ -6128,7 +6134,7 @@ regulatory, or decision-support tool.
         transition: background 0.12s, border-color 0.12s;
     " onmouseover="this.style.background='{THEME['surf3']}';this.style.borderColor='{THEME['primary']}'"
        onmouseout="this.style.background='{THEME['surf2']}';this.style.borderColor='{THEME['border']}'">
-        ✉ peter.jeong@uk-koeln.de
+        Email: peter.jeong@uk-koeln.de
     </a>
 </div>
         """,
@@ -6275,7 +6281,7 @@ Stand: {date.today().isoformat()}
 
 if _MODERATOR_MODE and tab_moderation is not None:
     with tab_moderation:
-        st.subheader("⚙ Moderation console")
+        st.subheader("Moderation console")
         st.caption(
             "Private moderator workspace. Triage community classification "
             "flags that have hit consensus, or — when the queue is empty — "
@@ -6319,7 +6325,7 @@ if _MODERATOR_MODE and tab_moderation is not None:
             for nct, entry in sorted(consensus_flags.items()):
                 _issue_urls = entry.get("issue_urls", [])
                 with st.expander(
-                    f"⚑ {nct} — {entry.get('count', 0)} flag(s) · "
+                    f"{nct} — {entry.get('count', 0)} flag(s) · "
                     f"consensus reached", expanded=True,
                 ):
                     if _issue_urls:

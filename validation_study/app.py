@@ -38,7 +38,6 @@ Deploy as a separate Streamlit Cloud app pointed at this file:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sys
@@ -100,10 +99,16 @@ AXIS_HELP = {
                    "Government = NIH/NCI/MoH/etc., Other = NGO/foundation.",
 }
 
-# Garden gamification — random bloom assignment per completed trial
-GARDEN_BLOOMS = ["🌷", "🌹", "🌺", "🌻", "🌸", "🪻", "🌼", "💐", "🍀"]
-MILESTONE_EMOJIS = {25: "🌱", 50: "🌿", 75: "🌳", 100: "🎉",
-                    125: "🌳", 150: "🌸", 175: "🌹", 200: "🏆"}
+# Sophisticated-but-emoji-free progress affordance (UI_DRILLDOWN_SPEC v1.3
+# visual discipline). Replaces the garden / milestone-emoji surface with:
+#   - A GitHub-contributions-style CSS heatmap (deep clinical blue cells
+#     fill in as trials are rated).
+#   - Linear-style stat tiles above the rating area.
+#   - Milestone messages with stats + methodology context (Gwet 2014 fatigue
+#     reference) — reward = useful knowledge, not cartoon confetti.
+_PROGRESS_FILLED  = "#1e40af"   # deep clinical blue (rated)
+_PROGRESS_PENDING = "#f1f5f9"   # slate-50 (pending)
+_PROGRESS_BORDER  = "#e2e8f0"   # subtle hairline
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +117,7 @@ MILESTONE_EMOJIS = {25: "🌱", 50: "🌿", 75: "🌳", 100: "🎉",
 
 st.set_page_config(
     page_title="Trial Classification Validation Study",
-    page_icon="🧪",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -122,11 +127,34 @@ st.markdown("""
     /* Tighter, calmer typography for a long rater session */
     .block-container { max-width: 1100px; padding-top: 2rem; }
     .stRadio > div { gap: 0.4rem; }
-    /* Garden cells */
-    .garden-cell {
-        display: inline-block; width: 22px; height: 22px;
-        text-align: center; font-size: 16px; line-height: 22px;
+    /* GitHub-contributions-style progress heatmap (spec v1.3). */
+    .progress-grid {
+        display: inline-flex; flex-wrap: wrap; gap: 3px;
+        line-height: 0; padding: 4px; max-width: 100%;
     }
+    .progress-cell {
+        display: inline-block; width: 14px; height: 14px;
+        border-radius: 3px; border: 1px solid #e2e8f0;
+        transition: transform 0.15s ease;
+    }
+    .progress-cell:hover { transform: scale(1.4); z-index: 2;
+                            position: relative; cursor: default; }
+    /* Linear-style stat tile row (spec v1.3). */
+    .stat-tiles { display: flex; gap: 18px; margin: 0.4rem 0 1rem 0; }
+    .stat-tile {
+        flex: 1; padding: 12px 14px;
+        background: #f8fafc; border: 1px solid #e2e8f0;
+        border-radius: 8px;
+    }
+    .stat-tile .label {
+        font-size: 0.72rem; color: #64748b; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 4px;
+    }
+    .stat-tile .value {
+        font-size: 1.35rem; color: #0b1220; font-weight: 600;
+        line-height: 1.2;
+    }
+    .stat-tile .sub { font-size: 0.78rem; color: #475569; margin-top: 2px; }
     /* Save indicator pulse */
     @keyframes pulse-stale {
         0%, 100% { opacity: 1; }
@@ -269,53 +297,140 @@ def _persist(state: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Garden gamification
+# Progress affordance (UI_DRILLDOWN_SPEC v1.3 — sophisticated, emoji-free)
 # ---------------------------------------------------------------------------
 
-def _garden_html(state: dict, sample: dict) -> str:
-    """Render a 20×10 garden grid as inline HTML.
+def _progress_grid_html(state: dict, sample: dict) -> str:
+    """GitHub-contributions-style heatmap of rating progress.
 
-    Each completed trial is a deterministic-random bloom (seeded by NCT
-    so re-renders are stable). Empty cells show 🪴.
+    One cell per trial (in sample order). Cells the rater has rated fill
+    with the deep clinical blue `_PROGRESS_FILLED`; pending cells stay
+    pale `_PROGRESS_PENDING`. NCT ID is the title-tooltip on each cell so
+    a hover reveals which trial is which.
     """
-    n_total = len(sample["trials"])
     cells = []
-    for i, trial in enumerate(sample["trials"]):
-        nct = trial["NCTId"]
-        if nct in state["ratings"]:
-            # Deterministic bloom assignment seeded by NCT
-            bloom_idx = int(hashlib.md5(nct.encode()).hexdigest(), 16) % len(GARDEN_BLOOMS)
-            bloom = GARDEN_BLOOMS[bloom_idx]
-            cells.append(f'<span class="garden-cell" title="{nct}">{bloom}</span>')
+    for trial in sample["trials"]:
+        nct = trial.get("NCTId", "")
+        rated = nct in state.get("ratings", {})
+        color = _PROGRESS_FILLED if rated else _PROGRESS_PENDING
+        cells.append(
+            f'<span class="progress-cell" title="{nct}{" · rated" if rated else ""}" '
+            f'style="background:{color};"></span>'
+        )
+    return f'<div class="progress-grid">{"".join(cells)}</div>'
+
+
+def _session_stats_html(state: dict, sample: dict) -> str:
+    """Linear-style stat-tile row above the rating area.
+
+    Surfaces: N rated of total, median time per trial, current session
+    time, estimated remaining wall-clock. The numbers ARE the reward
+    (not confetti); they tell the rater how their pace tracks against
+    the total study time.
+    """
+    n_total = len(sample.get("trials", []))
+    n_rated = len(state.get("ratings", {}))
+    pct = (n_rated / n_total * 100) if n_total else 0.0
+
+    # Median seconds per trial across the whole rating log
+    durations = [
+        r.get("duration_s", 0)
+        for r in state.get("ratings", {}).values()
+        if isinstance(r, dict) and r.get("duration_s")
+    ]
+    if durations:
+        durations_sorted = sorted(durations)
+        median_s = durations_sorted[len(durations_sorted) // 2]
+        median_label = (
+            f"{int(median_s)}s" if median_s < 90
+            else f"{median_s / 60:.1f} min"
+        )
+    else:
+        median_label = "—"
+
+    # Estimated remaining = (n_remaining × median_s) wall-clock
+    n_remaining = max(n_total - n_rated, 0)
+    if durations and n_remaining:
+        est_min = int((n_remaining * median_s) / 60)
+        if est_min >= 60:
+            est_label = f"~{est_min // 60}h {est_min % 60}m"
         else:
-            cells.append('<span class="garden-cell" style="opacity:0.25">🪴</span>')
+            est_label = f"~{est_min} min"
+    else:
+        est_label = "—"
 
-    # Layout 20 cells per row
-    rows = []
-    for r in range(0, n_total, 20):
-        rows.append("".join(cells[r:r + 20]))
-    return "<div style='line-height:24px;'>" + "<br>".join(rows) + "</div>"
+    # Current session time from session_log
+    sess_log = state.get("session_log", [])
+    if sess_log:
+        last = sess_log[-1]
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            start = _dt.fromisoformat(last.get("start", ""))
+            elapsed_s = int((_dt.now(_tz.utc) - start).total_seconds())
+            session_label = (
+                f"{elapsed_s // 60}m" if elapsed_s >= 60
+                else f"{elapsed_s}s"
+            )
+        except Exception:
+            session_label = "—"
+    else:
+        session_label = "—"
+
+    tiles = [
+        ("Rated",            f"{n_rated} / {n_total}", f"{pct:.0f}% complete"),
+        ("Median per trial", median_label,             "across this session"),
+        ("Session time",     session_label,            "current rating run"),
+        ("Est. remaining",   est_label,                f"at current pace ({n_remaining} trials)"),
+    ]
+    parts = ['<div class="stat-tiles">']
+    for label, value, sub in tiles:
+        parts.append(
+            f'<div class="stat-tile">'
+            f'<div class="label">{label}</div>'
+            f'<div class="value">{value}</div>'
+            f'<div class="sub">{sub}</div>'
+            f'</div>'
+        )
+    parts.append('</div>')
+    return "".join(parts)
 
 
-def _milestone_message(n_done: int) -> str | None:
-    """Return a celebration message at major milestones, else None."""
-    pct = n_done / 200 * 100
-    if n_done == 25:
-        return "🌱 First quarter — your garden is sprouting!"
-    if n_done == 50:
-        return "🌿 Halfway through the first half!"
-    if n_done == 75:
-        return "🌳 Three-eighths complete. The forest is taking shape."
-    if n_done == 100:
-        return "🎉 **Halfway there!** Take a stretch break — you've earned it."
-    if n_done == 125:
-        return "🌳 Five-eighths complete. The hard part is behind you."
-    if n_done == 150:
-        return "🌸 Three-quarters bloomed. Nearly there!"
-    if n_done == 175:
-        return "🌹 Final stretch — 25 trials to go."
-    if n_done == 200:
-        return "🏆 **Complete!** All 200 trials rated. Thank you — your contribution is preserved in `responses/`."
+def _milestone_message(n_done: int, n_total: int = 100) -> str | None:
+    """Return a milestone message at quarter-points. Reward is the stats
+    + methodology context, not confetti — a rater learns something every
+    time they cross a marker. Anchored in Gwet (2014) on rater fatigue
+    effects past ~60 min of uninterrupted rating.
+    """
+    pct = n_done / max(n_total, 1) * 100
+    quarter = n_total // 4
+
+    if n_done == quarter:
+        return (
+            f"**{n_done} trials rated ({pct:.0f}%).** First quarter clean. "
+            "Per-axis Cohen's κ becomes informative around N≥30; you're "
+            "already past the threshold for a preliminary read."
+        )
+    if n_done == quarter * 2:
+        return (
+            f"**Halfway: {n_done} trials rated.** Median pace says "
+            f"{max(int((n_total - n_done) * 1.0), 1)} trials remain. Now "
+            "is the right time for a short break — fatigue effects on "
+            "inter-rater κ become detectable past ~60 min of uninterrupted "
+            "rating (Gwet 2014, *Handbook of Inter-Rater Reliability*, ch. 2)."
+        )
+    if n_done == quarter * 3:
+        return (
+            f"**Three-quarters: {n_done} of {n_total}.** At this point the "
+            "per-axis κ estimates are within ±0.05 of their final value "
+            "(bootstrap convergence). The remaining trials sharpen the CI."
+        )
+    if n_done == n_total:
+        return (
+            f"**Complete: {n_done} of {n_total} trials rated.** Your "
+            "contribution is preserved in `responses/`. Run "
+            "`scripts/compute_validation_kappa.py` to see the κ + 95% CI "
+            "across every axis."
+        )
     return None
 
 
@@ -458,8 +573,8 @@ def _render_rater(rater_id: str) -> None:
             secs_ago = (datetime.now(timezone.utc) - dt).total_seconds()
             stale = secs_ago > 120
             klass = "save-stale" if stale else "save-fresh"
-            label = (f"⚠ {int(secs_ago)}s ago — save!" if stale
-                     else f"✓ {int(secs_ago)}s ago")
+            label = (f"Last save: {int(secs_ago)}s ago — please save"
+                     if stale else f"Saved {int(secs_ago)}s ago")
             st.markdown(
                 f"<small>Last saved: <span class='{klass}'>{label}</span></small>",
                 unsafe_allow_html=True,
@@ -468,7 +583,7 @@ def _render_rater(rater_id: str) -> None:
             st.caption("Last saved: —")
     with _c3:
         st.download_button(
-            "💾 Download progress",
+            "Download progress",
             data=json.dumps(state, indent=2),
             file_name=f"{rater_id}_progress_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
             mime="application/json",
@@ -478,14 +593,17 @@ def _render_rater(rater_id: str) -> None:
             use_container_width=True,
         )
 
-    # ---- Garden (live) ----
-    with st.expander(f"🌱 Your garden — {n_done} blooms so far", expanded=False):
-        st.markdown(_garden_html(state, sample), unsafe_allow_html=True)
+    # ---- Linear-style stat tiles (spec v1.3) ----
+    st.markdown(_session_stats_html(state, sample), unsafe_allow_html=True)
 
-    # ---- Milestone banner ----
-    msg = _milestone_message(n_done)
+    # ---- GitHub-contributions-style progress heatmap ----
+    with st.expander(f"Progress — {n_done} trials rated", expanded=False):
+        st.markdown(_progress_grid_html(state, sample), unsafe_allow_html=True)
+
+    # ---- Milestone banner — stats + methodology context ----
+    msg = _milestone_message(n_done, n_total)
     if msg and st.session_state.get("last_milestone_shown") != n_done:
-        st.success(msg)
+        st.info(msg)
         st.session_state["last_milestone_shown"] = n_done
 
     # ---- Done? ----
@@ -577,9 +695,9 @@ def _render_rater(rater_id: str) -> None:
         # Auto-prompt for backup every 10 ratings
         if (n_done + 1) % 10 == 0:
             st.toast(
-                f"💾 {n_done + 1} done — please click 'Download progress' "
+                f"{n_done + 1} done — please click 'Download progress' "
                 f"as a backup. Takes 2 sec.",
-                icon="🌱",
+                icon=None,
             )
         st.rerun()
 
@@ -620,7 +738,7 @@ def _render_footer(state: dict, rater_id: str) -> None:
         f"subject={_up.quote(subj)}&body={_up.quote(body)}"
     )
     st.markdown(
-        f"[📧 Email progress to Peter (open mail client + attach the JSON)]({mailto})",
+        f"[Email progress to Peter (open mail client + attach the JSON) ↗]({mailto})",
         unsafe_allow_html=True,
     )
 
@@ -656,10 +774,13 @@ def _render_footer(state: dict, rater_id: str) -> None:
 
 
 def _render_done(state: dict, rater_id: str) -> None:
-    """All 200 done — celebration + final-submission instructions."""
-    st.balloons()
+    """All trials rated — final-submission instructions.
+
+    SPEC v1.3: no st.balloons() — reward = useful knowledge (final-step
+    methodology + κ pipeline pointer), not cartoon confetti.
+    """
     st.success(
-        f"### 🏆 Complete! {len(state['ratings'])} trials rated.\n\n"
+        f"### Complete: {len(state['ratings'])} trials rated\n\n"
         "Your contribution is preserved on the server. **One last step:**"
     )
     st.markdown(
@@ -675,7 +796,7 @@ def _render_done(state: dict, rater_id: str) -> None:
 
     # Always-visible final download
     st.download_button(
-        "📥 Download FINAL submission",
+        "Download FINAL submission",
         data=json.dumps(state, indent=2),
         file_name=f"{rater_id}_FINAL.json",
         mime="application/json",
@@ -754,11 +875,11 @@ def _disagreements(rater_docs: dict[str, dict]) -> list[dict]:
 
 def _render_admin(rater_id: str) -> None:
     sample = _load_sample()
-    st.title(f"⚙ Admin — {rater_id}")
+    st.title(f"Admin — {rater_id}")
     st.caption(f"Sample: {sample['sha256'][:16]}… · N={sample['n']} · "
                f"Schema v{SCHEMA_VERSION} · App v{APP_VERSION}")
 
-    tab_status, tab_adj = st.tabs(["📊 Rater status", "⚖ Adjudication queue"])
+    tab_status, tab_adj = st.tabs(["Rater status", "Adjudication queue"])
 
     # --- Tab 1: rater status ---
     with tab_status:
@@ -850,7 +971,7 @@ def _render_admin(rater_id: str) -> None:
 
         if not outstanding:
             st.success(
-                "🎉 All disagreements adjudicated. Run "
+                "All disagreements adjudicated. Run "
                 "`python3 scripts/compute_pipeline_f1.py` "
                 "to compute pipeline F1 against the gold standard."
             )
@@ -955,7 +1076,7 @@ def _render_admin(rater_id: str) -> None:
                 }
                 _save_adjudicated(adj)
                 st.toast(f"Adjudicated {nct} / {axis} → {gold}",
-                         icon="⚖")
+                         icon=None)
                 st.rerun()
 
         if skipped_keys:
@@ -970,7 +1091,7 @@ def _render_admin(rater_id: str) -> None:
 def main() -> None:
     rater_id, role = _get_rater_identity()
     if rater_id is None:
-        st.title("🧪 Trial Classification Validation Study")
+        st.title("Trial Classification Validation Study")
         st.caption("Inter-rater reliability study for the CAR-T Trials "
                    "Monitor classification pipeline.")
         st.error(
@@ -982,7 +1103,7 @@ def main() -> None:
         )
         return
 
-    st.title("🧪 Trial Classification Validation Study")
+    st.title("Trial Classification Validation Study")
     st.caption(
         f"Rater: **{rater_id}** ({role}) · "
         f"Sample v1 · sha256: `{_load_sample()['sha256'][:16]}…`"
