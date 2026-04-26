@@ -380,6 +380,76 @@ class TestDiseaseClassification:
         ))
         assert primary == "Unclassified"
 
+    def test_strict_plus_oim_promotes_to_basket(self):
+        """A trial that strict-matches one rheum systemic AND has additional
+        pipe-separated condition entries naming OIM-cluster diseases (MS /
+        Myasthenia / NMOSD / CIDP / pemphigus / etc.) is a multi-disease
+        cohort. Live evidence: NCT07022197 (BAFF-R CART for refractory
+        neuroimmune diseases) lists CIDP | NMOSD | MG | IIM. Pre-fix it
+        was Single-disease/IIM because only IIM is in _SYSTEMIC_DISEASES.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions=(
+                "Chronic Inflammatory Demyelinating Polyradiculoneuropathy | "
+                "NMO Spectrum Disorder | Myasthenia Gravis | "
+                "Idiopathic Inflammatory Myopathies"
+            ),
+        ))
+        assert design == "Basket/Multidisease"
+        assert primary == "Basket/Multidisease"
+
+    def test_disease_aliases_do_not_falsely_promote_to_basket(self):
+        """Aliases of the same disease ('SLE | Lupus Nephritis' or
+        'LN class III | LN class IV') must NOT count as multiple distinct
+        diseases. The basket-broadening pass must dedupe by entity, not
+        count raw pipe-separated entries.
+        """
+        # Aliases of SLE
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Systemic Lupus Erythematosus | Lupus Nephritis | "
+                       "Lupus Nephritis - WHO Class III | Lupus Nephritis - WHO Class IV",
+        ))
+        assert design == "Single disease"
+        assert primary == "SLE"
+
+        # Aliases of SSc + subtype label
+        entities, design, primary = _classify_disease(self._row(
+            conditions="Systemic Sclerosis | Diffuse Cutaneous Systemic Sclerosis | "
+                       "Systemic Sclerosis - 2013 ACR/EULAR Classified",
+        ))
+        assert design == "Single disease"
+        assert primary == "SSc"
+
+    def test_strict_disease_does_not_double_count_with_oim_synonym(self):
+        """cGVHD has both a strict-map entry AND no OIM-cluster entry
+        (per pipeline.py the GVHD cluster is intentionally excluded
+        because it's covered by the strict map). A cGVHD trial whose
+        Conditions field uses multiple GVHD aliases must NOT flip to
+        Basket via the OIM-cluster pass.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions=(
+                "Chronic Graft Versus Host Disease | "
+                "Steroid Refractory Graft Versus Host Disease"
+            ),
+        ))
+        assert primary == "cGVHD"
+        assert design == "Single disease"
+
+    def test_glomerular_basket_promotes(self):
+        """Membranous nephropathy + IgA nephropathy + AAV (with no
+        strict-map systemic except AAV) should promote to Basket via
+        the OIM-cluster pass. Live evidence: NCT07389499 + NCT07535138.
+        """
+        entities, design, primary = _classify_disease(self._row(
+            conditions=(
+                "IgA Nephropathy | Membranous Nephropathy | "
+                "ANCA-associated Vasculitis"
+            ),
+        ))
+        assert design == "Basket/Multidisease"
+        assert primary == "Basket/Multidisease"
+
     def test_ctd_other_pair_with_sle_is_basket(self):
         """CTD_other paired with another systemic disease (SLE/SSc/IIM/AAV)
         is a real multi-disease cohort, not a single-disease trial. Regression

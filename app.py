@@ -668,7 +668,8 @@ _FLAG_AXIS_OPTIONS: dict[str, list[str]] = {
 
 
 def _build_flag_issue_url(record, *, axes: list[str], corrections: dict[str, str],
-                            notes: str) -> str:
+                            notes: str,
+                            constituent_entities: list[str] | None = None) -> str:
     """Construct a GitHub issue URL with title + labels + structured YAML
     body pre-filled. The user lands on github.com with everything ready;
     they review and click Submit. Auth is handled by GitHub.
@@ -677,12 +678,20 @@ def _build_flag_issue_url(record, *, axes: list[str], corrections: dict[str, str
     consensus-detection GitHub Action can parse it back without needing
     a custom front-matter convention. Free-form notes appear AFTER the
     machine-readable block.
+
+    `constituent_entities` is a list of specific rheum entities the trial
+    enrols when the proposed DiseaseEntity correction is
+    "Basket/Multidisease". Captured in the YAML as `constituent_entities`
+    so the moderator (and a future pipeline read of the override) sees
+    the full basket composition, not just the basket flag.
     """
     import urllib.parse as _up
 
     nct = record.get("NCTId", "")
     title_axes = ", ".join(axes) if axes else "general"
     title = f"[Flag] {nct} — {title_axes}"
+
+    constituent_entities = list(constituent_entities or [])
 
     yaml_lines = [
         "<!-- BEGIN_FLAG_DATA",
@@ -696,6 +705,17 @@ def _build_flag_issue_url(record, *, axes: list[str], corrections: dict[str, str
             f"    pipeline_label: \"{pipeline_label}\"",
             f"    proposed_correction: \"{corrections.get(axis, '')}\"",
         ]
+        # Attach the constituent-entities sub-list to the DiseaseEntity
+        # axis only, and only when the proposed correction is the basket
+        # label. Keeps the YAML schema uncluttered for non-basket flags.
+        if (
+            axis == "DiseaseEntity"
+            and corrections.get(axis) == "Basket/Multidisease"
+            and constituent_entities
+        ):
+            yaml_lines.append("    constituent_entities:")
+            for ent in constituent_entities:
+                yaml_lines.append(f"      - \"{ent}\"")
     yaml_lines.append("END_FLAG_DATA -->")
     yaml_block = "\n".join(yaml_lines)
 
@@ -715,6 +735,18 @@ def _build_flag_issue_url(record, *, axes: list[str], corrections: dict[str, str
     body_md += "| Axis | Proposed |\n|---|---|\n"
     for axis in axes:
         body_md += f"| {axis} | `{corrections.get(axis, '')}` |\n"
+
+    if (
+        constituent_entities
+        and corrections.get("DiseaseEntity") == "Basket/Multidisease"
+    ):
+        body_md += (
+            "\n### Basket composition\n"
+            "Specific rheum entities the trial enrols (the basket's "
+            "constituent diseases):\n\n"
+        )
+        for ent in constituent_entities:
+            body_md += f"- `{ent}`\n"
 
     if notes:
         body_md += f"\n### Reviewer notes\n\n{notes}\n"
@@ -790,6 +822,7 @@ def _render_suggest_correction(record, *, key_suffix: str = "") -> None:
         )
 
         corrections: dict[str, str] = {}
+        constituent_entities: list[str] = []
         if _selected_axes:
             for axis in _selected_axes:
                 _current = record.get(axis, "")
@@ -807,6 +840,44 @@ def _render_suggest_correction(record, *, key_suffix: str = "") -> None:
                         value="",
                         key=f"flag_correction_{axis}_{nct}_{key_suffix}",
                         placeholder="Type the correct label",
+                    )
+
+                # When the user proposes flipping DiseaseEntity to
+                # Basket/Multidisease, ask which specific rheum entities
+                # the trial actually enrols. The pipeline can promote a
+                # trial to Basket via ≥2 systemic-disease detection — but
+                # if the reviewer is doing it manually, capture WHICH
+                # entities they're calling so the moderator (and future
+                # pipeline override-reads) sees the full basket
+                # composition rather than just the basket flag.
+                if (
+                    axis == "DiseaseEntity"
+                    and corrections.get(axis) == "Basket/Multidisease"
+                ):
+                    _basket_options = [
+                        e for e in _FLAG_AXIS_OPTIONS.get("DiseaseEntity", [])
+                        if e not in (
+                            "Basket/Multidisease", "Unclassified",
+                            "Other immune-mediated",
+                        )
+                    ]
+                    # Pre-fill from the pipeline's existing DiseaseEntities
+                    # column (the multi-match output) so the reviewer
+                    # only has to add/remove entities, not retype the lot.
+                    _seed = [
+                        e.strip()
+                        for e in str(record.get("DiseaseEntities", "")).split("|")
+                        if e.strip() in _basket_options
+                    ]
+                    constituent_entities = st.multiselect(
+                        "Specific entities in the basket — pick all that this trial enrols",
+                        options=_basket_options,
+                        default=_seed,
+                        key=f"flag_basket_constituents_{nct}_{key_suffix}",
+                        help="Basket/Multidisease means the trial enrols ≥2 "
+                             "distinct rheum diseases. Select every entity "
+                             "the cohort spans so the moderator sees the "
+                             "full basket composition (not just the flag).",
                     )
 
         notes = st.text_area(
@@ -834,6 +905,7 @@ def _render_suggest_correction(record, *, key_suffix: str = "") -> None:
                 axes=_final_axes,
                 corrections={a: corrections[a] for a in _final_axes},
                 notes=notes,
+                constituent_entities=constituent_entities,
             )
             st.link_button(
                 "Open as GitHub issue ↗",
@@ -3271,16 +3343,26 @@ with tab_geo:
                 if city_trial_view.empty:
                     st.info(f"No study rows found for {selected_city}.")
                 else:
+                    # Wire the spec-v1.3 drilldown into the Geography
+                    # city-trial table so the suggest-correction expander
+                    # is reachable from every trial-level surface in the
+                    # app (UI_DRILLDOWN_SPEC contract: every trial-table
+                    # call site uses _render_trial_drilldown).
                     _cols = [c for c in [
                         "NCTId", "NCTLink", "BriefTitle", "DiseaseEntity",
                         "TargetCategory", "ProductType", "Phase", "OverallStatus",
                         "LeadSponsor", "Cities", "SiteStatuses",
                     ] if c in city_trial_view.columns]
-                    st.dataframe(
+                    city_trial_view, _cols = _attach_flag_column(city_trial_view, _cols)
+                    st.caption("Click any row to open the full trial record below.")
+                    _city_trial_event = st.dataframe(
                         city_trial_view[_cols],
                         width='stretch',
                         height=320,
                         hide_index=True,
+                        on_select="rerun",
+                        selection_mode="single-row",
+                        key=f"geo_city_trial_table_{selected_country}_{selected_city}",
                         column_config={
                             "NCTId": st.column_config.TextColumn("NCT ID"),
                             "NCTLink": st.column_config.LinkColumn("Trial link", display_text="Open trial"),
@@ -3295,6 +3377,26 @@ with tab_geo:
                             "SiteStatuses": st.column_config.TextColumn("Site status", width="medium"),
                         },
                     )
+                    _city_rows = (
+                        _city_trial_event.selection.rows
+                        if _city_trial_event and hasattr(_city_trial_event, "selection")
+                        else []
+                    )
+                    if _city_rows:
+                        _sel_nct = city_trial_view.iloc[_city_rows[0]]["NCTId"]
+                        # Look up the full record in df_filt so the
+                        # drilldown gets every column (Modality / AgeGroup
+                        # / etc) — the city-table subset is missing some
+                        # of them.
+                        _full_rec = df_filt[df_filt["NCTId"] == _sel_nct]
+                        _drill_rec = (
+                            _full_rec.iloc[0] if not _full_rec.empty
+                            else city_trial_view.iloc[_city_rows[0]]
+                        )
+                        _render_trial_drilldown(
+                            _drill_rec,
+                            key_suffix=f"geo_city_{selected_country}_{selected_city}",
+                        )
             else:
                 st.caption("Select a city row in the table to open the related trial list below.")
 

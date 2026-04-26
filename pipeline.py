@@ -186,6 +186,44 @@ _SYSTEMIC_DISEASES = {
     "SLE", "SSc", "Sjogren", "CTD_other", "IIM", "AAV", "RA", "IgG4-RD", "Behcet", "cGVHD",
 }
 
+# OIM-disease clusters — used for the basket-detection broadening pass
+# inside `_classify_disease`. Each cluster groups synonyms / variant
+# spellings for ONE specific OIM disease so a condition-entry like
+# "Myasthenia Gravis" and one like "MGFA Class IIIa" don't double-count
+# as two distinct OIM diseases. The cluster set mirrors the L2 disease
+# split inside app.py's `_NEURO_DISEASE_PATTERNS` and the system-level
+# `_SUBFAMILY_PATTERNS`, but lives in pipeline.py so the basket-detection
+# logic doesn't need to import from app.py.
+_OIM_CLUSTERS: dict[str, list[str]] = {
+    # Neurologic-autoimmune
+    "MS":           ["multiple sclerosis", "rrms", "ppms", "spms"],
+    "Myasthenia":   ["myasthenia gravis", "musk antibody", "musk myasthenia"],
+    "NMOSD":        ["neuromyelitis optica", "nmosd", "nmo spectrum"],
+    "CIDP":         ["chronic inflammatory demyelinating", "cidp"],
+    "MOGAD":        ["mogad", "mog antibody", "mog associated"],
+    "AIE":          ["autoimmune encephalitis", "anti nmda", "lgi1", "caspr2"],
+    "Stiff_person": ["stiff person", "stiff man"],
+    # Dermatologic
+    "Pemphigus":    ["pemphigus", "pemphigoid"],
+    # Endocrine
+    "T1D":          ["type 1 diabetes", "t1dm"],
+    "Graves":       ["graves disease", "graves"],
+    "Hashimoto":    ["hashimoto"],
+    # Cytopenias
+    "ITP":          ["immune thrombocytopen", "itp"],
+    "AIHA":         ["hemolytic anemia", "aiha", "waiha"],
+    # Glomerular / renal (not bundled into SLE-Lupus-Nephritis path)
+    "IgAN":         ["iga nephropathy", "igan"],
+    "Membranous":   ["membranous nephropathy"],
+    "FSGS":         ["focal segmental glomerul", "fsgs"],
+    # NOTE: GVHD is intentionally NOT in this map — cGVHD already lives
+    # in the strict _DISEASE_TERMS, so a GVHD cluster here would double-
+    # count as both "cGVHD" (strict) and "OIM:GVHD" on the same disease,
+    # falsely flipping single-disease cGVHD trials to Basket. Add only
+    # OIM diseases that have NO strict-map entry.
+}
+
+
 _BROAD_BASKET_TERMS = [
     "b cell mediated autoimmune disease", "b cell mediated autoimmune diseases",
     "b cell related autoimmune disease", "b cell related autoimmune diseases",
@@ -261,6 +299,36 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
         n_systemic = sum(1 for m in all_matched if m in _SYSTEMIC_DISEASES)
         if n_systemic >= 2:
             return _normalize_disease_result(all_matched, "Basket/Multidisease", "Basket/Multidisease")
+
+        # Basket-detection broadening: a trial that strict-matches one
+        # rheum systemic AND has pipe-separated condition entries naming
+        # additional OIM-cluster diseases (MS / Myasthenia / NMOSD / CIDP
+        # / pemphigus / membranous nephropathy / etc.) is also a multi-
+        # disease cohort. Live evidence: NCT07022197 (BAFF-R CART for
+        # refractory neuroimmune diseases) lists CIDP | NMOSD | MG | IIM
+        # but only IIM is in _SYSTEMIC_DISEASES, so n_systemic=1 and the
+        # trial wrongly stays Single.
+        #
+        # Algorithm: identify the DISEASE ENTITY each pipe-separated
+        # condition entry maps to (strict entity for rheum systemics, an
+        # OIM cluster label otherwise). Aliases of the same disease
+        # ("SLE | Lupus Nephritis", "Dermatomyositis, Juvenile |
+        # Dermatomyositis") collapse to a single entity. Promote to
+        # Basket when >=2 DISTINCT entities are named.
+        distinct_entities: set[str] = set(all_matched)
+        for chunk in condition_chunks:
+            if _match_terms(chunk, _DISEASE_TERMS):
+                # Already counted via the strict map; skip
+                continue
+            for cluster_label, cluster_terms in _OIM_CLUSTERS.items():
+                if any(_term_in_text(chunk, t) for t in cluster_terms):
+                    distinct_entities.add(f"OIM:{cluster_label}")
+                    break  # at most one OIM cluster per chunk
+        if len(distinct_entities) >= 2:
+            return _normalize_disease_result(
+                all_matched, "Basket/Multidisease", "Basket/Multidisease",
+            )
+
         return _normalize_disease_result(all_matched, "Single disease", all_matched[0])
 
     if _contains_any(full_text, OTHER_IMMUNE_MEDIATED_TERMS):
