@@ -21,6 +21,7 @@ from pipeline import (
     _row_text,
     _DISEASE_TERMS,
     compute_confidence_factors,
+    compute_classification_rationale,
 )
 from config import (
     DISEASE_ENTITIES,
@@ -355,93 +356,256 @@ def _disease_family(
     return _DISEASE_FAMILY_MAP.get(str(entity), "Other / Unclassified")
 
 
-# ── Per-trial classification rationale (Phase 2 of REVIEW.md) ────────────────
-# Plain-language explanations attached to each TargetSource / ProductTypeSource
-# value so the audit trail shown in the trial-detail panel is self-explanatory
-# without the reader having to open pipeline.py.
-_TARGET_SOURCE_RATIONALE = {
-    "explicit_marker": "Antigen named directly in the trial text (e.g. 'CD19', 'BCMA' as a CAR target).",
-    "named_product":   "Resolved via a named-product alias (e.g. 'KYV-101' → CD19).",
-    "car_core_fallback": "Generic 'CAR-T' language with no specific antigen disclosed.",
-    "unknown":         "No CAR-T construct or antigen signal found.",
-    "legacy_snapshot": "Inherited from an older snapshot taken before per-source attribution was added.",
-}
-_PTYPE_SOURCE_RATIONALE = {
-    "explicit_autologous":              "Trial text explicitly says autologous (e.g. 'autologous CD19 CAR-T').",
-    "explicit_allogeneic":              "Trial text explicitly says allogeneic / off-the-shelf / donor-derived.",
-    "explicit_in_vivo_title":           "Title explicitly says 'in vivo' / 'in-vivo CAR-T'.",
-    "explicit_in_vivo_text":            "Brief summary or interventions explicitly describe in-vivo CAR-T (e.g. mRNA-LNP delivery).",
-    "named_product":                    "Resolved via a named-product alias (e.g. 'NKX019' → Allogeneic).",
-    "weak_allogeneic_marker":           "Weak allogeneic marker (donor lymphocyte, off-the-shelf hint) without an explicit autologous statement.",
-    "default_autologous_no_allo_markers": "Default = Autologous: a confirmed CAR-T target is present and no allogeneic markers were found.",
-    "no_signal":                        "No product-type signal in the trial text.",
-    "legacy_snapshot":                  "Inherited from an older snapshot taken before per-source attribution was added.",
-}
-_CONFIDENCE_RATIONALE = {
-    "high":   "All three classification axes resolved cleanly (explicit target + explicit product type + recognised disease, or an LLM override is in force).",
-    "medium": "One axis is ambiguous (target unclear OR product type defaulted to Autologous without explicit markers).",
-    "low":    "Disease is Unclassified, or both target and product type are ambiguous — investigate before citing this row.",
+# ── Per-trial drilldown (UI_DRILLDOWN_SPEC v1.0; cross-app aligned) ──────────
+# Sole drilldown render path — every trial-table call site invokes
+# `_render_trial_drilldown`. The 4 separate explainer functions
+# (_disease_explainer, _target_explainer, _product_explainer,
+# _confidence_explainer) shipped earlier in this branch were collapsed into
+# a single tabular dataframe + composite-confidence header + per-axis
+# st.metric tiles per the spec — same information, scannable in one glance.
+# The plain-language source-tag explanations now live in pipeline.py
+# (_TARGET_SOURCE_EXPLAINS / _PRODUCT_SOURCE_EXPLAINS) and feed
+# `pipeline.compute_classification_rationale(row)`.
+
+_CONFIDENCE_LEVEL_EMOJI = {"high": "🟢", "medium": "🟡", "low": "🔴"}
+_CONFIDENCE_FACTOR_LABELS = {
+    "disease": "DiseaseEntity",
+    "target":  "TargetCategory",
+    "product": "ProductType",
 }
 
 
-def _disease_explainer(rec: dict) -> None:
-    """Show which terms in the strict disease vocabulary matched, and which
-    fallback path was taken when none did."""
-    text = _row_text(rec)
-    matches = []
-    for entity, terms in _DISEASE_TERMS.items():
-        hit_terms = [t for t in terms if _term_in_text(text, t)]
-        if hit_terms:
-            matches.append((entity, hit_terms))
-    primary = rec.get("DiseaseEntity") or "Unclassified"
-    design = rec.get("TrialDesign") or "Single disease"
-    st.markdown(f"**Disease →** `{primary}` ({design})")
-    if rec.get("LLMOverride"):
-        st.caption(
-            "Source: per-trial LLM override (see `llm_overrides.json`). "
-            "Strict-vocabulary matching was bypassed."
-        )
-    elif matches:
-        n_systemic = sum(1 for e, _ in matches if e in (
-            "SLE", "SSc", "Sjogren", "CTD_other", "IIM", "AAV", "RA",
-            "IgG4-RD", "Behcet", "cGVHD",
-        ))
-        if n_systemic >= 2:
-            st.caption(f"Multi-systemic match (≥2 systemic diseases) → promoted to Basket/Multidisease.")
-        else:
-            st.caption("Strict-vocabulary match (high precision):")
-        for entity, hit_terms in matches:
-            st.markdown(
-                f"- `{entity}` ← matched: " +
-                ", ".join(f"`{h}`" for h in hit_terms[:6])
-                + (f" *(+{len(hit_terms) - 6} more)*" if len(hit_terms) > 6 else "")
+def _render_classification_rationale(record, *, key_suffix: str = "") -> None:
+    """Render the "How was this classified?" expander.
+
+    Conforms to UI_DRILLDOWN_SPEC v1.0 §5:
+      a) Composite confidence header (🟢/🟡/🔴 + level + percentage)
+      b) Row of st.metric tiles, one per confidence factor (driver as tooltip)
+      c) "What's holding the score down" caption (worst-scoring axes)
+      d) Tabular rationale (Axis | Label | Source | Matched terms | Explanation)
+      e) LLM-override note (st.info) when applicable
+
+    Read-only: never mutates `record`. Pure render — failure of any
+    sub-section degrades to a caption rather than crashing the card.
+    """
+    rec_dict = record.to_dict() if hasattr(record, "to_dict") else dict(record)
+
+    with st.expander("How was this classified?", expanded=False):
+        # ── (a) Composite confidence header ──
+        try:
+            cf = compute_confidence_factors(
+                rec_dict.get("TargetCategory") or "",
+                rec_dict.get("TargetSource") or "",
+                rec_dict.get("ProductType") or "",
+                rec_dict.get("ProductTypeSource") or "",
+                rec_dict.get("DiseaseEntity") or "Unclassified",
+                bool(rec_dict.get("LLMOverride", False)),
             )
-    elif primary == "Other immune-mediated":
-        st.caption("No strict-vocabulary match; matched the OTHER_IMMUNE_MEDIATED_TERMS fallback (e.g. neurologic / dermatologic / endocrine autoimmune).")
-    elif primary == "Basket/Multidisease":
-        st.caption("No strict-vocabulary match; matched a generic basket phrase ('B-cell mediated autoimmune disease', 'systemic autoimmune disease', etc.).")
-    else:
-        st.caption("No vocabulary match — landed in 'Unclassified'. Curation candidate.")
+        except Exception as e:
+            cf = {"score": 0.0, "level": "—", "factors": {}, "drivers": []}
+            st.caption(f"_(confidence factors unavailable: {e})_")
+
+        score = float(cf.get("score", 0.0))
+        level = str(cf.get("level", "—"))
+        emoji = _CONFIDENCE_LEVEL_EMOJI.get(level, "⚪")
+        st.markdown(
+            f"#### Composite confidence: {emoji} **{level}** "
+            f"({score * 100:.0f}%)"
+        )
+
+        # ── (b) Per-axis st.metric tiles ──
+        factors = cf.get("factors", {})
+        # rheum's drivers list is [(short_axis, score, reason), ...]; build
+        # a driver-text lookup keyed by short axis name.
+        driver_map = {
+            axis: reason
+            for axis, _score, reason in cf.get("drivers", [])
+            if isinstance(reason, str)
+        }
+        if factors:
+            cols = st.columns(len(factors))
+            for col, (axis, value) in zip(cols, factors.items()):
+                with col:
+                    label = _CONFIDENCE_FACTOR_LABELS.get(axis, str(axis).title())
+                    st.metric(
+                        label,
+                        f"{float(value) * 100:.0f}%",
+                        help=driver_map.get(axis, f"Sub-score for {label}."),
+                    )
+
+        # ── (c) "What's holding the score down" caption ──
+        worst = sorted(
+            (
+                (axis, sc, reason)
+                for axis, sc, reason in cf.get("drivers", [])
+                if isinstance(sc, (int, float))
+            ),
+            key=lambda t: t[1],
+        )[:3]
+        if worst:
+            lines = [
+                f"- **{_CONFIDENCE_FACTOR_LABELS.get(axis, axis.title())}** "
+                f"({float(sc) * 100:.0f}%): {reason}"
+                for axis, sc, reason in worst
+            ]
+            st.caption("**What's holding the score down:**\n" + "\n".join(lines))
+
+        # ── (d) Tabular rationale ──
+        try:
+            rationale = compute_classification_rationale(rec_dict)
+        except Exception as e:
+            rationale = {}
+            st.caption(f"_(rationale dataframe unavailable: {e})_")
+
+        if rationale:
+            rows = [
+                {
+                    "Axis": axis,
+                    "Label": str(info.get("label", "—")) or "—",
+                    "Source": str(info.get("source", "—")) or "—",
+                    "Matched terms": (
+                        ", ".join(info.get("matched_terms", [])[:6]) or "—"
+                    ),
+                    "Explanation": str(info.get("explanation", "—")) or "—",
+                }
+                for axis, info in rationale.items()
+            ]
+            st.markdown("---")
+            st.markdown("**Per-axis breakdown:**")
+            st.dataframe(
+                pd.DataFrame(rows),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Axis":          st.column_config.TextColumn("Axis", width="small"),
+                    "Label":         st.column_config.TextColumn("Label", width="small"),
+                    "Source":        st.column_config.TextColumn("Source", width="medium"),
+                    "Matched terms": st.column_config.TextColumn("Matched terms", width="medium"),
+                    "Explanation":   st.column_config.TextColumn("Explanation", width="large"),
+                },
+            )
+
+        # ── (e) LLM-override note ──
+        if rec_dict.get("LLMOverride"):
+            st.info(
+                "🔒 LLM override is in force for this trial — pipeline labels "
+                "above were set by the curation loop. See `llm_overrides.json`."
+            )
 
 
-def _target_explainer(rec: dict) -> None:
-    target = rec.get("TargetCategory") or "Unknown"
-    src = rec.get("TargetSource") or "—"
-    st.markdown(f"**Target →** `{target}`  *(source: `{src}`)*")
-    rationale = _TARGET_SOURCE_RATIONALE.get(src)
-    if rationale:
-        st.caption(rationale)
+def _render_trial_drilldown(record, *, key_suffix: str = "") -> None:
+    """Per-trial detail card. Conforms to UI_DRILLDOWN_SPEC v1.0.
 
+    Sole drilldown render path. Tolerant of missing optional fields
+    (renders "—"). Subsystem failures (flag banner / rationale /
+    suggest-correction) degrade to a silent skip rather than crashing
+    the card.
 
-def _product_explainer(rec: dict) -> None:
-    ptype = rec.get("ProductType") or "Unclear"
-    src = rec.get("ProductTypeSource") or "—"
-    st.markdown(f"**Product type →** `{ptype}`  *(source: `{src}`)*")
-    rationale = _PTYPE_SOURCE_RATIONALE.get(src)
-    if rationale:
-        st.caption(rationale)
-    if rec.get("ProductName"):
-        st.caption(f"Recognised named product: **{rec['ProductName']}**")
+    `record` is a pd.Series or dict-like; `key_suffix` disambiguates
+    session-state widget keys when the same trial may appear in
+    multiple drilldown contexts (e.g. Data tab + Geography city
+    table) within one render.
+    """
+    nct = (record.get("NCTId") if hasattr(record, "get") else "") or ""
+    title = (record.get("BriefTitle") if hasattr(record, "get") else "") or ""
+
+    with st.expander(f"**{nct}** — {title}", expanded=True):
+        # 1. Flag banner (silent skip if subsystem missing)
+        try:
+            _render_flag_banner(record)
+        except NameError:
+            pass
+
+        # 2. External link — placed BEFORE metadata so a rater can verify
+        # against the live CT.gov record without scrolling.
+        _link = (record.get("NCTLink") if hasattr(record, "get") else None) \
+            or f"https://clinicaltrials.gov/study/{nct}"
+        st.markdown(f"📎 **[Open on ClinicalTrials.gov ↗]({_link})**")
+
+        # 3. Three-column metadata grid (Disease / Product / Sponsor)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("##### Disease")
+            _fam = record.get("DiseaseFamily") if hasattr(record, "get") else None
+            if _fam:
+                st.markdown(f"**Family:** {_fam}")
+            st.markdown(f"**Entity:** {record.get('DiseaseEntity', '—') or '—'}")
+            _all_ent = record.get("DiseaseEntities") or ""
+            if _all_ent and _all_ent != record.get("DiseaseEntity"):
+                st.markdown(f"**All entities:** {_all_ent}")
+            st.markdown(f"**Trial design:** {record.get('TrialDesign', '—') or '—'}")
+            st.markdown(f"**Phase:** {record.get('Phase', '—') or '—'}")
+            st.markdown(f"**Status:** {record.get('OverallStatus', '—') or '—'}")
+            _sy = record.get("StartYear")
+            if _sy is not None and not (hasattr(pd, "isna") and pd.isna(_sy)):
+                try:
+                    st.markdown(f"**Start year:** {int(_sy)}")
+                except (TypeError, ValueError):
+                    st.markdown(f"**Start year:** {_sy}")
+        with c2:
+            st.markdown("##### Product")
+            st.markdown(
+                f"**Target:** {record.get('TargetCategory', '—') or '—'} "
+                f"*(via {record.get('TargetSource', '—') or '—'})*"
+            )
+            st.markdown(
+                f"**Product type:** {record.get('ProductType', '—') or '—'} "
+                f"*(via {record.get('ProductTypeSource', '—') or '—'})*"
+            )
+            if record.get("Modality"):
+                st.markdown(f"**Modality:** {record['Modality']}")
+            if record.get("ProductName"):
+                st.markdown(f"**Named product:** {record['ProductName']}")
+            if bool(record.get("LLMOverride", False)):
+                st.markdown("🔒 **LLM override applied**")
+        with c3:
+            st.markdown("##### Sponsor")
+            st.markdown(f"**Lead sponsor:** {record.get('LeadSponsor', '—') or '—'}")
+            st.markdown(f"**Sponsor type:** {record.get('SponsorType', '—') or '—'}")
+            _enr = record.get("EnrollmentCount")
+            if _enr is not None and not (hasattr(pd, "isna") and pd.isna(_enr)):
+                try:
+                    st.markdown(f"**Enrollment:** {int(_enr)}")
+                except (TypeError, ValueError):
+                    pass
+            st.markdown(f"**Countries:** {record.get('Countries', '') or '—'}")
+            st.markdown(f"**Age group:** {record.get('AgeGroup', '—') or '—'}")
+
+        # 4. Free-text payload — render only non-empty fields
+        if record.get("PrimaryEndpoints"):
+            st.markdown(
+                "**Primary endpoints:** "
+                + str(record["PrimaryEndpoints"]).replace("|", "; ")
+            )
+        if record.get("Conditions"):
+            st.markdown(
+                "**Conditions:** " + str(record["Conditions"]).replace("|", ", ")
+            )
+        if record.get("Interventions"):
+            st.markdown(
+                "**Interventions:** "
+                + str(record["Interventions"]).replace("|", ", ")
+            )
+        if record.get("BriefSummary"):
+            st.markdown("**Brief summary:**")
+            # Block-quote per spec — visually separates from metadata
+            _summary = str(record["BriefSummary"]).replace("\n", "\n> ")
+            st.markdown(f"> {_summary}")
+
+        # 5. "How was this classified?" expander
+        try:
+            _render_classification_rationale(record, key_suffix=key_suffix)
+        except Exception as e:
+            st.caption(f"_(classification rationale unavailable: {e})_")
+
+        # 6. "Suggest a classification correction" expander
+        try:
+            _render_suggest_correction(
+                record,
+                key_suffix=f"{key_suffix}_{nct}".strip("_") or nct,
+            )
+        except NameError:
+            pass
 
 
 # ── Community classification-flag system ────────────────────────────────────
@@ -931,33 +1095,9 @@ def _cohens_kappa(rater_a: list[str], rater_b: list[str]) -> float | None:
     return (observed - expected) / (1 - expected)
 
 
-def _confidence_explainer(rec: dict) -> None:
-    conf = rec.get("ClassificationConfidence") or "—"
-    st.markdown(f"**Confidence →** `{conf}`")
-    rationale = _CONFIDENCE_RATIONALE.get(str(conf).lower())
-    if rationale:
-        st.caption(rationale)
-    if rec.get("LLMOverride"):
-        st.caption("LLM override is in force for this trial — see `llm_overrides.json`.")
-    # Multi-factor breakdown (Phase 3 of REVIEW.md). Surfaces the per-axis
-    # sub-score so the legacy 3-bucket categorical above is no longer the
-    # sole signal — reviewers can see which axis is driving the level.
-    factors = compute_confidence_factors(
-        rec.get("TargetCategory") or "",
-        rec.get("TargetSource") or "",
-        rec.get("ProductType") or "",
-        rec.get("ProductTypeSource") or "",
-        rec.get("DiseaseEntity") or "Unclassified",
-        bool(rec.get("LLMOverride", False)),
-    )
-    score = factors["score"]
-    st.caption(f"Multi-factor score: **{score:.2f}** / 1.00 (level: `{factors['level']}`)")
-    breakdown = factors.get("factors", {})
-    if breakdown:
-        cols = st.columns(len(breakdown))
-        for col, (axis, value) in zip(cols, breakdown.items()):
-            with col:
-                st.metric(axis.title(), f"{value:.2f}")
+# _confidence_explainer collapsed into _render_classification_rationale
+# above per UI_DRILLDOWN_SPEC v1.0 (composite header + tiles + tabular
+# rationale replaces the four free-form markdown blocks).
 
 
 THEME = {
@@ -3291,6 +3431,10 @@ with tab_data:
     )
 
     # ── Trial detail drilldown (row-click driven) ──────────────────────────
+    # Sole drilldown render path — UI_DRILLDOWN_SPEC v1.0 conformance
+    # contract is "every trial-table call site uses _render_trial_drilldown
+    # exclusively." Adding a Geography-city or Deep-Dive drilldown later
+    # just calls the same helper with a distinct key_suffix.
     if not table_df.empty:
         _selected_rows = (
             _table_event.selection.rows
@@ -3298,70 +3442,7 @@ with tab_data:
         )
         if _selected_rows:
             rec = table_df.iloc[_selected_rows[0]]
-            sel_nct = rec["NCTId"]
-            with st.expander(f"{sel_nct} — {rec.get('BriefTitle', '')}", expanded=True):
-                # Flag banner at the top — invisible when the trial has no
-                # open classification-flag GitHub issues, otherwise renders
-                # status alert + table of proposed corrections inline.
-                _render_flag_banner(rec)
-
-                _link = rec.get("NCTLink") or f"https://clinicaltrials.gov/study/{sel_nct}"
-                st.markdown(f"**[Open on ClinicalTrials.gov]({_link})**")
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.markdown(f"**Disease:** {rec.get('DiseaseEntities', '')}")
-                    st.markdown(f"**Trial design:** {rec.get('TrialDesign', '')}")
-                    st.markdown(f"**Phase:** {rec.get('Phase', '')}")
-                    st.markdown(f"**Status:** {rec.get('OverallStatus', '')}")
-                with c2:
-                    st.markdown(f"**Target:** {rec.get('TargetCategory', '')} *(via {rec.get('TargetSource', '—')})*")
-                    st.markdown(f"**Product:** {rec.get('ProductType', '')} *(via {rec.get('ProductTypeSource', '—')})*")
-                    st.markdown(f"**Confidence:** {rec.get('ClassificationConfidence', '—')}")
-                    if rec.get("ProductName"):
-                        st.markdown(f"**Named product:** {rec.get('ProductName')}")
-                    if bool(rec.get("LLMOverride", False)):
-                        st.markdown("**LLM override applied**")
-                with c3:
-                    st.markdown(f"**Sponsor:** {rec.get('LeadSponsor', '')}")
-                    st.markdown(f"**Sponsor type:** {rec.get('SponsorType', '')}")
-                    _enr = rec.get("EnrollmentCount")
-                    if pd.notna(_enr):
-                        st.markdown(f"**Enrollment:** {int(_enr)}")
-                    st.markdown(f"**Countries:** {rec.get('Countries', '') or '—'}")
-                    st.markdown(f"**Age group:** {rec.get('AgeGroup', '—')}")
-                if rec.get("PrimaryEndpoints"):
-                    st.markdown("**Primary endpoints:**")
-                    st.write(str(rec["PrimaryEndpoints"]).replace("|", "; "))
-
-                if rec.get("Conditions"):
-                    st.markdown("**Conditions:**")
-                    st.write(str(rec["Conditions"]).replace("|", ", "))
-                if rec.get("Interventions"):
-                    st.markdown("**Interventions:**")
-                    st.write(str(rec["Interventions"]).replace("|", ", "))
-                if rec.get("BriefSummary"):
-                    st.markdown("**Brief summary:**")
-                    st.write(str(rec["BriefSummary"]))
-
-                # ── Classification rationale (Phase 2 of REVIEW.md) ─────────
-                # Surfaces WHICH terms drove each axis's classification so a
-                # clinical reader can audit individual trials without reading
-                # the pipeline source. Re-runs the classifier on the row to
-                # capture matched terms; cheap (<1ms per row).
-                with st.expander("How was this classified?"):
-                    _rec_dict = rec.to_dict()
-                    _disease_explainer(_rec_dict)
-                    st.markdown("---")
-                    _target_explainer(_rec_dict)
-                    st.markdown("---")
-                    _product_explainer(_rec_dict)
-                    st.markdown("---")
-                    _confidence_explainer(_rec_dict)
-
-                # Suggest-correction affordance — opens a pre-filled GitHub
-                # issue with structured BEGIN_FLAG_DATA YAML body so the
-                # consensus-detection workflow can parse and aggregate.
-                _render_suggest_correction(rec, key_suffix=f"data_{sel_nct}")
+            _render_trial_drilldown(rec, key_suffix=f"data_{rec['NCTId']}")
         else:
             st.info("Select a row in the table above to see the full trial record and classification reasoning.")
 

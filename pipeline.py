@@ -542,6 +542,159 @@ def compute_confidence_factors(
             "drivers": drivers}
 
 
+# Plain-language rationale snippets per source-tag value, surfaced in the
+# "How was this classified?" expander (UI_DRILLDOWN_SPEC v1.0 §5d).
+_TARGET_SOURCE_EXPLAINS = {
+    "explicit_marker":   "Antigen named directly in trial text (e.g. 'CD19', 'BCMA' as a CAR target).",
+    "named_product":     "Resolved via a named-product alias (e.g. 'KYV-101' → CD19).",
+    "car_core_fallback": "Generic 'CAR-T' language with no specific antigen disclosed.",
+    "unknown":           "No CAR-T construct or antigen signal found.",
+    "llm_override":      "Per-trial LLM curator override is in force.",
+    "legacy_snapshot":   "Inherited from an older snapshot (pre source-tag attribution).",
+}
+_PRODUCT_SOURCE_EXPLAINS = {
+    "explicit_autologous":              "Trial text explicitly says autologous.",
+    "explicit_allogeneic":              "Trial text explicitly says allogeneic / off-the-shelf / donor-derived.",
+    "explicit_in_vivo_title":           "Title explicitly says 'in vivo' / 'in-vivo CAR-T'.",
+    "explicit_in_vivo_text":            "Brief summary or interventions describe in-vivo CAR-T (e.g. mRNA-LNP).",
+    "named_product":                    "Resolved via a named-product alias.",
+    "weak_allogeneic_marker":           "Weak allogeneic marker without an explicit autologous statement.",
+    "default_autologous_no_allo_markers": "Defaulted to autologous — a CAR-T target is present and no allogeneic markers were found.",
+    "no_signal":                        "No product-type signal in the trial text.",
+    "llm_override":                     "Per-trial LLM curator override is in force.",
+    "legacy_snapshot":                  "Inherited from an older snapshot.",
+}
+
+
+def compute_classification_rationale(row: dict) -> dict:
+    """Re-run the classifier instrumented to surface WHY each label was chosen.
+
+    Returns a dict with one entry per rheum axis, each value a sub-dict:
+        {
+            "label":          <the label assigned>,
+            "source":         <short source-tag, e.g. 'llm_override' / 'rule_based'>,
+            "matched_terms":  <list of terms the row text matched>,
+            "explanation":    <human-readable one-sentence rationale>,
+        }
+
+    Used by the dashboard's per-trial drilldown to render a tabular
+    "How was this classified?" expander (UI_DRILLDOWN_SPEC v1.0 §5d).
+    Read-only — never mutates the input row, never persists. Pure
+    function: same row in → same rationale out.
+
+    Rheum axes (5): DiseaseEntity, TargetCategory, ProductType,
+    TrialDesign, SponsorType. (Onc has Branch + DiseaseCategory in
+    addition; rheum is single-branch with a flatter taxonomy.)
+    """
+    text = _row_text(row)
+    nct = _safe_text(row.get("NCTId")).strip()
+
+    rationale: dict[str, dict] = {}
+    is_llm_override = bool(nct and nct in _LLM_OVERRIDES)
+    override_entry = _LLM_OVERRIDES.get(nct, {}) if is_llm_override else {}
+
+    # ---- DiseaseEntity (also drives TrialDesign) ----
+    entities, design, primary = _classify_disease(row)
+    if is_llm_override and override_entry.get("disease_entity"):
+        rationale["DiseaseEntity"] = {
+            "label": override_entry["disease_entity"],
+            "source": "llm_override",
+            "matched_terms": [],
+            "explanation": (
+                f"Overridden by `llm_overrides.json` entry for {nct}. "
+                f"Strict-vocabulary matching was bypassed."
+            ),
+        }
+    else:
+        # Surface every term in the strict map that hit the row text.
+        ent_matches: list[str] = []
+        for entity_key, terms in _DISEASE_TERMS.items():
+            ent_matches.extend(t for t in terms if _term_in_text(text, t))
+        n_systemic = sum(1 for m in entities if m in _SYSTEMIC_DISEASES)
+        if n_systemic >= 2:
+            explanation = (
+                "Multi-systemic match (≥2 systemic diseases) — promoted to "
+                "Basket/Multidisease per pipeline.py:_SYSTEMIC_DISEASES."
+            )
+        elif primary == "Other immune-mediated":
+            explanation = (
+                "No strict-vocabulary match; matched the OTHER_IMMUNE_MEDIATED_TERMS "
+                "fallback (e.g. neurologic / dermatologic / endocrine autoimmune)."
+            )
+        elif primary == "Basket/Multidisease":
+            explanation = (
+                "No strict-vocabulary match; matched a generic basket phrase "
+                "('B-cell mediated autoimmune disease', 'systemic autoimmune disease')."
+            )
+        elif primary == "Unclassified":
+            explanation = "No vocabulary match — landed in 'Unclassified'. Curation candidate."
+        else:
+            explanation = (
+                f"Strict-vocabulary match (high precision); single-disease "
+                f"(systemic count = {n_systemic})."
+            )
+        rationale["DiseaseEntity"] = {
+            "label": primary,
+            "source": "rule_based",
+            "matched_terms": ent_matches[:6],
+            "explanation": explanation,
+        }
+
+    # ---- TrialDesign (derived from disease classification) ----
+    rationale["TrialDesign"] = {
+        "label": design,
+        "source": "derived_from_disease_entity",
+        "matched_terms": [],
+        "explanation": (
+            "Single disease = trial enrols ONE rheum indication; "
+            "Basket/Multidisease = ≥2 systemic diseases or a generic "
+            "B-cell-mediated cohort. Derived from DiseaseEntity classification."
+        ),
+    }
+
+    # ---- TargetCategory ----
+    target_label, target_source = _assign_target(row)
+    rationale["TargetCategory"] = {
+        "label": target_label,
+        "source": target_source,
+        "matched_terms": [target_label] if target_source == "explicit_marker" else [],
+        "explanation": _TARGET_SOURCE_EXPLAINS.get(
+            target_source, f"Source tag: {target_source}"
+        ),
+    }
+
+    # ---- ProductType ----
+    try:
+        ptype, ptype_source = _assign_product_type(row, target_source=target_source)
+    except Exception:
+        ptype = _safe_text(row.get("ProductType", "Unclear"))
+        ptype_source = _safe_text(row.get("ProductTypeSource", "unknown"))
+    rationale["ProductType"] = {
+        "label": ptype,
+        "source": ptype_source,
+        "matched_terms": [],
+        "explanation": _PRODUCT_SOURCE_EXPLAINS.get(
+            ptype_source, f"Source tag: {ptype_source}"
+        ),
+    }
+
+    # ---- SponsorType ----
+    sponsor_label = _classify_sponsor(
+        row.get("LeadSponsor"), row.get("LeadSponsorClass"),
+    )
+    rationale["SponsorType"] = {
+        "label": sponsor_label,
+        "source": "lead_sponsor_class + name_pattern",
+        "matched_terms": [],
+        "explanation": (
+            f"Classified from LeadSponsor name + LeadSponsorClass. "
+            f"Class hint: {row.get('LeadSponsorClass') or '—'}."
+        ),
+    }
+
+    return rationale
+
+
 def _compute_confidence(
     target: str, target_source: str,
     product_type: str, product_source: str,
