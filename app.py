@@ -3337,17 +3337,24 @@ with tab_data:
         # SPEC v1.3: dropped the "Flagged only" filter (triage lives in the
         # Moderation tab; the 🚩 BriefTitle prefix already gives at-a-glance
         # discoverability — onc dropped this in commit a95147b for the same
-        # reason). Replaced with a public refresh-flags button so a rater
-        # who just filed a flag doesn't have to wait the 5-min cache TTL
-        # before the prefix shows up on their trial.
-        st.write("")  # vertical alignment with the search input above
+        # reason). Replaced with a quiet public refresh-flags button so a
+        # rater who just filed a flag doesn't have to wait the 5-min cache
+        # TTL before the prefix shows up on their trial.
+        # The 32px spacer matches the label+gap height of the
+        # text_input / selectbox in the adjacent columns so all three
+        # input baselines align. Tertiary button + content-sized width
+        # keeps the affordance discoverable without competing with the
+        # search box for visual weight.
+        st.markdown(
+            '<div style="height: 32px"></div>', unsafe_allow_html=True,
+        )
         if st.button(
             "Refresh ↻",
             key="data_refresh_flags",
+            type="tertiary",
             help="Refetch the open classification-flag GitHub issues. "
                  "Cached 5 minutes by default; use this if you just filed "
                  "a flag and want the 🚩 indicator to appear immediately.",
-            use_container_width=True,
         ):
             _load_active_flags.clear()
             _load_flag_issue_details.clear()
