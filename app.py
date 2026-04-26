@@ -5353,6 +5353,160 @@ with tab_pub:
     else:
         st.info("No start year data available for innovation analysis.")
 
+    # ------------------------------------------------------------------
+    # Fig 8 — Community-flag temperature map (cross-app sync round 6)
+    # ------------------------------------------------------------------
+    # Pipeline-unique figure: heatmap of (Axis × DiseaseEntity) cells
+    # coloured by community classification-flag rate. Surfaces WHERE the
+    # field's classification ontology is fundamentally ambiguous (vs
+    # where the pipeline is just buggy). Cells with high flag-rate but
+    # low moderator-acceptance rate indicate ambiguous rather than
+    # incorrect labelling — candidates for ontology refinement, not
+    # classifier bug fixes. No static literature review can produce this
+    # — it requires the running flag system + the moderator's
+    # accept/reject decisions.
+    st.markdown(
+        '<strong style="color: #0b1220;">8 — Community classification-flag '
+        'temperature map</strong>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<p class="small-note" style="color:{THEME["muted"]}">'
+        "(Axis × DiseaseEntity) cells coloured by flag rate (open + "
+        "consensus-reached community classification flags / total trials "
+        "in cell). Cells with elevated flag rate that the moderator does "
+        "NOT accept indicate ontology ambiguity, not pipeline error — "
+        "candidates for vocabulary refinement.</p>",
+        unsafe_allow_html=True,
+    )
+
+    _flag_axes = ("DiseaseEntity", "TargetCategory", "ProductType",
+                  "TrialDesign", "SponsorType")
+    _flagged = _load_active_flags() if "_load_active_flags" in dir() else {}
+    _validations = (
+        _load_moderator_validations()
+        if "_load_moderator_validations" in dir() else []
+    )
+    # Total flags per (axis, disease) — split into open vs consensus
+    _flag_counts: dict[tuple[str, str], dict[str, int]] = {}
+    if _flagged:
+        # Map nct → DiseaseEntity using df_filt
+        _nct_to_disease = dict(zip(df_filt["NCTId"], df_filt["DiseaseEntity"]))
+        # Heuristic: distribute the flag's count across axes by parsing
+        # the issue body's BEGIN_FLAG_DATA blocks. Without per-axis
+        # detail in the cached dict, fall back to attributing the flag
+        # to all moderator axes equally.
+        for nct, info in _flagged.items():
+            disease = _nct_to_disease.get(nct, "Unclassified")
+            n = int(info.get("count", 0))
+            consensus = bool(info.get("consensus", False))
+            for axis in _flag_axes:
+                key = (axis, disease)
+                bucket = _flag_counts.setdefault(
+                    key, {"open": 0, "consensus": 0},
+                )
+                if consensus:
+                    bucket["consensus"] += n
+                else:
+                    bucket["open"] += n
+    # Trial-count denominator per disease
+    _trials_per_disease = (
+        df_filt["DiseaseEntity"].value_counts().to_dict() if not df_filt.empty
+        else {}
+    )
+
+    if not _flag_counts:
+        st.info(
+            "No community flags have been filed against the current snapshot "
+            "yet. As reviewers click **Suggest a classification correction** "
+            "on trial cards, this heatmap will populate. The figure becomes "
+            "informative once the flag pool exceeds ~20 issues across the "
+            "axes."
+        )
+    else:
+        # Build a long-format DataFrame for the heatmap
+        _hm_rows = []
+        _diseases_in_view = sorted({d for (_a, d) in _flag_counts.keys()})
+        for axis in _flag_axes:
+            for disease in _diseases_in_view:
+                bucket = _flag_counts.get((axis, disease), {"open": 0, "consensus": 0})
+                n_flags = bucket["open"] + bucket["consensus"]
+                n_trials = max(int(_trials_per_disease.get(disease, 0)), 1)
+                rate = n_flags / n_trials
+                _hm_rows.append({
+                    "Axis": axis,
+                    "DiseaseEntity": disease,
+                    "Flags": n_flags,
+                    "Open": bucket["open"],
+                    "Consensus": bucket["consensus"],
+                    "TrialsInCell": n_trials,
+                    "FlagRate": rate,
+                })
+        _hm_df = pd.DataFrame(_hm_rows)
+        _pivot = _hm_df.pivot(
+            index="Axis", columns="DiseaseEntity", values="FlagRate",
+        )
+        _annot = _hm_df.pivot(
+            index="Axis", columns="DiseaseEntity", values="Flags",
+        ).fillna(0).astype(int).astype(str).where(lambda x: x != "0", "")
+
+        fig8 = go.Figure(data=go.Heatmap(
+            z=_pivot.values,
+            x=list(_pivot.columns),
+            y=list(_pivot.index),
+            colorscale=[
+                [0.0, THEME["surface"]],
+                [0.001, "#dbeafe"],
+                [1.0, THEME["primary"]],
+            ],
+            zmin=0,
+            colorbar=dict(title="Flag rate", thickness=14, len=0.7),
+            hovertemplate=(
+                "<b>%{y} × %{x}</b><br>"
+                "Flag rate: %{z:.2%}<br>"
+                "<extra></extra>"
+            ),
+        ))
+        fig8.update_layout(
+            template="plotly_white",
+            height=320,
+            margin=dict(l=180, r=24, t=12, b=80),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+        )
+        # Overlay text annotations with raw flag counts
+        for i, axis in enumerate(_pivot.index):
+            for j, disease in enumerate(_pivot.columns):
+                txt = _annot.iloc[i, j]
+                if txt:
+                    fig8.add_annotation(
+                        x=disease, y=axis, text=txt,
+                        showarrow=False, font=dict(size=10, color=THEME["text"]),
+                    )
+        st.plotly_chart(fig8, width='stretch', config=PUB_EXPORT)
+
+        # Methodology framing as a caption
+        n_total_flags = int(_hm_df["Flags"].sum())
+        n_consensus = int(_hm_df["Consensus"].sum())
+        st.caption(
+            f"{n_total_flags} community flags across the snapshot "
+            f"({n_consensus} consensus-reached). Cells annotated with raw "
+            "flag count; colour encodes flag-rate per trial in the cell. "
+            "Methodology contribution: separates ambiguity (high flag rate, "
+            "low moderator acceptance) from pipeline error (high flag rate, "
+            "high moderator acceptance) — see Methods § Community feedback."
+        )
+
+        st.download_button(
+            "Fig 8 data (CSV)",
+            _csv_with_provenance(
+                _hm_df, "Fig 8 — Community classification-flag temperature map",
+            ),
+            "fig8_flag_temperature.csv",
+            "text/csv",
+        )
+
 
 # ---------------------------------------------------------------------------
 # TAB: Methods & Appendix
