@@ -17,6 +17,11 @@ from pipeline import (
     save_snapshot,
     BASE_URL,
     _normalize_text,
+    # Used by `_disease_family()` to split basket trials into the rheum-
+    # blue "Classical rheumatology basket" wedge versus the generic slate
+    # "Basket/Multidisease" bucket. Lives in pipeline.py so it's
+    # importable in pytest without spinning up Streamlit.
+    is_classical_rheum_basket as _is_classical_rheum_basket,
 )
 # compute_confidence_factors and compute_classification_rationale shipped
 # in commits 9a15cda + 4cce635. Wrap the import so a stale deploy (e.g.
@@ -216,8 +221,18 @@ _FAMILY_ORDER = [
     "Connective tissue",
     "Inflammatory arthritis",
     "Vasculitis",
+    # NEW (2026-04-25) — basket trials whose constituent entities are ALL
+    # classical-rheum (CTD / IA / Vasculitis) get their own family wedge so
+    # a reader sees them as part of the rheum cluster rather than lumped
+    # into the generic Basket bucket. Placed right after Vasculitis so the
+    # sunburst's contiguous rheum arc reads CTD → IA → Vasc → Combined-rheum
+    # basket, then breaks into Neurologic / Other / Mixed-class baskets.
+    "Classical rheumatology basket",
     "Neurologic autoimmune",
     "Other autoimmune",
+    # "Basket/Multidisease" now means MIXED-class baskets only (≥1 non-rheum
+    # entity, or text signals neuro / glomerular / GVHD / cytopenia / etc.).
+    # Pure-rheum baskets are surfaced under "Classical rheumatology basket".
     "Basket/Multidisease",
     "Other / Unclassified",
 ]
@@ -225,13 +240,17 @@ _FAMILY_ORDER = [
 # reader sees them as one super-family at a glance; non-rheum buckets sit in a
 # distinct slate range. Shared by sunburst and Deep Dive charts.
 _FAMILY_COLORS = {
-    "Connective tissue":       "#0b3d91",   # deep navy   — rheum
-    "Inflammatory arthritis":  "#2e6dbf",   # mid blue    — rheum
-    "Vasculitis":              "#5fa3d9",   # light blue  — rheum
-    "Neurologic autoimmune":   "#7c3aed",   # violet-600  — own clinical specialty
-    "Other autoimmune":        "#475569",   # slate-600
-    "Basket/Multidisease":     "#94a3b8",   # slate-400
-    "Other / Unclassified":    "#cbd5e1",   # slate-300
+    "Connective tissue":              "#0b3d91",   # deep navy   — rheum
+    "Inflammatory arthritis":         "#2e6dbf",   # mid blue    — rheum
+    "Vasculitis":                     "#5fa3d9",   # light blue  — rheum
+    # Saturated blue-700 — clearly part of the rheum-blue family but
+    # distinct from CTD/IA/Vasc so the wedge reads as "the multi-disease
+    # extension of the rheum arc" rather than a fourth specific entity.
+    "Classical rheumatology basket":  "#1d4ed8",
+    "Neurologic autoimmune":          "#7c3aed",   # violet-600  — own clinical specialty
+    "Other autoimmune":               "#475569",   # slate-600
+    "Basket/Multidisease":            "#94a3b8",   # slate-400
+    "Other / Unclassified":           "#cbd5e1",   # slate-300
 }
 
 # Sub-family palette — used only on the sunburst L2 ring inside the
@@ -353,6 +372,9 @@ _RHEUM_SYSTEMIC_ENTITIES = {
     "SLE", "SSc", "Sjogren", "CTD_other", "IIM", "AAV",
     "RA", "IgG4-RD", "Behcet", "cGVHD",
 }
+# Classical-rheum basket detector lives in pipeline.py and is imported
+# at module top alongside the other pipeline symbols.
+
 _BASKET_NEURO_KEYWORDS = (
     "multiple sclerosis", "myasthenia", "neuromyelitis", "nmosd",
     "nmo spectrum", "demyelinating", "cidp", "encephalitis",
@@ -428,15 +450,25 @@ def _disease_family(
     trial_design: str | None = None,
     conditions: str | None = None,
     brief_title: str | None = None,
+    entities_str: str | None = None,
 ) -> str:
-    """Map a disease entity to its top-level family. Basket trials always
-    resolve to 'Basket/Multidisease'. Trials whose pipeline entity is a
-    non-specific autoimmune bucket ('Other immune-mediated' / 'cGVHD') and
-    whose conditions/title flag them as neurologic are promoted to the
-    Neurologic autoimmune family — neuro is the largest non-rheum cluster
-    and a distinct clinical specialty, so it gets its own L1 branch with
-    disease-level L2 detail."""
+    """Map a disease entity to its top-level family.
+
+    Basket trials are split:
+      - "Classical rheumatology basket" — constituents are ALL classical
+        rheum (CTD/IA/Vasc) AND text shows no non-rheum signal; visually
+        extends the rheum arc with a saturated rheum-blue wedge.
+      - "Basket/Multidisease" — everything else (mixed-class baskets).
+
+    Trials whose pipeline entity is a non-specific autoimmune bucket
+    ('Other immune-mediated' / 'cGVHD') and whose conditions/title flag
+    them as neurologic are promoted to the Neurologic autoimmune family —
+    neuro is the largest non-rheum cluster and a distinct clinical
+    specialty, so it gets its own L1 branch with disease-level L2 detail.
+    """
     if trial_design == "Basket/Multidisease":
+        if _is_classical_rheum_basket(entities_str, conditions, brief_title):
+            return "Classical rheumatology basket"
         return "Basket/Multidisease"
     if not entity or entity in ("Unclassified", ""):
         return "Other / Unclassified"
@@ -2203,6 +2235,12 @@ df["DiseaseFamily"] = df.apply(
         r.get("TrialDesign"),
         r.get("Conditions"),
         r.get("BriefTitle"),
+        # Pipe-joined constituent entities — required to detect the
+        # "Classical rheumatology basket" sub-family. Rheum-only baskets
+        # (≥2 of CTD/IA/Vasc, no non-rheum constituents) get a distinct
+        # rheum-blue wedge in the sunburst rather than the generic slate
+        # Basket/Multidisease bucket.
+        r.get("DiseaseEntities"),
     ),
     axis=1,
 )
@@ -2773,7 +2811,10 @@ with tab_overview:
         st.markdown(
             f'<p class="small-note" style="color:{THEME["muted"]}">Click a wedge to zoom in. '
             'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
-            'Basket / multi-disease trials form their own branch.</p>',
+            'Basket / multi-disease trials are split into <em>Classical rheumatology basket</em> '
+            '(rheum-blue, ≥2 of CTD / IA / Vasculitis with no non-rheum constituents — visually '
+            'extends the rheum arc) and the generic slate <em>Basket/Multidisease</em> wedge '
+            '(mixed-class baskets with neuro / glomerular / GVHD / etc. constituents).</p>',
             unsafe_allow_html=True,
         )
 
@@ -2824,16 +2865,28 @@ with tab_overview:
         if _neuro_mask.any():
             _sb.loc[_neuro_mask, "_L2"] = _sub_text[_neuro_mask].apply(_neuro_disease)
 
-        # Override 3 (highest priority): basket trials always get the
-        # Basket/Multidisease label. (Earlier this branch shipped a
-        # clinical-archetype split here — Pan-rheum / Rheum dual / etc.
-        # — but the result rendered too busy on the live snapshot. The
-        # archetype function is kept in module scope for use elsewhere
-        # if needed; the sunburst keeps the simpler single-label
-        # treatment so the basket branch reads as one clear bucket.)
+        # Override 3 (highest priority): basket trials get an L2 label
+        # that depends on which basket family they belong to. Classical-
+        # rheum baskets show "Combined CTD/IA/Vasc" (so the L2 ring is
+        # informative rather than just echoing the L1 wedge); generic
+        # / mixed-class baskets keep the "Basket/Multidisease" label.
+        # (Earlier this branch shipped a fuller clinical-archetype split
+        # here — Pan-rheum / Rheum dual / Rheum + neuro / etc. — but
+        # the result rendered too busy on the live snapshot. The
+        # `_basket_archetype` helper is kept in module scope for use
+        # elsewhere if needed; the sunburst now does only the binary
+        # rheum-vs-mixed split so the basket arc reads cleanly.)
         _basket_mask = _sb["TrialDesign"].eq("Basket/Multidisease")
         if _basket_mask.any():
-            _sb.loc[_basket_mask, "_L2"] = "Basket/Multidisease"
+            _classical_mask = _sb["DiseaseFamily"].eq(
+                "Classical rheumatology basket"
+            )
+            _sb.loc[_basket_mask & _classical_mask, "_L2"] = (
+                "Combined CTD / IA / Vasculitis"
+            )
+            _sb.loc[_basket_mask & ~_classical_mask, "_L2"] = (
+                "Basket/Multidisease"
+            )
 
         # L3: target with the unclear bucket folded.
         _sb["_L3"] = _fold_unclear_target(_sb["TargetCategory"])
@@ -2913,12 +2966,20 @@ with tab_overview:
             sort=False,
         ))
         _fig_sb.update_layout(
-            height=560, margin=dict(l=8, r=8, t=8, b=8),
+            # Sized down from 560 → 360 (~60%) per user feedback that the
+            # sunburst was dominating the dashboard hero. Centred in a
+            # 60%-wide column below so the figure reads as a focused
+            # diagram, not a page-wide poster.
+            height=360, margin=dict(l=4, r=4, t=4, b=4),
             paper_bgcolor="white", plot_bgcolor="white",
-            font=dict(family=FONT_FAMILY, size=12, color=THEME["text"]),
-            uniformtext=dict(minsize=10, mode="hide"),
+            font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+            uniformtext=dict(minsize=9, mode="hide"),
         )
-        st.plotly_chart(_fig_sb, width='stretch')
+        # Centre the sunburst in a 60%-wide slot so it stays a focal
+        # diagram rather than stretching across the full Streamlit page.
+        _sb_l, _sb_c, _sb_r = st.columns([0.2, 0.6, 0.2])
+        with _sb_c:
+            st.plotly_chart(_fig_sb, width='stretch')
 
         # Family headline row
         _fam_counts = _sb["_L1"].value_counts().rename_axis("Family").reset_index(name="Trials")
@@ -3024,6 +3085,7 @@ with tab_overview:
                 lambda r: _disease_family(
                     r["_Disease"], r.get("TrialDesign"),
                     r.get("Conditions"), r.get("BriefTitle"),
+                    r.get("DiseaseEntities"),
                 ),
                 axis=1,
             )
@@ -5983,15 +6045,34 @@ with tab_pub:
             st.plotly_chart(fig9, width='stretch', config=PUB_EXPORT)
 
             _top_pair = max(_co.items(), key=lambda kv: kv[1])
+            # Surface the rheum-only vs mixed-class basket split so the
+            # reader sees how much of the basket activity is anchored in
+            # classical rheumatology (the clinically coherent baskets
+            # extending the rheum arc in Fig 1) versus broader autoimmune
+            # umbrellas. Computed on the same _basket_df so the count
+            # matches the heatmap.
+            if "DiseaseFamily" in _basket_df.columns:
+                _n_classical = int(
+                    (_basket_df["DiseaseFamily"]
+                     == "Classical rheumatology basket").sum()
+                )
+                _n_mixed = len(_basket_df) - _n_classical
+                _split_str = (
+                    f" (of which **{_n_classical} classical-rheum** baskets "
+                    f"— ≥2 of CTD/IA/Vasc, no non-rheum constituents — and "
+                    f"**{_n_mixed} mixed-class** baskets)"
+                )
+            else:
+                _split_str = ""
             st.caption(
-                f"{len(_basket_df)} basket trials in the filtered set, "
-                f"yielding {len(_co)} distinct disease-pair co-occurrences. "
-                f"Top pair: **{_top_pair[0][0]} ⨯ {_top_pair[0][1]}** "
-                f"({_top_pair[1]} trials). Pipeline-unique: requires the "
-                "multi-entity classification stored in the DiseaseEntities "
-                "pipe-joined column; CT.gov's flat Conditions list cannot "
-                "be cross-tabulated this way without the closed-vocab "
-                "taxonomy."
+                f"{len(_basket_df)} basket trials in the filtered set"
+                f"{_split_str}, yielding {len(_co)} distinct disease-pair "
+                f"co-occurrences. Top pair: **{_top_pair[0][0]} ⨯ "
+                f"{_top_pair[0][1]}** ({_top_pair[1]} trials). Pipeline-"
+                "unique: requires the multi-entity classification stored "
+                "in the DiseaseEntities pipe-joined column; CT.gov's flat "
+                "Conditions list cannot be cross-tabulated this way "
+                "without the closed-vocab taxonomy."
             )
 
             _co_csv = pd.DataFrame(
