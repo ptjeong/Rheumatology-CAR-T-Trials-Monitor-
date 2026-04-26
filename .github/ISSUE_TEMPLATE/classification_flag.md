@@ -1,0 +1,68 @@
+---
+name: Classification correction (flag)
+about: Suggest a correction to a trial's automated classification
+title: "[Flag] NCT00000000 — axes…"
+labels: classification-flag, needs-review
+assignees: ''
+---
+
+> **Note**: this template is normally pre-filled by the dashboard's
+> "Suggest a classification correction" button (`Open as GitHub issue ↗`).
+> If you're filing manually, follow the same structure so the
+> consensus-detection workflow can parse your submission.
+
+## Trial classification correction
+
+**Trial**: [NCT00000000](https://clinicaltrials.gov/study/NCT00000000)
+**Title**: <full trial title>
+
+### Current pipeline classification
+| Axis | Current label |
+|---|---|
+| DiseaseEntity | `Other immune-mediated` |
+| TargetCategory | `Other_or_unknown` |
+
+### Proposed correction
+| Axis | Proposed |
+|---|---|
+| DiseaseEntity | `SLE` |
+| TargetCategory | `CD19` |
+
+### Reviewer notes
+
+(Optional. Cite trial text or a reference if helpful. Public.)
+
+### Reviewer information
+- **GitHub identity**: visible above (issue author).
+
+### Moderator workflow
+1. **Other reviewers** can add their own assessment as a *comment* using
+   the same axis schema below. Use one comment per reviewer; the
+   consensus-detection workflow parses every comment with a `BEGIN_FLAG_DATA`
+   block.
+2. The issue is automatically labelled `consensus-reached` when at
+   least `CONSENSUS_THRESHOLD` distinct human reviewers agree on the
+   same correction. **Currently the threshold is 1** (single-reviewer
+   suffices to surface to the moderator), configurable via the
+   workflow env var. Will be raised as the community grows.
+3. The moderator (@ptjeong) reviews the consensus in the dashboard's
+   Moderation tab. Approve → records to `moderator_validations.json` and
+   queues for promotion to `llm_overrides.json` via
+   `scripts/promote_consensus_flags.py`.
+
+---
+
+<!-- BEGIN_FLAG_DATA
+nct_id: NCT00000000
+flagged_axes:
+  - axis: DiseaseEntity
+    pipeline_label: "Other immune-mediated"
+    proposed_correction: "SLE"
+  - axis: TargetCategory
+    pipeline_label: "Other_or_unknown"
+    proposed_correction: "CD19"
+END_FLAG_DATA -->
+
+<sub>Validation methodology described in
+[`docs/methods.md`](https://github.com/ptjeong/Rheumatology-CAR-T-Trials-Monitor-/blob/main/docs/methods.md)
+§ 4.4.</sub>
