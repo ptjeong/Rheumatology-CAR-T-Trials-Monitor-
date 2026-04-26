@@ -444,6 +444,464 @@ def _product_explainer(rec: dict) -> None:
         st.caption(f"Recognised named product: **{rec['ProductName']}**")
 
 
+# ── Community classification-flag system ────────────────────────────────────
+# Ported from the onc app (ptjeong/ONC-CAR-T-Trials-Monitor commits b4402d1
+# → c3e2388). Architecture in three layers:
+#   1. UI: Suggest-correction expander on every trial card → opens a
+#      pre-filled GitHub issue with structured BEGIN_FLAG_DATA YAML body
+#      so reviewers don't have to write boilerplate.
+#   2. Backend: detect_flag_consensus.py (run by the flag_consensus.yml
+#      workflow on every issue/comment event) parses the YAML blocks,
+#      counts distinct authors agreeing on the same (axis, proposed)
+#      tuple, applies the consensus-reached label.
+#   3. Moderator: token-gated tab (Phase 4 of REVIEW.md) triages
+#      consensus-reached issues + records to moderator_validations.json;
+#      promote_consensus_flags.py merges into llm_overrides.json.
+
+GITHUB_REPO_SLUG = "ptjeong/Rheumatology-CAR-T-Trials-Monitor-"
+
+# Per-axis option lists shown in the suggest-correction form. Closed-vocab
+# only — submitted corrections must feed cleanly back into the override
+# schema. DiseaseEntity / TargetCategory built from the rheum classifier's
+# emit set so a reviewer's correction can never propose a label the pipeline
+# can't represent.
+_FLAG_AXIS_OPTIONS: dict[str, list[str]] = {
+    "DiseaseEntity": (
+        sorted(DISEASE_ENTITIES.keys())
+        + ["Other immune-mediated", "Basket/Multidisease", "Unclassified"]
+    ),
+    "TargetCategory": [
+        "CD19", "CD20", "CD7", "CD70", "BCMA", "BAFF", "CD6",
+        "CD19/BCMA dual", "CD19/CD20 dual", "CD19/BAFF dual", "BCMA/CD70 dual",
+        "CAR-Treg", "CAAR-T",
+        "CAR-T_unspecified", "Other_or_unknown",
+    ],
+    "ProductType": ["Autologous", "Allogeneic/Off-the-shelf", "In vivo", "Unclear"],
+    "TrialDesign": ["Single disease", "Basket/Multidisease"],
+    "SponsorType": ["Industry", "Academic", "Government", "Other"],
+}
+
+
+def _build_flag_issue_url(record, *, axes: list[str], corrections: dict[str, str],
+                            notes: str) -> str:
+    """Construct a GitHub issue URL with title + labels + structured YAML
+    body pre-filled. The user lands on github.com with everything ready;
+    they review and click Submit. Auth is handled by GitHub.
+
+    The body uses an HTML-comment-bracketed YAML block so the
+    consensus-detection GitHub Action can parse it back without needing
+    a custom front-matter convention. Free-form notes appear AFTER the
+    machine-readable block.
+    """
+    import urllib.parse as _up
+
+    nct = record.get("NCTId", "")
+    title_axes = ", ".join(axes) if axes else "general"
+    title = f"[Flag] {nct} — {title_axes}"
+
+    yaml_lines = [
+        "<!-- BEGIN_FLAG_DATA",
+        f"nct_id: {nct}",
+        f"flagged_axes:",
+    ]
+    for axis in axes:
+        pipeline_label = record.get(axis, "")
+        yaml_lines += [
+            f"  - axis: {axis}",
+            f"    pipeline_label: \"{pipeline_label}\"",
+            f"    proposed_correction: \"{corrections.get(axis, '')}\"",
+        ]
+    yaml_lines.append("END_FLAG_DATA -->")
+    yaml_block = "\n".join(yaml_lines)
+
+    body_md = f"""## Trial classification correction
+
+**Trial**: [{nct}](https://clinicaltrials.gov/study/{nct})
+**Title**: {record.get("BriefTitle", "")}
+
+### Current pipeline classification
+| Axis | Current label |
+|---|---|
+"""
+    for axis in axes:
+        body_md += f"| {axis} | `{record.get(axis, '')}` |\n"
+
+    body_md += "\n### Proposed correction\n"
+    body_md += "| Axis | Proposed |\n|---|---|\n"
+    for axis in axes:
+        body_md += f"| {axis} | `{corrections.get(axis, '')}` |\n"
+
+    if notes:
+        body_md += f"\n### Reviewer notes\n\n{notes}\n"
+
+    body_md += f"""
+### Reviewer information
+- **Submitted via**: dashboard at https://rheum-car-t-trial-monitor.streamlit.app
+- **GitHub identity**: this issue was created by your GitHub login (visible above)
+
+### Moderator workflow
+1. Reviewers can add their own assessment as a comment using the same axis schema.
+2. The issue is auto-labelled `consensus-reached` once at least
+   `CONSENSUS_THRESHOLD` reviewers agree (currently 1 — single-reviewer
+   suffices to surface to the moderator at the dashboard's current
+   community volume; raisable as the reviewer pool grows).
+3. The moderator (@ptjeong) reviews the consensus in the dashboard's
+   Moderation tab. Approve → promotes the correction to
+   `llm_overrides.json` via `scripts/promote_consensus_flags.py`.
+
+---
+
+{yaml_block}
+
+<sub>This issue was pre-filled by the dashboard's Suggest-correction
+affordance. See `docs/methods.md` § 4.4 for the validation methodology.</sub>
+"""
+
+    labels = ["classification-flag", "needs-review"]
+    for axis in axes:
+        labels.append(f"axis-{axis}")
+
+    params = {
+        "title": title,
+        "body":  body_md,
+        "labels": ",".join(labels),
+    }
+    return (
+        f"https://github.com/{GITHUB_REPO_SLUG}/issues/new?"
+        + _up.urlencode(params)
+    )
+
+
+def _render_suggest_correction(record, *, key_suffix: str = "") -> None:
+    """Suggest-correction form inside the trial drilldown.
+
+    Renders an expander with a per-axis correction form. On submit, builds
+    a pre-filled GitHub issue URL and surfaces a button that opens it in a
+    new tab. Submission completes on github.com — the user authenticates
+    via GitHub and clicks Submit there.
+
+    Why link-out instead of in-app POST: zero auth code in this app, no
+    PAT to manage, identity verified by GitHub. The "extra click" is also
+    a feature — kills spam at the entry point.
+    """
+    nct = record.get("NCTId", "")
+    if not nct:
+        return
+
+    with st.expander("Suggest a classification correction", expanded=False):
+        st.caption(
+            "If you think the classifier got an axis wrong, propose a correction "
+            "below. Submission opens a pre-filled GitHub issue — you'll log in "
+            "(or sign up) on GitHub and click Submit there. The flag is then "
+            "queued for moderator review and, if approved, promoted to "
+            "`llm_overrides.json` so the next pipeline reload reflects the fix."
+        )
+
+        _selected_axes = st.multiselect(
+            "Which axis is wrong?",
+            options=list(_FLAG_AXIS_OPTIONS.keys()),
+            key=f"flag_axes_{nct}_{key_suffix}",
+            help="Pick every axis you'd like to suggest a correction on.",
+        )
+
+        corrections: dict[str, str] = {}
+        if _selected_axes:
+            for axis in _selected_axes:
+                _current = record.get(axis, "")
+                _options = _FLAG_AXIS_OPTIONS.get(axis, [])
+                _label = f"{axis} should be (current: `{_current}`)"
+                if _options:
+                    corrections[axis] = st.selectbox(
+                        _label,
+                        options=[""] + _options,
+                        key=f"flag_correction_{axis}_{nct}_{key_suffix}",
+                    )
+                else:
+                    corrections[axis] = st.text_input(
+                        _label,
+                        value="",
+                        key=f"flag_correction_{axis}_{nct}_{key_suffix}",
+                        placeholder="Type the correct label",
+                    )
+
+        notes = st.text_area(
+            "Notes (optional)",
+            value="",
+            key=f"flag_notes_{nct}_{key_suffix}",
+            height=80,
+            placeholder="Briefly explain your reasoning, cite the trial text or a "
+                        "reference if helpful. Visible publicly in the GitHub issue.",
+        )
+
+        ready = bool(_selected_axes) and any(
+            corrections.get(a) for a in _selected_axes
+        )
+
+        if not ready:
+            st.caption(
+                "Pick at least one axis and provide a proposed correction to "
+                "enable the submit button."
+            )
+        else:
+            _final_axes = [a for a in _selected_axes if corrections.get(a)]
+            _url = _build_flag_issue_url(
+                record,
+                axes=_final_axes,
+                corrections={a: corrections[a] for a in _final_axes},
+                notes=notes,
+            )
+            st.link_button(
+                "Open as GitHub issue ↗",
+                _url,
+                type="primary",
+                help="Opens a pre-filled GitHub issue in a new tab. You'll need a "
+                     "GitHub account (free, fast to register).",
+            )
+            st.caption(
+                "After clicking Submit on GitHub, the issue enters the moderator "
+                "review queue. You can track all open flags at "
+                f"[github.com/{GITHUB_REPO_SLUG}/issues?q=label%3Aclassification-flag]"
+                f"(https://github.com/{GITHUB_REPO_SLUG}/issues?q=label%3Aclassification-flag)."
+            )
+
+
+@st.cache_data(ttl=60 * 5, show_spinner=False)
+def _load_active_flags() -> dict:
+    """Fetch open classification-flag GitHub issues and group by NCT ID.
+
+    Returns {nct_id: {"count": int, "consensus": bool, "issue_urls": [...]}}.
+    Cached 5 minutes so a single page render doesn't hit the API per-trial.
+    On any error (network, rate limit, JSON parse), returns {} so badge
+    rendering silently degrades rather than crashing the page.
+    """
+    try:
+        import requests
+        url = (
+            f"https://api.github.com/repos/{GITHUB_REPO_SLUG}/issues"
+            "?state=open&labels=classification-flag&per_page=100"
+        )
+        resp = requests.get(url, timeout=8)
+        if resp.status_code != 200:
+            return {}
+        issues = resp.json()
+        flags: dict[str, dict] = {}
+        import re as _re_flag
+        nct_re = _re_flag.compile(r"NCT\d{8}")
+        for issue in issues:
+            title = issue.get("title", "")
+            labels = {lbl.get("name", "") for lbl in (issue.get("labels") or [])}
+            m = nct_re.search(title) or nct_re.search(issue.get("body", "") or "")
+            if not m:
+                continue
+            nct = m.group(0)
+            entry = flags.setdefault(nct, {
+                "count": 0, "consensus": False, "issue_urls": [],
+            })
+            entry["count"] += 1
+            entry["issue_urls"].append(issue.get("html_url", ""))
+            if "consensus-reached" in labels:
+                entry["consensus"] = True
+        return flags
+    except Exception:
+        return {}
+
+
+_FLAG_EMOJI = "🚩"
+
+
+def _attach_flag_column(
+    df: "pd.DataFrame", show_cols: list[str]
+) -> "tuple[pd.DataFrame, list[str]]":
+    """Inline-flag indicator: prepend 🚩 to BriefTitle for flagged trials.
+
+    Replaces the earlier `_Flag` column approach (onc commit 8ed8787 →
+    c3e2388 refactor); now invisible until a flag exists. Idempotent:
+    re-running on an already-prefixed BriefTitle is a no-op. Function
+    name kept stable so call sites don't have to change.
+    """
+    flags = _load_active_flags()
+    out = df.copy()
+    if not flags or "NCTId" not in out.columns or "BriefTitle" not in out.columns:
+        return out, show_cols
+
+    def _prefix(row):
+        nct = row.get("NCTId", "")
+        title = str(row.get("BriefTitle", ""))
+        if title.startswith(f"{_FLAG_EMOJI} "):
+            return title  # already prefixed (idempotent)
+        entry = flags.get(nct)
+        if entry and entry.get("count", 0) > 0:
+            return f"{_FLAG_EMOJI} {title}"
+        return title
+
+    out["BriefTitle"] = out.apply(_prefix, axis=1)
+    return out, show_cols
+
+
+@st.cache_data(ttl=60 * 5, show_spinner=False)
+def _load_flag_issue_details(issue_url: str) -> dict:
+    """Fetch a single flag issue's body + parse out proposal blocks.
+
+    Called from the drilldown banner so we can show the actual proposed
+    corrections inline (not just a count). Cached 5 minutes to match
+    `_load_active_flags`. Returns {} on any failure so the banner
+    silently degrades to a plain GitHub link rather than crashing.
+    """
+    if not issue_url:
+        return {}
+    import re as _re_det
+    m = _re_det.match(
+        r"https://github\.com/([^/]+/[^/]+)/issues/(\d+)", issue_url
+    )
+    if not m:
+        return {}
+    api_url = f"https://api.github.com/repos/{m.group(1)}/issues/{m.group(2)}"
+    try:
+        import requests
+        r = requests.get(api_url, timeout=8)
+        if r.status_code != 200:
+            return {}
+        issue = r.json()
+        body = issue.get("body", "") or ""
+        proposals: list[dict] = []
+        block_re = _re_det.compile(
+            r"<!--\s*BEGIN_FLAG_DATA\s*\n(.*?)END_FLAG_DATA\s*-->",
+            _re_det.DOTALL,
+        )
+        try:
+            import yaml as _yaml_det
+            for blk in block_re.finditer(body):
+                try:
+                    data = _yaml_det.safe_load(blk.group(1))
+                except Exception:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                for ax in (data.get("flagged_axes") or []):
+                    if isinstance(ax, dict):
+                        proposals.append(ax)
+        except ImportError:
+            pair_re = _re_det.compile(
+                r"axis:\s*(\w+).*?pipeline_label:\s*\"?([^\"\n]*)\"?.*?"
+                r"proposed_correction:\s*\"?([^\"\n]*)\"?",
+                _re_det.DOTALL,
+            )
+            for blk in block_re.finditer(body):
+                for axm in pair_re.finditer(blk.group(1)):
+                    proposals.append({
+                        "axis": axm.group(1).strip(),
+                        "pipeline_label": axm.group(2).strip(),
+                        "proposed_correction": axm.group(3).strip(),
+                    })
+        return {
+            "title": issue.get("title", ""),
+            "html_url": issue.get("html_url", issue_url),
+            "author": (issue.get("user") or {}).get("login", ""),
+            "created_at": issue.get("created_at", ""),
+            "proposals": proposals,
+        }
+    except Exception:
+        return {}
+
+
+def _render_flag_banner(record) -> None:
+    """Render the per-trial flag banner at the top of the drilldown card.
+
+    Invisible when the trial has no open flags. Otherwise renders:
+      - st.error (consensus) or st.warning (open) status header
+      - inline table of proposed corrections (axis | current | proposed)
+        with direct links to the originating GitHub issue
+      - explicit "View discussion on GitHub" link button(s)
+
+    Safe to call when `_load_active_flags()` returned {} (no-op).
+    """
+    nct = record.get("NCTId", "") if record is not None else ""
+    if not nct:
+        return
+    flags = _load_active_flags()
+    entry = flags.get(nct)
+    if not entry or entry.get("count", 0) == 0:
+        return
+
+    n = entry["count"]
+    is_consensus = bool(entry.get("consensus"))
+    issue_urls = entry.get("issue_urls", [])
+
+    if is_consensus:
+        st.error(
+            f"{_FLAG_EMOJI} **Awaiting moderator review** — the community "
+            "has reached the consensus threshold on this trial's "
+            "classification. Moderator decision pending."
+        )
+    else:
+        plural = "s" if n > 1 else ""
+        st.warning(
+            f"{_FLAG_EMOJI} **{n} open classification flag{plural}** — "
+            "community has suggested a correction to this trial's labels. "
+            "Awaiting consensus before moderator review."
+        )
+
+    all_proposals: list[dict] = []
+    for url in issue_urls:
+        details = _load_flag_issue_details(url)
+        for prop in details.get("proposals", []):
+            all_proposals.append({
+                "Axis": prop.get("axis", ""),
+                "Current label": prop.get("pipeline_label", ""),
+                "Proposed correction": prop.get("proposed_correction", ""),
+                "Discussion": url,
+            })
+
+    if all_proposals:
+        st.markdown("**Proposed corrections:**")
+        st.dataframe(
+            pd.DataFrame(all_proposals),
+            hide_index=True, width="stretch",
+            column_config={
+                "Discussion": st.column_config.LinkColumn(
+                    "Discussion",
+                    display_text="View ↗",
+                    help="Open the GitHub issue thread for this proposal.",
+                ),
+            },
+        )
+    else:
+        for url in issue_urls:
+            st.markdown(f"- [View flag discussion on GitHub ↗]({url})")
+
+
+# ── Moderator-validation pool ───────────────────────────────────────────────
+# Append-only JSON log per moderator action (accept/reject a flag, or
+# annotate a randomly-sampled trial). Substrate for per-axis Cohen's κ +
+# the override-promotion pipeline.
+MODERATOR_VALIDATIONS_PATH = "moderator_validations.json"
+_MODERATOR_AXES = (
+    "DiseaseEntity", "TargetCategory", "ProductType",
+    "TrialDesign", "SponsorType",
+)
+
+
+def _load_moderator_validations() -> list[dict]:
+    """Read the moderator-validations log from disk. Returns [] on any error."""
+    import json
+    try:
+        with open(MODERATOR_VALIDATIONS_PATH, "r") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _append_moderator_validation(record: dict) -> None:
+    """Append one validation event. Writes the whole list back atomically
+    enough for our single-moderator workflow (no concurrent writers)."""
+    import json
+    log = _load_moderator_validations()
+    log.append(record)
+    with open(MODERATOR_VALIDATIONS_PATH, "w") as fh:
+        json.dump(log, fh, indent=2)
+
+
 def _cohens_kappa(rater_a: list[str], rater_b: list[str]) -> float | None:
     """Cohen's κ between two equal-length label sequences.
 
@@ -2664,7 +3122,7 @@ with tab_data:
         _prev_zoom = _ALL_COUNTRIES_LABEL
     _zoom_idx = _country_options.index(_prev_zoom)
 
-    _c_search, _c_country = st.columns([0.65, 0.35])
+    _c_search, _c_country, _c_flag = st.columns([0.55, 0.30, 0.15])
     with _c_search:
         search_q = st.text_input(
             "Search",
@@ -2681,6 +3139,22 @@ with tab_data:
             key="data_country_zoom",
             help="Filter the trial table to studies with an open or recruiting site in a specific country. "
                  "Shows that country's cities and site statuses inline.",
+        )
+    with _c_flag:
+        # Live count of trials with one or more open classification-flag
+        # GitHub issues. Disabled when the count is 0 so the checkbox isn't
+        # a tease (cached 5 minutes via _load_active_flags).
+        _active_flags_for_filter = _load_active_flags()
+        _n_flagged_in_view = (
+            df_filt["NCTId"].isin(_active_flags_for_filter.keys()).sum()
+            if _active_flags_for_filter else 0
+        )
+        _flagged_only = st.checkbox(
+            f"🚩 Flagged only ({_n_flagged_in_view})",
+            key="data_flagged_only",
+            disabled=_n_flagged_in_view == 0,
+            help="Show only trials with one or more open community "
+                 "classification-flag GitHub issues.",
         )
     _zoom_active = _zoom_country != _ALL_COUNTRIES_LABEL
 
@@ -2737,6 +3211,17 @@ with tab_data:
         table_df = table_df[mask]
         st.caption(f"Search '{search_q}' · {len(table_df)} of {len(df_filt)} filtered trials match")
 
+    # Apply the flagged-only checkbox filter (after the country zoom + search
+    # so the user sees the in-view count, not the global count).
+    if _flagged_only and _active_flags_for_filter:
+        table_df = table_df[
+            table_df["NCTId"].isin(_active_flags_for_filter.keys())
+        ].copy()
+
+    # Inline 🚩 prefix on flagged trials' BriefTitle (idempotent; no-op when
+    # _load_active_flags() returns {}, e.g. offline / rate-limited / no flags).
+    table_df, show_cols = _attach_flag_column(table_df, show_cols)
+
     st.caption("Click any row to open the full trial record below.")
     _table_event = st.dataframe(
         table_df[show_cols],
@@ -2783,6 +3268,11 @@ with tab_data:
             rec = table_df.iloc[_selected_rows[0]]
             sel_nct = rec["NCTId"]
             with st.expander(f"{sel_nct} — {rec.get('BriefTitle', '')}", expanded=True):
+                # Flag banner at the top — invisible when the trial has no
+                # open classification-flag GitHub issues, otherwise renders
+                # status alert + table of proposed corrections inline.
+                _render_flag_banner(rec)
+
                 _link = rec.get("NCTLink") or f"https://clinicaltrials.gov/study/{sel_nct}"
                 st.markdown(f"**[Open on ClinicalTrials.gov]({_link})**")
                 c1, c2, c3 = st.columns(3)
@@ -2835,6 +3325,11 @@ with tab_data:
                     _product_explainer(_rec_dict)
                     st.markdown("---")
                     _confidence_explainer(_rec_dict)
+
+                # Suggest-correction affordance — opens a pre-filled GitHub
+                # issue with structured BEGIN_FLAG_DATA YAML body so the
+                # consensus-detection workflow can parse and aggregate.
+                _render_suggest_correction(rec, key_suffix=f"data_{sel_nct}")
         else:
             st.info("Select a row in the table above to see the full trial record and classification reasoning.")
 
