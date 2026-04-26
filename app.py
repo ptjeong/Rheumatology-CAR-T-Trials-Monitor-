@@ -5463,158 +5463,310 @@ with tab_pub:
         st.info("No start year data available for innovation analysis.")
 
     # ------------------------------------------------------------------
-    # Fig 8 — Community-flag temperature map (cross-app sync round 6)
+    # Fig 8 — Antigen × Modality maturity matrix
     # ------------------------------------------------------------------
-    # Pipeline-unique figure: heatmap of (Axis × DiseaseEntity) cells
-    # coloured by community classification-flag rate. Surfaces WHERE the
-    # field's classification ontology is fundamentally ambiguous (vs
-    # where the pipeline is just buggy). Cells with high flag-rate but
-    # low moderator-acceptance rate indicate ambiguous rather than
-    # incorrect labelling — candidates for ontology refinement, not
-    # classifier bug fixes. No static literature review can produce this
-    # — it requires the running flag system + the moderator's
-    # accept/reject decisions.
+    # Pipeline-unique figure: this chart is impossible to reproduce from
+    # CT.gov + an afternoon because it requires both (a) the closed-vocab
+    # antigen taxonomy that treats dual-target combos as their own
+    # categories AND (b) the modality classifier that orthogonalises
+    # ProductType (Auto / Allo / In-vivo) from the platform family
+    # (CAR-NK / CAR-Treg / CAAR-T / CAR-γδ T). The cell grid reveals
+    # where the field is saturated, where it's experimenting, and which
+    # combinations remain unstudied — the white cells are the field's
+    # research agenda.
     st.markdown(
-        '<strong style="color: #0b1220;">8 — Community classification-flag '
-        'temperature map</strong>',
+        '<strong style="color: #0b1220;">8 — Antigen × Modality maturity '
+        'matrix</strong>',
         unsafe_allow_html=True,
     )
     st.markdown(
         f'<p class="small-note" style="color:{THEME["muted"]}">'
-        "(Axis × DiseaseEntity) cells coloured by flag rate (open + "
-        "consensus-reached community classification flags / total trials "
-        "in cell). Cells with elevated flag rate that the moderator does "
-        "NOT accept indicate ontology ambiguity, not pipeline error — "
-        "candidates for vocabulary refinement.</p>",
+        "Each cell is one (antigen × modality) combination across the "
+        "filtered dataset. Colour encodes trial count; cell annotation "
+        "shows count plus the most-advanced phase reached. Saturated cells "
+        "(CD19 × Auto CAR-T) reveal where the field has consolidated; "
+        "single-modality antigens (BAFF, CD6) are research opportunities; "
+        "white cells are unstudied combinations.</p>",
         unsafe_allow_html=True,
     )
 
-    _flag_axes = ("DiseaseEntity", "TargetCategory", "ProductType",
-                  "TrialDesign", "SponsorType")
-    _flagged = _load_active_flags() if "_load_active_flags" in dir() else {}
-    _validations = (
-        _load_moderator_validations()
-        if "_load_moderator_validations" in dir() else []
+    _hidden_targets = {"Other_or_unknown", "CAR-T_unspecified"}
+    _antigens_in_view = sorted(
+        t for t in df_filt["TargetCategory"].dropna().unique()
+        if t not in _hidden_targets
     )
-    # Total flags per (axis, disease) — split into open vs consensus
-    _flag_counts: dict[tuple[str, str], dict[str, int]] = {}
-    if _flagged:
-        # Map nct → DiseaseEntity using df_filt
-        _nct_to_disease = dict(zip(df_filt["NCTId"], df_filt["DiseaseEntity"]))
-        # Heuristic: distribute the flag's count across axes by parsing
-        # the issue body's BEGIN_FLAG_DATA blocks. Without per-axis
-        # detail in the cached dict, fall back to attributing the flag
-        # to all moderator axes equally.
-        for nct, info in _flagged.items():
-            disease = _nct_to_disease.get(nct, "Unclassified")
-            n = int(info.get("count", 0))
-            consensus = bool(info.get("consensus", False))
-            for axis in _flag_axes:
-                key = (axis, disease)
-                bucket = _flag_counts.setdefault(
-                    key, {"open": 0, "consensus": 0},
-                )
-                if consensus:
-                    bucket["consensus"] += n
-                else:
-                    bucket["open"] += n
-    # Trial-count denominator per disease
-    _trials_per_disease = (
-        df_filt["DiseaseEntity"].value_counts().to_dict() if not df_filt.empty
-        else {}
-    )
+    _modalities_in_view = [
+        m for m in _MODALITY_ORDER
+        if m in set(df_filt.get("Modality", pd.Series(dtype=str)).dropna())
+    ]
 
-    if not _flag_counts:
+    if not _antigens_in_view or not _modalities_in_view:
         st.info(
-            "No community flags have been filed against the current snapshot "
-            "yet. As reviewers click **Suggest a classification correction** "
-            "on trial cards, this heatmap will populate. The figure becomes "
-            "informative once the flag pool exceeds ~20 issues across the "
-            "axes."
+            "Not enough antigen × modality data in the current filter "
+            "selection to render the maturity matrix."
         )
     else:
-        # Build a long-format DataFrame for the heatmap
-        _hm_rows = []
-        _diseases_in_view = sorted({d for (_a, d) in _flag_counts.keys()})
-        for axis in _flag_axes:
-            for disease in _diseases_in_view:
-                bucket = _flag_counts.get((axis, disease), {"open": 0, "consensus": 0})
-                n_flags = bucket["open"] + bucket["consensus"]
-                n_trials = max(int(_trials_per_disease.get(disease, 0)), 1)
-                rate = n_flags / n_trials
-                _hm_rows.append({
-                    "Axis": axis,
-                    "DiseaseEntity": disease,
-                    "Flags": n_flags,
-                    "Open": bucket["open"],
-                    "Consensus": bucket["consensus"],
-                    "TrialsInCell": n_trials,
-                    "FlagRate": rate,
-                })
-        _hm_df = pd.DataFrame(_hm_rows)
-        _pivot = _hm_df.pivot(
-            index="Axis", columns="DiseaseEntity", values="FlagRate",
+        # Sort antigens by total trial count (descending) so the
+        # busiest columns are leftmost.
+        _antigen_counts_dict = (
+            df_filt.loc[df_filt["TargetCategory"].isin(_antigens_in_view), "TargetCategory"]
+            .value_counts().to_dict()
         )
-        _annot = _hm_df.pivot(
-            index="Axis", columns="DiseaseEntity", values="Flags",
-        ).fillna(0).astype(int).astype(str).where(lambda x: x != "0", "")
+        _antigen_order = sorted(
+            _antigens_in_view, key=lambda t: -_antigen_counts_dict.get(t, 0),
+        )
 
+        def _phase_max_label(series: pd.Series) -> str:
+            """Most-advanced phase reached among a Series of PhaseOrdered
+            values, expressed as a short label ('P1' / 'P1/2' / 'P2' /
+            'P3'). Falls back to '—' on no data."""
+            phase_strs = [str(p) for p in series.dropna()]
+            if not phase_strs:
+                return "—"
+            try:
+                cat = pd.Categorical(phase_strs, categories=PHASE_ORDER, ordered=True)
+                if len(cat) == 0:
+                    return "—"
+                full = PHASE_LABELS.get(str(cat.max()), str(cat.max()))
+                return (
+                    full.replace("Phase ", "P")
+                        .replace("Early Phase ", "EP")
+                        .replace("/Phase ", "/")
+                )
+            except Exception:
+                return "—"
+
+        # Build the matrix: count + furthest phase per (antigen, modality).
+        # Returning a scalar from the lambda keeps pandas happy when the
+        # source column is categorical (returning a list would trigger
+        # pandas' attempt to coerce list→categorical and fail).
+        _am = (
+            df_filt[df_filt["TargetCategory"].isin(_antigens_in_view)]
+            .groupby(["TargetCategory", "Modality"], observed=True)
+            .agg(
+                Trials=("NCTId", "nunique"),
+                FurthestPhase=("PhaseOrdered", _phase_max_label),
+            )
+            .reset_index()
+        )
+        _trials_pivot = _am.pivot(
+            index="Modality", columns="TargetCategory", values="Trials",
+        ).reindex(index=_modalities_in_view, columns=_antigen_order)
+        _phase_pivot = _am.pivot(
+            index="Modality", columns="TargetCategory", values="FurthestPhase",
+        ).reindex(index=_modalities_in_view, columns=_antigen_order)
+
+        # White for empty cells, then a navy ramp for population.
+        # log1p makes single-trial cells visible alongside CD19×Auto's 84.
+        import numpy as np
+        _z = _trials_pivot.values.astype(float)
+        _z_log = np.log1p(_z)
         fig8 = go.Figure(data=go.Heatmap(
-            z=_pivot.values,
-            x=list(_pivot.columns),
-            y=list(_pivot.index),
+            z=_z_log,
+            x=list(_trials_pivot.columns),
+            y=list(_trials_pivot.index),
+            zmin=0,
             colorscale=[
-                [0.0, THEME["surface"]],
-                [0.001, "#dbeafe"],
+                [0.0, "#ffffff"],
+                [0.001, "#eff6ff"],   # very pale blue at n=1
+                [0.5, "#93c5fd"],     # mid
                 [1.0, THEME["primary"]],
             ],
-            zmin=0,
-            colorbar=dict(title="Flag rate", thickness=14, len=0.7),
+            showscale=True,
+            colorbar=dict(
+                title="log(Trials+1)", thickness=12, len=0.7, x=1.02,
+            ),
+            customdata=_trials_pivot.values,
             hovertemplate=(
-                "<b>%{y} × %{x}</b><br>"
-                "Flag rate: %{z:.2%}<br>"
+                "<b>%{y} ⨯ %{x}</b><br>"
+                "Trials: %{customdata}<br>"
                 "<extra></extra>"
             ),
         ))
         fig8.update_layout(
             template="plotly_white",
-            height=320,
-            margin=dict(l=180, r=24, t=12, b=80),
+            height=max(280, 36 * len(_modalities_in_view) + 90),
+            margin=dict(l=160, r=80, t=12, b=80),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(side="bottom", tickangle=-30),
             font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
         )
-        # Overlay text annotations with raw flag counts
-        for i, axis in enumerate(_pivot.index):
-            for j, disease in enumerate(_pivot.columns):
-                txt = _annot.iloc[i, j]
-                if txt:
+        # Annotate populated cells with "n · P-label"
+        for i, modality in enumerate(_trials_pivot.index):
+            for j, antigen in enumerate(_trials_pivot.columns):
+                n = _trials_pivot.iloc[i, j]
+                if pd.notna(n) and n > 0:
+                    n_int = int(n)
+                    phase = str(_phase_pivot.iloc[i, j] or "—")
+                    color = "#ffffff" if n_int >= 25 else THEME["text"]
                     fig8.add_annotation(
-                        x=disease, y=axis, text=txt,
-                        showarrow=False, font=dict(size=10, color=THEME["text"]),
+                        x=antigen, y=modality,
+                        text=f"<b>{n_int}</b>·{phase}",
+                        showarrow=False,
+                        font=dict(size=10, color=color, family=FONT_FAMILY),
                     )
         st.plotly_chart(fig8, width='stretch', config=PUB_EXPORT)
 
-        # Methodology framing as a caption
-        n_total_flags = int(_hm_df["Flags"].sum())
-        n_consensus = int(_hm_df["Consensus"].sum())
+        _n_cells_filled = int((_trials_pivot.notna() & (_trials_pivot > 0)).sum().sum())
+        _n_cells_total = _trials_pivot.size
         st.caption(
-            f"{n_total_flags} community flags across the snapshot "
-            f"({n_consensus} consensus-reached). Cells annotated with raw "
-            "flag count; colour encodes flag-rate per trial in the cell. "
-            "Methodology contribution: separates ambiguity (high flag rate, "
-            "low moderator acceptance) from pipeline error (high flag rate, "
-            "high moderator acceptance) — see Methods § Community feedback."
+            f"{_n_cells_filled} of {_n_cells_total} (antigen × modality) "
+            f"cells populated ({100 * _n_cells_filled / max(_n_cells_total, 1):.0f}%). "
+            "Cells annotated with trial count and furthest phase reached. "
+            "Pipeline-unique: combines closed-vocab antigen taxonomy with "
+            "modality classifier; not reproducible from CT.gov free-text alone."
         )
 
+        # Long-format CSV for the data download
+        _fig8_csv = _am.copy()
         st.download_button(
             "Fig 8 data (CSV)",
             _csv_with_provenance(
-                _hm_df, "Fig 8 — Community classification-flag temperature map",
+                _fig8_csv, "Fig 8 — Antigen × Modality maturity matrix",
             ),
-            "fig8_flag_temperature.csv",
+            "fig8_antigen_modality.csv",
             "text/csv",
         )
+
+    # ------------------------------------------------------------------
+    # Fig 9 — Basket-disease co-occurrence triangle
+    # ------------------------------------------------------------------
+    # Second pipeline-unique figure: an upper-triangle heatmap showing
+    # which pairs of disease entities co-enrol in basket trials. Reveals
+    # the field's emerging multi-disease design clusters (e.g., "the
+    # B-cell autoimmune basket": SLE + SSc + IIM together; the
+    # glomerular basket: Lupus Nephritis + Membranous + IgAN). Requires
+    # the pipeline's multi-entity classification (DiseaseEntities pipe-
+    # joined column) — CT.gov gives a flat Conditions list per trial;
+    # mapping that to disease entities for cross-tabulation requires
+    # the closed-vocab taxonomy.
+    st.markdown(
+        '<strong style="color: #0b1220;">9 — Basket co-occurrence: which '
+        'disease pairs cluster in basket trials</strong>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<p class="small-note" style="color:{THEME["muted"]}">'
+        "Each cell counts the basket trials enrolling BOTH diseases. "
+        "Hot cells reveal the field's converged multi-disease designs; "
+        "the triangle is upper-only because (A,B) and (B,A) are the "
+        "same trial cohort.</p>",
+        unsafe_allow_html=True,
+    )
+
+    _basket_df = df_filt[df_filt["TrialDesign"] == "Basket/Multidisease"]
+    if _basket_df.empty:
+        st.info(
+            "No basket / multi-disease trials in the current filter selection."
+        )
+    else:
+        import itertools as _it
+        _co: dict[tuple[str, str], int] = {}
+        _entity_total: dict[str, int] = {}
+        for _, _r in _basket_df.iterrows():
+            _ents = sorted({
+                e.strip()
+                for e in str(_r.get("DiseaseEntities", "")).split("|")
+                if e.strip() and e.strip() not in (
+                    "Basket/Multidisease", "Unclassified", "Other immune-mediated",
+                )
+            })
+            for _e in _ents:
+                _entity_total[_e] = _entity_total.get(_e, 0) + 1
+            for _a, _b in _it.combinations(_ents, 2):
+                _co[(_a, _b)] = _co.get((_a, _b), 0) + 1
+
+        if not _co:
+            st.info(
+                "Basket trials in the current filter don't carry pipe-joined "
+                "DiseaseEntities information. The figure activates once a "
+                "basket trial enrols ≥2 specific entities."
+            )
+        else:
+            # Order entities by their basket-participation count (most-
+            # involved first) so the dense upper-left of the triangle is
+            # the field's hottest co-occurrence cluster.
+            _ent_order = sorted(
+                _entity_total.keys(),
+                key=lambda e: -_entity_total.get(e, 0),
+            )
+            _co_matrix = pd.DataFrame(
+                index=_ent_order, columns=_ent_order, dtype=float,
+            )
+            for (_a, _b), _n in _co.items():
+                # Place value in the upper triangle: row = earlier in
+                # _ent_order, col = later.
+                _ai, _bi = _ent_order.index(_a), _ent_order.index(_b)
+                _row, _col = (_a, _b) if _ai < _bi else (_b, _a)
+                _co_matrix.loc[_row, _col] = _n
+
+            fig9 = go.Figure(data=go.Heatmap(
+                z=_co_matrix.values.astype(float),
+                x=list(_co_matrix.columns),
+                y=list(_co_matrix.index),
+                zmin=0,
+                colorscale=[
+                    [0.0, "#ffffff"],
+                    [0.001, "#eff6ff"],
+                    [0.5, "#93c5fd"],
+                    [1.0, THEME["primary"]],
+                ],
+                showscale=True,
+                colorbar=dict(title="Trials", thickness=12, len=0.7, x=1.02),
+                hovertemplate=(
+                    "<b>%{y} ⨯ %{x}</b><br>"
+                    "Co-occurring trials: %{z}<br>"
+                    "<extra></extra>"
+                ),
+            ))
+            fig9.update_layout(
+                template="plotly_white",
+                height=max(320, 32 * len(_ent_order) + 90),
+                margin=dict(l=140, r=80, t=12, b=120),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(tickangle=-30, side="bottom"),
+                yaxis=dict(autorange="reversed"),
+                font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+            )
+            for _i, _row_e in enumerate(_co_matrix.index):
+                for _j, _col_e in enumerate(_co_matrix.columns):
+                    _v = _co_matrix.iloc[_i, _j]
+                    if pd.notna(_v) and _v > 0:
+                        _v_int = int(_v)
+                        _color = "#ffffff" if _v_int >= 30 else THEME["text"]
+                        fig9.add_annotation(
+                            x=_col_e, y=_row_e, text=f"<b>{_v_int}</b>",
+                            showarrow=False,
+                            font=dict(size=10, color=_color, family=FONT_FAMILY),
+                        )
+            st.plotly_chart(fig9, width='stretch', config=PUB_EXPORT)
+
+            _top_pair = max(_co.items(), key=lambda kv: kv[1])
+            st.caption(
+                f"{len(_basket_df)} basket trials, {len(_co)} distinct "
+                f"disease pairs co-occurring. Top pair: "
+                f"**{_top_pair[0][0]} ⨯ {_top_pair[0][1]}** "
+                f"({_top_pair[1]} trials). Pipeline-unique: requires multi-"
+                "entity classification per trial (DiseaseEntities); "
+                "CT.gov free-text doesn't structure this directly."
+            )
+
+            _co_csv = pd.DataFrame(
+                [
+                    {"Disease A": a, "Disease B": b, "Co-occurring trials": n}
+                    for (a, b), n in sorted(_co.items(), key=lambda kv: -kv[1])
+                ]
+            )
+            st.download_button(
+                "Fig 9 data (CSV)",
+                _csv_with_provenance(
+                    _co_csv, "Fig 9 — Basket-disease co-occurrence",
+                ),
+                "fig9_basket_co_occurrence.csv",
+                "text/csv",
+            )
 
 
 # ---------------------------------------------------------------------------
