@@ -20,6 +20,7 @@ from pipeline import (
     _term_in_text,
     _row_text,
     _DISEASE_TERMS,
+    compute_confidence_factors,
 )
 from config import (
     DISEASE_ENTITIES,
@@ -451,6 +452,25 @@ def _confidence_explainer(rec: dict) -> None:
         st.caption(rationale)
     if rec.get("LLMOverride"):
         st.caption("LLM override is in force for this trial — see `llm_overrides.json`.")
+    # Multi-factor breakdown (Phase 3 of REVIEW.md). Surfaces the per-axis
+    # sub-score so the legacy 3-bucket categorical above is no longer the
+    # sole signal — reviewers can see which axis is driving the level.
+    factors = compute_confidence_factors(
+        rec.get("TargetCategory") or "",
+        rec.get("TargetSource") or "",
+        rec.get("ProductType") or "",
+        rec.get("ProductTypeSource") or "",
+        rec.get("DiseaseEntity") or "Unclassified",
+        bool(rec.get("LLMOverride", False)),
+    )
+    score = factors["score"]
+    st.caption(f"Multi-factor score: **{score:.2f}** / 1.00 (level: `{factors['level']}`)")
+    breakdown = factors.get("factors", {})
+    if breakdown:
+        cols = st.columns(len(breakdown))
+        for col, (axis, value) in zip(cols, breakdown.items()):
+            with col:
+                st.metric(axis.title(), f"{value:.2f}")
 
 
 THEME = {

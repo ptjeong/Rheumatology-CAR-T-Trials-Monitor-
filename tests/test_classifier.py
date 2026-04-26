@@ -550,3 +550,76 @@ class TestVocabularyParity:
                     f"config.DISEASE_ENTITIES[{entity!r}]. Add it to the "
                     f"canonical synonym list or remove it from _DISEASE_TERMS."
                 )
+
+
+# ---------------------------------------------------------------------------
+# Multi-factor confidence breakdown (Phase 3 of REVIEW.md)
+# ---------------------------------------------------------------------------
+
+class TestConfidenceFactors:
+    """Tests for the new compute_confidence_factors API. The legacy
+    3-bucket _compute_confidence wrapper is tested separately in
+    TestConfidence (back-compat), so this class covers the richer
+    breakdown that powers the trial-detail rationale UI."""
+
+    def test_llm_override_pins_score_to_one(self):
+        from pipeline import compute_confidence_factors
+        out = compute_confidence_factors(
+            "CD19", "explicit_marker", "Autologous", "explicit_autologous",
+            "SLE", llm_override=True,
+        )
+        assert out["score"] == 1.0
+        assert out["level"] == "high"
+        assert out["factors"]["llm_override"] == 1.0
+        assert any(d[0] == "llm_override" for d in out["drivers"])
+
+    def test_all_explicit_yields_max_score(self):
+        from pipeline import compute_confidence_factors
+        out = compute_confidence_factors(
+            "CD19", "explicit_marker",
+            "Autologous", "explicit_autologous",
+            "SLE",
+        )
+        assert out["factors"]["disease"] == 1.0
+        assert out["factors"]["target"] == 1.0
+        assert out["factors"]["product"] == 1.0
+        assert out["score"] == 1.0
+        assert out["level"] == "high"
+
+    def test_unclassified_disease_zeroes_disease_axis(self):
+        from pipeline import compute_confidence_factors
+        out = compute_confidence_factors(
+            "CD19", "explicit_marker",
+            "Autologous", "explicit_autologous",
+            "Unclassified",
+        )
+        assert out["factors"]["disease"] == 0.0
+        # 2 of 3 axes still strong → score 0.667 → medium under the new model
+        assert 0.55 <= out["score"] < 0.85
+        assert out["level"] == "medium"
+
+    def test_basket_promotion_scores_below_specific_entity(self):
+        from pipeline import compute_confidence_factors
+        basket = compute_confidence_factors(
+            "CD19", "explicit_marker", "Autologous", "explicit_autologous",
+            "Basket/Multidisease",
+        )
+        specific = compute_confidence_factors(
+            "CD19", "explicit_marker", "Autologous", "explicit_autologous",
+            "SLE",
+        )
+        assert basket["score"] < specific["score"]
+        assert basket["factors"]["disease"] == 0.6
+
+    def test_drivers_carry_human_readable_reasons(self):
+        from pipeline import compute_confidence_factors
+        out = compute_confidence_factors(
+            "CD19", "explicit_marker", "Autologous", "explicit_autologous",
+            "SLE",
+        )
+        axes_in_drivers = {d[0] for d in out["drivers"]}
+        assert axes_in_drivers == {"disease", "target", "product"}
+        for axis, value, reason in out["drivers"]:
+            assert isinstance(reason, str) and reason
+
+

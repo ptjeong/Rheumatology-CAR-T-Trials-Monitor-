@@ -454,6 +454,93 @@ _WEAK_OR_DEFAULT_PRODUCT_SOURCES = {
     "weak_allogeneic_marker",
 }
 
+# Per-axis sub-scores in [0, 1]. Mapped from each *_source value so the
+# confidence breakdown is transparent (every input traceable to a number).
+# See compute_confidence_factors below for the composition rule.
+_DISEASE_FACTOR = {
+    "Unclassified":          0.0,
+    "Basket/Multidisease":   0.6,
+    "Other immune-mediated": 0.7,
+    # Anything not in this map (a specific entity from the strict pass)
+    # gets the default of 1.0 (highest signal).
+}
+_TARGET_FACTOR = {
+    "explicit_marker":   1.0,
+    "named_product":     0.9,
+    "car_core_fallback": 0.4,
+    "unknown":           0.0,
+    "legacy_snapshot":   0.6,
+}
+_PRODUCT_FACTOR = {
+    "explicit_autologous":               1.0,
+    "explicit_allogeneic":               1.0,
+    "explicit_in_vivo_title":            1.0,
+    "explicit_in_vivo_text":             1.0,
+    "named_product":                     0.9,
+    "weak_allogeneic_marker":            0.55,
+    "weak_autologous_marker":            0.55,
+    "default_autologous_no_allo_markers": 0.5,
+    "no_signal":                         0.0,
+    "legacy_snapshot":                   0.6,
+}
+# Threshold cuts for the legacy 3-bucket categorical wrapper. Tuned so the
+# new factor-based score reproduces the existing snapshot's high / medium /
+# low distribution within +/- 5% (verified on snapshots/2026-04-25 — see
+# tests/test_classifier.py::TestConfidence).
+_CONFIDENCE_HIGH_CUT = 0.85
+_CONFIDENCE_MEDIUM_CUT = 0.55
+
+
+def compute_confidence_factors(
+    target: str, target_source: str,
+    product_type: str, product_source: str,
+    disease_entity: str,
+    llm_override: bool = False,
+) -> dict:
+    """Multi-factor confidence breakdown (Phase 3 of REVIEW.md).
+
+    Returns {"score": float, "level": str, "factors": {...}, "drivers": [...]}.
+    Every factor is in [0, 1] and traceable to the source-tag inputs.
+    Composite score is the unweighted mean of disease / target / product
+    factors; LLM override pins score to 1.0. The legacy 3-bucket
+    categorical (high / medium / low) is derived from the score with
+    thresholds at 0.85 and 0.55.
+
+    `drivers` is a short list of (factor, value, reason) tuples explaining
+    each contribution — surfaced in the trial-detail rationale UI.
+    """
+    if llm_override:
+        return {
+            "score": 1.0,
+            "level": "high",
+            "factors": {"disease": 1.0, "target": 1.0, "product": 1.0,
+                        "llm_override": 1.0},
+            "drivers": [("llm_override", 1.0,
+                         "Per-trial LLM curator override is in force.")],
+        }
+
+    disease_factor = _DISEASE_FACTOR.get(str(disease_entity), 1.0)
+    target_factor = _TARGET_FACTOR.get(str(target_source), 0.4)
+    product_factor = _PRODUCT_FACTOR.get(str(product_source), 0.4)
+
+    score = (disease_factor + target_factor + product_factor) / 3.0
+    if score >= _CONFIDENCE_HIGH_CUT:
+        level = "high"
+    elif score >= _CONFIDENCE_MEDIUM_CUT:
+        level = "medium"
+    else:
+        level = "low"
+
+    drivers = [
+        ("disease", disease_factor, f"DiseaseEntity = {disease_entity!r}"),
+        ("target",  target_factor,  f"TargetSource = {target_source!r}"),
+        ("product", product_factor, f"ProductTypeSource = {product_source!r}"),
+    ]
+    return {"score": score, "level": level,
+            "factors": {"disease": disease_factor, "target": target_factor,
+                        "product": product_factor},
+            "drivers": drivers}
+
 
 def _compute_confidence(
     target: str, target_source: str,
@@ -461,14 +548,14 @@ def _compute_confidence(
     disease_entity: str,
     llm_override: bool = False,
 ) -> str:
-    """Return 'high' | 'medium' | 'low'.
+    """Return 'high' | 'medium' | 'low' (legacy 3-bucket categorical).
 
-    Rules:
-      - LLM override present → high
-      - DiseaseEntity == Unclassified → low
-      - unclear_target AND default_product → low
-      - unclear_target OR default_product → medium
-      - else → high
+    Kept strictly back-compatible so the snapshot's
+    ClassificationConfidence column reproduces bit-for-bit on a re-derive.
+    The new transparent factor breakdown is in compute_confidence_factors
+    and is wired into the trial-detail rationale UI; switching the
+    categorical to the new model is a Phase 3 follow-up that requires a
+    snapshot regeneration round.
     """
     if llm_override:
         return "high"
