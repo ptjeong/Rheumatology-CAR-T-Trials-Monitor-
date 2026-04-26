@@ -3643,21 +3643,28 @@ def _cagr(first_count: int, last_count: int, n_years: int) -> float | None:
 
 with tab_deepdive:
     st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">Segmented landscape views. '
-        'Pick a dimension, then drill into a single disease or product to see who is running trials, '
-        'where, and at what scale.</p>',
+        f'<p class="small-note" style="color:{THEME["muted"]}">Four focused views '
+        "that complement the aggregate dashboards: (1) drill into a single disease "
+        "entity to see all trials, sponsors, phases and targets in one place; "
+        "(2) drill into a single antigen target to see how its pipeline spreads "
+        "across diseases, phases, modalities and sponsors; (3) aggregate trials "
+        "by named CAR-T product to track each product's portfolio across indications "
+        "and phases; (4) break the landscape down by sponsor type (Industry / "
+        "Academic / Government / Other) to compare who is running what. Every "
+        "trial-list table supports row-click drilldown to a full trial record.</p>",
         unsafe_allow_html=True,
     )
 
-    _dd_view = st.radio(
-        "Dimension",
-        options=["By disease", "By product type", "By sponsor type"],
-        horizontal=True,
-        key="deepdive_view",
-        label_visibility="collapsed",
+    (deep_sub_disease, deep_sub_target, deep_sub_product,
+     deep_sub_sponsor) = st.tabs(
+        ["By disease", "By target", "By product", "By sponsor type"]
     )
 
     def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
+        """Explode trials with pipe-joined DiseaseEntities into one row per
+        entity, preserving the rest of the trial record. Used by the
+        by-disease landscape so a basket trial appears once under every
+        entity it enrols rather than only under its primary."""
         rows = []
         for _, r in df_in.iterrows():
             ents = [e.strip() for e in str(r.get("DiseaseEntities", "")).split("|") if e.strip()]
@@ -3669,135 +3676,493 @@ with tab_deepdive:
                 rows.append(rr)
         return pd.DataFrame(rows) if rows else pd.DataFrame()
 
-    if df_filt.empty:
-        st.info("No trials match the current filters.")
-    elif _dd_view == "By disease":
-        dd_df = _expand_disease_rows(df_filt)
-        if dd_df.empty:
-            st.info("No disease data available.")
+    # ===== By disease =====
+    with deep_sub_disease:
+        st.subheader("Disease-entity focus")
+        if df_filt.empty:
+            st.info("No trials match the current filters.")
         else:
-            agg = (
-                dd_df.groupby("_Disease")
+            dd_df = _expand_disease_rows(df_filt)
+            if dd_df.empty:
+                st.info("No disease data available.")
+            else:
+                agg = (
+                    dd_df.groupby("_Disease")
+                    .agg(
+                        Trials=("NCTId", "nunique"),
+                        Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
+                        Sponsors=("LeadSponsor", "nunique"),
+                        TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
+                        MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
+                    )
+                    .reset_index()
+                    .rename(columns={"_Disease": "Disease"})
+                    .sort_values("Trials", ascending=False)
+                )
+                agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
+                st.caption(f"{len(agg)} diseases · sorted by trial count")
+                st.dataframe(
+                    agg, width='stretch', hide_index=True,
+                    column_config=_landscape_table_cols("Disease", "Disease"),
+                )
+
+                disease_choices = agg["Disease"].tolist()
+                pick = st.selectbox(
+                    "Drill into disease",
+                    options=["—"] + disease_choices,
+                    key="dd_disease_pick",
+                )
+                if pick and pick != "—":
+                    sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Trials", len(sub))
+                    c2.metric(
+                        "Open / recruiting",
+                        int(sub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                    )
+                    _enr = pd.to_numeric(sub["EnrollmentCount"], errors="coerce")
+                    c3.metric("Total enrolled", f"{int(_enr.fillna(0).sum()):,}")
+                    c4.metric("Median enrollment", int(_enr.median()) if _enr.notna().any() else 0)
+
+                    _tgt = (
+                        sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                        .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+                    )
+                    _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
+                    cA, cB = st.columns(2)
+                    with cA:
+                        st.markdown("**Antigen targets**")
+                        st.dataframe(_tgt, width='stretch', hide_index=True,
+                                     column_config=_mini_count_cols("Target"))
+                    with cB:
+                        st.markdown("**Product types**")
+                        st.dataframe(_prod, width='stretch', hide_index=True,
+                                     column_config=_mini_count_cols("Product"))
+
+                    _dd_cols = [c for c in (
+                        "NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
+                        "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries",
+                    ) if c in sub.columns]
+                    detail = sub[_dd_cols].copy()
+                    if "PhaseLabel" in sub.columns and "Phase" in detail.columns:
+                        detail["Phase"] = sub["PhaseLabel"].values
+                    if "OverallStatus" in detail.columns:
+                        detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
+                    detail, _dd_cols = _attach_flag_column(detail, _dd_cols)
+                    st.markdown(
+                        f"### Trials — **{pick}** "
+                        f"<span style='color:#64748b; font-weight:400;'>"
+                        f"({len(detail)} trial{'s' if len(detail) != 1 else ''} · click any row for full details)</span>",
+                        unsafe_allow_html=True,
+                    )
+                    _dd_event = st.dataframe(
+                        detail, width='stretch', height=380, hide_index=True,
+                        on_select="rerun", selection_mode="single-row",
+                        key=f"deep_disease_trial_table_{pick}",
+                        column_config=_trial_detail_cols(),
+                    )
+                    _dd_rows = (
+                        _dd_event.selection.rows
+                        if _dd_event and hasattr(_dd_event, "selection") else []
+                    )
+                    if _dd_rows:
+                        _render_trial_drilldown(
+                            sub.iloc[_dd_rows[0]],
+                            key_suffix=f"deep_disease_{pick}",
+                        )
+
+    # ===== By target (NEW; ported from onc commit 5e6553b, rheum-adapted) =====
+    with deep_sub_target:
+        st.subheader("Antigen target focus")
+        st.caption(
+            "Pick an antigen to see how its pipeline spreads across diseases, "
+            "phases, modalities, and sponsors. Same row-click drilldown as the "
+            "other Deep-Dive sub-tabs."
+        )
+
+        # Antigen options — full closed vocab from the snapshot, EXCLUDING
+        # the platform / catch-all labels (those live in the Modality
+        # sidebar filter). Per the cross-app brief, rheum keeps CAAR-T
+        # and CAR-Treg in the picker (they're central rheum modalities),
+        # so the exclusion list is just the catch-all values.
+        _hidden = {"Other_or_unknown", "CAR-T_unspecified"}
+        _antigens_only = sorted(
+            t for t in df_filt["TargetCategory"].dropna().unique()
+            if t not in _hidden
+        )
+        _target_counts = (
+            df_filt.loc[df_filt["TargetCategory"].isin(_antigens_only), "TargetCategory"]
+            .value_counts().to_dict()
+        )
+        _target_options_sorted = sorted(
+            _antigens_only, key=lambda t: -_target_counts.get(t, 0)
+        )
+
+        ct1, ct2 = st.columns([0.7, 0.3])
+        with ct1:
+            target_pick = st.selectbox(
+                "Antigen target",
+                ["(any — show landscape)"] + _target_options_sorted,
+                key="dd_target_pick",
+                format_func=lambda t: (
+                    t if t == "(any — show landscape)"
+                    else f"{t}  ({_target_counts.get(t, 0)} trials)"
+                ),
+            )
+        with ct2:
+            st.metric(
+                "Antigens in dataset",
+                f"{len(_antigens_only)}",
+                help="Excludes catch-all buckets (Other_or_unknown / CAR-T_unspecified)",
+            )
+
+        if df_filt.empty:
+            st.info("No trials match the current filters.")
+        elif target_pick == "(any — show landscape)":
+            st.markdown(
+                "**Top antigens by trial count** "
+                "<span style='color:#64748b; font-weight:400;'>"
+                "— pick a specific antigen above to drill in</span>",
+                unsafe_allow_html=True,
+            )
+            _top_n = 25
+            _landscape = (
+                df_filt.loc[df_filt["TargetCategory"].isin(_antigens_only)]
+                .groupby("TargetCategory")
                 .agg(
                     Trials=("NCTId", "nunique"),
-                    Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
                     Sponsors=("LeadSponsor", "nunique"),
-                    TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
-                    MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
+                    TopDisease=("DiseaseEntity",
+                                lambda s: s.value_counts().index[0] if not s.empty else "—"),
+                    Diseases=("DiseaseEntity",
+                              lambda s: ", ".join(sorted(set(s.dropna()))[:6])),
                 )
                 .reset_index()
-                .rename(columns={"_Disease": "Disease"})
                 .sort_values("Trials", ascending=False)
+                .head(_top_n)
             )
-            agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
-            st.subheader("Landscape by disease")
-            st.caption(f"{len(agg)} diseases · sorted by trial count")
             st.dataframe(
-                agg, width='stretch', hide_index=True,
-                column_config=_landscape_table_cols("Disease", "Disease"),
+                _landscape,
+                width="stretch", height=460, hide_index=True,
+                column_config={
+                    "TargetCategory": st.column_config.TextColumn("Antigen", width="medium"),
+                    "Trials":         st.column_config.NumberColumn("Trials", format="%d", width="small"),
+                    "Sponsors":       st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
+                    "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
+                    "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
+                },
             )
+            st.caption(
+                f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
+                "Pick a specific antigen above to see its full focus view."
+            )
+        else:
+            focus = df_filt[df_filt["TargetCategory"] == target_pick].copy()
 
-            disease_choices = agg["Disease"].tolist()
-            pick = st.selectbox("Drill into disease", options=["—"] + disease_choices, key="dd_disease_pick")
-            if pick and pick != "—":
-                sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Trials", len(sub))
-                c2.metric("Open / recruiting",
-                          int(sub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()))
-                _enr = pd.to_numeric(sub["EnrollmentCount"], errors="coerce")
-                c3.metric("Total enrolled", f"{int(_enr.fillna(0).sum()):,}")
-                c4.metric("Median enrollment", int(_enr.median()) if _enr.notna().any() else 0)
-
-                _tgt = (
-                    sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                    .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+            if focus.empty:
+                st.info(
+                    f"No trials match target = {target_pick}. "
+                    "Broaden the upstream sidebar filters if a category is excluded."
                 )
-                _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
-                cA, cB = st.columns(2)
-                with cA:
-                    st.markdown("**Antigen targets**")
-                    st.dataframe(_tgt, width='stretch', hide_index=True,
-                                 column_config=_mini_count_cols("Target"))
-                with cB:
-                    st.markdown("**Product types**")
-                    st.dataframe(_prod, width='stretch', hide_index=True,
-                                 column_config=_mini_count_cols("Product"))
+            else:
+                _n = len(focus)
+                _rec = int(focus["OverallStatus"].isin(
+                    ["RECRUITING", "NOT_YET_RECRUITING"]).sum())
+                _sponsors = focus["LeadSponsor"].dropna().nunique()
+                _countries = set()
+                for cs in focus["Countries"].dropna():
+                    for c in str(cs).split("|"):
+                        c = c.strip()
+                        if c:
+                            _countries.add(c)
+                _enroll = pd.to_numeric(focus["EnrollmentCount"], errors="coerce").dropna()
+                _med_e = int(_enroll.median()) if not _enroll.empty else 0
 
-                _dd_cols = ["NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
-                            "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries"]
-                _dd_cols = [c for c in _dd_cols if c in sub.columns]
-                detail = sub[_dd_cols].copy()
-                if "PhaseLabel" in sub.columns and "Phase" in detail.columns:
-                    detail["Phase"] = sub["PhaseLabel"].values
-                if "OverallStatus" in detail.columns:
-                    detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
-                st.markdown("**Trials**")
-                st.caption(f"{len(detail)} trial{'s' if len(detail) != 1 else ''}")
+                m1, m2, m3, m4 = st.columns(4)
+                with m1: st.metric("Trials", f"{_n:,}", help=f"Targeting {target_pick}")
+                with m2: st.metric("Open / recruiting", f"{_rec:,}")
+                with m3: st.metric("Distinct sponsors", f"{_sponsors:,}")
+                with m4: st.metric("Median enrollment", f"{_med_e:,}",
+                                    help=f"across {len(_countries)} countries")
+
+                # 2x2 panel grid: disease entity / phase / modality / family
+                # (rheum is single-branch — replaced onc's "Branch split" with
+                # DiseaseFamily split; replaced onc's "DiseaseCategory
+                # breakdown" with DiseaseEntity breakdown.)
+                ta1, ta2 = st.columns(2)
+                with ta1:
+                    st.markdown("**Disease entity breakdown**")
+                    _ents = (
+                        focus["DiseaseEntity"].fillna("Unknown")
+                        .value_counts().head(15)
+                        .rename_axis("Entity").reset_index(name="Trials")
+                    )
+                    if not _ents.empty:
+                        st.plotly_chart(
+                            make_bar(_ents, "Entity", "Trials", height=280),
+                            width="stretch",
+                        )
+
+                    st.markdown("**Modality breakdown**")
+                    _mods = (
+                        focus.get("Modality", pd.Series(dtype=str)).fillna("Unknown")
+                        .value_counts()
+                        .rename_axis("Modality").reset_index(name="Trials")
+                    )
+                    if not _mods.empty:
+                        st.dataframe(
+                            _mods, width="stretch", hide_index=True,
+                            column_config=_mini_count_cols("Modality"),
+                        )
+
+                with ta2:
+                    st.markdown("**Phase distribution**")
+                    _phase_counts = (
+                        focus.groupby("PhaseOrdered", observed=False).size()
+                        .reset_index(name="Count")
+                    )
+                    _phase_counts["Phase"] = (
+                        _phase_counts["PhaseOrdered"].astype(str).map(PHASE_LABELS)
+                    )
+                    _phase_counts = _phase_counts[_phase_counts["Count"] > 0]
+                    if not _phase_counts.empty:
+                        st.plotly_chart(
+                            make_bar(_phase_counts, "Phase", "Count", height=280),
+                            width="stretch",
+                        )
+
+                    st.markdown("**Disease family split**")
+                    _fam = (
+                        focus.get("DiseaseFamily", pd.Series(dtype=str)).fillna("Unknown")
+                        .value_counts()
+                        .rename_axis("Family").reset_index(name="Trials")
+                    )
+                    if not _fam.empty:
+                        st.dataframe(
+                            _fam, width="stretch", hide_index=True,
+                            column_config=_mini_count_cols("Family"),
+                        )
+
+                # Top sponsors developing this antigen
+                st.markdown(
+                    f"**Top sponsors developing {target_pick}** "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({_sponsors} distinct sponsors total)</span>",
+                    unsafe_allow_html=True,
+                )
+                _spon_top = (
+                    focus["LeadSponsor"].dropna().value_counts().head(15)
+                    .rename_axis("Lead sponsor").reset_index(name="Trials")
+                )
                 st.dataframe(
-                    detail, width='stretch', hide_index=True,
+                    _spon_top, width="stretch", hide_index=True,
+                    column_config=_mini_count_cols("Lead sponsor"),
+                )
+
+                # Trial list with row-click → drilldown
+                st.markdown(
+                    f"### Trials targeting **{target_pick}** "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({_n} trials · click any row for full details)</span>",
+                    unsafe_allow_html=True,
+                )
+                _focus_show = focus.copy()
+                if "NCTLink" not in _focus_show.columns:
+                    _focus_show["NCTLink"] = _focus_show["NCTId"].apply(
+                        lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
+                    )
+                if "PhaseLabel" in _focus_show.columns:
+                    _focus_show["Phase"] = _focus_show["PhaseLabel"].fillna(_focus_show["Phase"])
+                _focus_show["OverallStatus"] = _focus_show["OverallStatus"].map(
+                    STATUS_DISPLAY).fillna(_focus_show["OverallStatus"])
+                _focus_sorted = _focus_show.sort_values(
+                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
+                ).reset_index(drop=True)
+                _target_trial_cols = [c for c in (
+                    "NCTId", "NCTLink", "BriefTitle",
+                    "DiseaseEntity", "DiseaseEntities", "TrialDesign",
+                    "ProductType", "ProductName", "Phase",
+                    "OverallStatus", "StartYear", "Countries", "LeadSponsor",
+                ) if c in _focus_sorted.columns]
+                _focus_sorted, _target_trial_cols = _attach_flag_column(
+                    _focus_sorted, _target_trial_cols
+                )
+                _target_event = st.dataframe(
+                    _focus_sorted[_target_trial_cols],
+                    width="stretch", height=420, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"deep_target_trial_table_{target_pick}",
                     column_config=_trial_detail_cols(),
                 )
+                _target_rows = (
+                    _target_event.selection.rows
+                    if _target_event and hasattr(_target_event, "selection")
+                    else []
+                )
+                if _target_rows:
+                    _render_trial_drilldown(
+                        _focus_sorted.iloc[_target_rows[0]],
+                        key_suffix=f"deep_target_{target_pick}",
+                    )
 
-    elif _dd_view == "By product type":
-        agg = (
-            df_filt.groupby("ProductType")
-            .agg(
-                Trials=("NCTId", "nunique"),
-                Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
-                Sponsors=("LeadSponsor", "nunique"),
-                TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
-                MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
-            )
-            .reset_index()
-            .sort_values("Trials", ascending=False)
+                st.download_button(
+                    f"Download trials targeting {target_pick} (CSV)",
+                    data=_csv_with_provenance(
+                        focus, f"Deep-dive by target: {target_pick}",
+                    ),
+                    file_name=f"deep_dive_target_{target_pick}.csv".replace(
+                        "/", "_").replace(" ", "_"),
+                    mime="text/csv",
+                )
+
+    # ===== By product (per-named-product; ported from onc commit f006d8e) =====
+    with deep_sub_product:
+        st.subheader("Per-product pipeline view")
+        st.caption(
+            "Each row is one named CAR-T product (KYV-101, CABA-201, ADI-001, "
+            "CNTY-101, …). Shows the product's portfolio across the filtered "
+            "dataset: number of trials, primary target, modality, furthest "
+            "phase, sponsor, indications. Click a row → see that product's "
+            "trials, click a trial for the full record."
         )
-        agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
-        st.subheader("Landscape by product type")
-        st.caption(f"{len(agg)} product types · sorted by trial count")
-        st.dataframe(
-            agg, width='stretch', hide_index=True,
-            column_config=_landscape_table_cols("ProductType", "Product type"),
-        )
 
-        prod_choices = agg["ProductType"].tolist()
-        pick = st.selectbox("Drill into product type", options=["—"] + prod_choices, key="dd_product_pick")
-        if pick and pick != "—":
-            sub = df_filt[df_filt["ProductType"] == pick]
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Trials", len(sub))
-            c2.metric("Distinct named products",
-                      int(sub["ProductName"].dropna().nunique()) if "ProductName" in sub.columns else 0)
-            c3.metric("Distinct sponsors", int(sub["LeadSponsor"].dropna().nunique()))
-            c4.metric("Countries",
-                      len({c.strip() for v in sub["Countries"].dropna() for c in str(v).split("|") if c.strip()}))
+        prod_df = df_filt.dropna(subset=["ProductName"]).copy() if "ProductName" in df_filt.columns else pd.DataFrame()
+        if prod_df.empty:
+            st.info(
+                "No named-product trials in the current filter selection. "
+                "Named products come from `NAMED_PRODUCT_TARGETS` aliases — "
+                "trials without a recognised product alias are aggregated by "
+                "antigen target on the **By target** tab."
+            )
+        else:
+            prod_df["EnrollmentCount"] = pd.to_numeric(prod_df["EnrollmentCount"], errors="coerce")
 
-            if "ProductName" in sub.columns:
-                _np = sub["ProductName"].dropna().value_counts().rename_axis("Named product").reset_index(name="Trials")
-                if not _np.empty:
-                    st.markdown("**Named products**")
-                    st.dataframe(_np, width='stretch', hide_index=True,
-                                 column_config=_mini_count_cols("Named product"))
+            def _phase_max_rank(phases: pd.Series) -> str:
+                """Most-advanced phase label among a set of phase labels."""
+                try:
+                    cat = pd.Categorical(phases.dropna(), categories=PHASE_ORDER, ordered=True)
+                    if len(cat) == 0:
+                        return "—"
+                    return PHASE_LABELS.get(str(cat.max()), str(cat.max()))
+                except Exception:
+                    return "—"
 
-            _detail_cols = ["NCTId", "NCTLink", "BriefTitle", "DiseaseEntities", "DiseaseEntity",
-                            "TargetCategory", "ProductName", "Phase", "OverallStatus",
-                            "LeadSponsor", "StartYear"]
-            _detail_cols = [c for c in _detail_cols if c in sub.columns]
-            detail = sub[_detail_cols].copy()
-            if "PhaseLabel" in sub.columns and "Phase" in detail.columns:
-                detail["Phase"] = sub["PhaseLabel"].values
-            if "OverallStatus" in detail.columns:
-                detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
-            st.markdown("**Trials**")
-            st.caption(f"{len(detail)} trial{'s' if len(detail) != 1 else ''}")
-            st.dataframe(
-                detail, width='stretch', hide_index=True,
-                column_config=_trial_detail_cols(),
+            pivot = (
+                prod_df.groupby("ProductName")
+                .agg(
+                    Trials=("NCTId", "nunique"),
+                    Target=("TargetCategory", lambda s: s.value_counts().index[0] if not s.empty else "—"),
+                    Modality=("Modality", lambda s: s.value_counts().index[0] if not s.empty else "—"),
+                    ProductType=("ProductType", lambda s: s.value_counts().index[0] if not s.empty else "—"),
+                    FurthestPhase=("PhaseNormalized", _phase_max_rank) if "PhaseNormalized" in prod_df.columns else ("Phase", lambda _s: "—"),
+                    Sponsors=("LeadSponsor", lambda s: s.dropna().nunique()),
+                    Diseases=("DiseaseEntity", lambda s: ", ".join(sorted(set(s.dropna())))),
+                    Countries=("Countries", lambda s: ", ".join(sorted(set(split_pipe_values(s)))[:8])),
+                    MedianEnroll=("EnrollmentCount", lambda s: int(s.median()) if s.notna().any() else 0),
+                )
+                .reset_index()
+                .sort_values("Trials", ascending=False)
             )
 
-    else:  # By sponsor type
+            m1, m2, m3 = st.columns(3)
+            with m1: st.metric("Named products", f"{len(pivot):,}", help="In the current filter")
+            with m2: st.metric("Total trials", f"{int(pivot['Trials'].sum()):,}")
+            with m3: st.metric(
+                "Top product",
+                pivot.iloc[0]["ProductName"] if not pivot.empty else "—",
+                help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
+            )
+
+            st.caption(
+                f"{len(pivot):,} named products · sorted by trial count · "
+                "click any row to see that product's trial list, then click a trial for full details"
+            )
+            _prod_event = st.dataframe(
+                pivot, width='stretch', height=460, hide_index=True,
+                on_select="rerun", selection_mode="single-row",
+                key="deep_product_pivot",
+                column_config={
+                    "ProductName":   st.column_config.TextColumn("Product", width="medium"),
+                    "Target":        st.column_config.TextColumn("Primary target", width="small"),
+                    "Modality":      st.column_config.TextColumn("Modality", width="small"),
+                    "ProductType":   st.column_config.TextColumn("Product type", width="small"),
+                    "FurthestPhase": st.column_config.TextColumn("Furthest phase", width="small"),
+                    "Sponsors":      st.column_config.NumberColumn("# Sponsors", width="small"),
+                    "Diseases":      st.column_config.TextColumn("Indications", width="medium"),
+                    "Countries":     st.column_config.TextColumn("Countries (top)", width="large"),
+                    "MedianEnroll":  st.column_config.NumberColumn("Median enrollment", width="small"),
+                },
+            )
+
+            st.download_button(
+                "Download per-product CSV",
+                data=_csv_with_provenance(pivot, "Per-product pipeline view"),
+                file_name="per_product_pipeline.csv",
+                mime="text/csv",
+            )
+
+            _prod_rows = (
+                _prod_event.selection.rows
+                if _prod_event and hasattr(_prod_event, "selection") else []
+            )
+            if _prod_rows:
+                _picked_product = pivot.iloc[_prod_rows[0]]["ProductName"]
+                _prod_trials = prod_df[prod_df["ProductName"] == _picked_product].copy()
+                if "NCTLink" not in _prod_trials.columns:
+                    _prod_trials["NCTLink"] = _prod_trials["NCTId"].apply(
+                        lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
+                    )
+                if "PhaseLabel" in _prod_trials.columns:
+                    _prod_trials["Phase"] = _prod_trials["PhaseLabel"].fillna(_prod_trials["Phase"])
+                _prod_trials["OverallStatus"] = _prod_trials["OverallStatus"].map(
+                    STATUS_DISPLAY).fillna(_prod_trials["OverallStatus"])
+                _prod_trials = _prod_trials.sort_values(
+                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
+                ).reset_index(drop=True)
+
+                st.markdown(
+                    f"### Trials for **{_picked_product}** "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({len(_prod_trials)} trials · click any row for full details)</span>",
+                    unsafe_allow_html=True,
+                )
+                _prod_trial_cols = [c for c in (
+                    "NCTId", "NCTLink", "BriefTitle",
+                    "DiseaseEntity", "DiseaseEntities", "TrialDesign",
+                    "TargetCategory", "Phase", "OverallStatus",
+                    "StartYear", "Countries", "LeadSponsor",
+                ) if c in _prod_trials.columns]
+                _prod_trials, _prod_trial_cols = _attach_flag_column(
+                    _prod_trials, _prod_trial_cols
+                )
+                _prod_trial_event = st.dataframe(
+                    _prod_trials[_prod_trial_cols],
+                    width='stretch', height=320, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"deep_product_trial_table_{_picked_product}",
+                    column_config=_trial_detail_cols(),
+                )
+                _prod_trial_rows = (
+                    _prod_trial_event.selection.rows
+                    if _prod_trial_event and hasattr(_prod_trial_event, "selection")
+                    else []
+                )
+                if _prod_trial_rows:
+                    _render_trial_drilldown(
+                        _prod_trials.iloc[_prod_trial_rows[0]],
+                        key_suffix=f"deep_product_{_picked_product}",
+                    )
+
+    # ===== By sponsor type =====
+    with deep_sub_sponsor:
+        st.subheader("Landscape by sponsor type")
+        st.caption(
+            "Aggregates the filtered dataset by sponsor type "
+            "(Industry / Academic / Government / Other). Drill into any "
+            "bucket to see its top sponsors, antigen targets, and product mix."
+        )
+
         # Defensive fallback: older cached state may lack SponsorType.
-        # Recompute it on the fly rather than blocking the view.
         if "SponsorType" not in df_filt.columns and "LeadSponsor" in df_filt.columns:
             try:
                 from pipeline import _classify_sponsor as _cs
@@ -3806,8 +4171,11 @@ with tab_deepdive:
                 )
             except Exception:
                 pass
+
         if "SponsorType" not in df_filt.columns:
             st.info("Sponsor type not available in the current snapshot.")
+        elif df_filt.empty:
+            st.info("No trials in the current filter.")
         else:
             agg = (
                 df_filt.groupby("SponsorType")
@@ -3822,7 +4190,6 @@ with tab_deepdive:
                 .sort_values("Trials", ascending=False)
             )
             agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
-            st.subheader("Landscape by sponsor type")
             st.caption(f"{len(agg)} sponsor categories · sorted by trial count")
             st.dataframe(
                 agg, width='stretch', hide_index=True,
@@ -3830,16 +4197,27 @@ with tab_deepdive:
             )
 
             sp_choices = agg["SponsorType"].tolist()
-            pick = st.selectbox("Drill into sponsor type", options=["—"] + sp_choices, key="dd_sponsor_pick")
+            pick = st.selectbox(
+                "Drill into sponsor type", options=["—"] + sp_choices, key="dd_sponsor_pick",
+            )
             if pick and pick != "—":
-                sub = df_filt[df_filt["SponsorType"] == pick]
+                sub = df_filt[df_filt["SponsorType"] == pick].copy()
+
+                st.markdown(
+                    f"**Sponsors in *{pick}*** "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({len(sub)} trials, {sub['LeadSponsor'].nunique()} distinct sponsors)"
+                    f"</span>",
+                    unsafe_allow_html=True,
+                )
                 _top_sponsors = (
-                    sub["LeadSponsor"].dropna().value_counts().head(10)
+                    sub["LeadSponsor"].dropna().value_counts().head(15)
                     .rename_axis("Lead sponsor").reset_index(name="Trials")
                 )
-                st.markdown("**Top sponsors**")
-                st.dataframe(_top_sponsors, width='stretch', hide_index=True,
-                             column_config=_mini_count_cols("Lead sponsor"))
+                st.dataframe(
+                    _top_sponsors, width='stretch', hide_index=True,
+                    column_config=_mini_count_cols("Lead sponsor"),
+                )
                 _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
                 _tgt = (
                     sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
@@ -3854,6 +4232,49 @@ with tab_deepdive:
                     st.markdown("**Product types**")
                     st.dataframe(_prod, width='stretch', hide_index=True,
                                  column_config=_mini_count_cols("Product"))
+
+                # Trial list with row-click → drilldown
+                _sp_trials = sub.copy()
+                if "NCTLink" not in _sp_trials.columns:
+                    _sp_trials["NCTLink"] = _sp_trials["NCTId"].apply(
+                        lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
+                    )
+                if "PhaseLabel" in _sp_trials.columns:
+                    _sp_trials["Phase"] = _sp_trials["PhaseLabel"].fillna(_sp_trials["Phase"])
+                _sp_trials["OverallStatus"] = _sp_trials["OverallStatus"].map(
+                    STATUS_DISPLAY).fillna(_sp_trials["OverallStatus"])
+                _sp_trials = _sp_trials.sort_values(
+                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
+                ).reset_index(drop=True)
+                _sp_cols = [c for c in (
+                    "NCTId", "NCTLink", "BriefTitle",
+                    "DiseaseEntity", "TrialDesign",
+                    "TargetCategory", "ProductType", "Phase",
+                    "OverallStatus", "StartYear", "Countries", "LeadSponsor",
+                ) if c in _sp_trials.columns]
+                _sp_trials, _sp_cols = _attach_flag_column(_sp_trials, _sp_cols)
+                st.markdown(
+                    f"### Trials in **{pick}** sponsor bucket "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({len(_sp_trials)} trials · click any row for full details)</span>",
+                    unsafe_allow_html=True,
+                )
+                _sp_event = st.dataframe(
+                    _sp_trials[_sp_cols],
+                    width='stretch', height=380, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"deep_sponsor_trial_table_{pick}",
+                    column_config=_trial_detail_cols(),
+                )
+                _sp_rows = (
+                    _sp_event.selection.rows
+                    if _sp_event and hasattr(_sp_event, "selection") else []
+                )
+                if _sp_rows:
+                    _render_trial_drilldown(
+                        _sp_trials.iloc[_sp_rows[0]],
+                        key_suffix=f"deep_sponsor_{pick}",
+                    )
 
 
 with tab_pub:
