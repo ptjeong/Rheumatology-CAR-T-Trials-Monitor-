@@ -444,6 +444,35 @@ def _product_explainer(rec: dict) -> None:
         st.caption(f"Recognised named product: **{rec['ProductName']}**")
 
 
+def _cohens_kappa(rater_a: list[str], rater_b: list[str]) -> float | None:
+    """Cohen's κ between two equal-length label sequences.
+
+    Returns None when N<2 or the categories collapse (κ undefined).
+    Implemented inline (not via sklearn) to keep the dependency footprint
+    tiny — this is a simple closed-form computation.
+
+    Anchored against Sim & Wright (2005) BMC Med Res Methodol worked
+    example in tests/test_moderator_helpers.py — protects against silent
+    formula regressions in the most-cited stat in either app's methods
+    section. Ported verbatim from the onc app
+    (ptjeong/ONC-CAR-T-Trials-Monitor commit 816dcef).
+    """
+    if len(rater_a) != len(rater_b) or len(rater_a) < 2:
+        return None
+    n = len(rater_a)
+    categories = sorted(set(rater_a) | set(rater_b))
+    if len(categories) < 2:
+        return None
+    observed = sum(1 for a, b in zip(rater_a, rater_b) if a == b) / n
+    from collections import Counter
+    ca = Counter(rater_a)
+    cb = Counter(rater_b)
+    expected = sum((ca[c] / n) * (cb[c] / n) for c in categories)
+    if expected >= 1.0:
+        return None
+    return (observed - expected) / (1 - expected)
+
+
 def _confidence_explainer(rec: dict) -> None:
     conf = rec.get("ClassificationConfidence") or "—"
     st.markdown(f"**Confidence →** `{conf}`")
