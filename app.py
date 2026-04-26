@@ -343,6 +343,86 @@ def _neuro_disease(text: str) -> str:
     return "Neurology_other"
 
 
+# ── Basket-archetype classifier (sunburst L2 enrichment) ────────────────────
+# Without this, basket trials show "Basket/Multidisease" as both L1 and L2
+# in the sunburst — redundant. The archetype splits the basket branch into
+# clinically meaningful sub-types based on which entities the trial enrols
+# (read from the pipeline's pipe-joined DiseaseEntities column + a text
+# scan for neuro / glomerular keywords).
+_RHEUM_SYSTEMIC_ENTITIES = {
+    "SLE", "SSc", "Sjogren", "CTD_other", "IIM", "AAV",
+    "RA", "IgG4-RD", "Behcet", "cGVHD",
+}
+_BASKET_NEURO_KEYWORDS = (
+    "multiple sclerosis", "myasthenia", "neuromyelitis", "nmosd",
+    "nmo spectrum", "demyelinating", "cidp", "encephalitis",
+    "mogad", "stiff person",
+)
+_BASKET_GLOMERULAR_KEYWORDS = (
+    "iga nephropathy", "igan", "membranous nephropathy",
+    "fsgs", "focal segmental glomer", "minimal change",
+)
+
+
+def _basket_archetype(record) -> str:
+    """For basket/multidisease trials, return one of ~7 archetype labels
+    (used as the sunburst L2 wedge inside the Basket/Multidisease branch).
+
+    Categories:
+      - "Pan-rheum (≥3)": basket enrols 3+ rheum systemic entities
+      - "Rheum dual": exactly 2 rheum systemic entities
+      - "Rheum + neuro": 1 rheum systemic + neuro disease(s)
+      - "Rheum + glomerular": 1 rheum systemic + glomerular OIM
+      - "Neuro multi-disease": multiple neuro autoimmune diseases (no rheum systemics)
+      - "Other multi-disease": doesn't fit the above patterns
+      - "Generic basket": matched only broad basket phrasing, no specific entities
+    """
+    ents_str = str(record.get("DiseaseEntities") or "")
+    ents = [
+        e.strip()
+        for e in ents_str.split("|")
+        if e.strip()
+        and e.strip() not in (
+            "Basket/Multidisease", "Unclassified", "Other immune-mediated",
+        )
+    ]
+    rheum_in = set(ents) & _RHEUM_SYSTEMIC_ENTITIES
+    text = (
+        str(record.get("Conditions") or "") + " "
+        + str(record.get("BriefTitle") or "")
+    ).lower()
+    has_neuro = any(kw in text for kw in _BASKET_NEURO_KEYWORDS)
+    has_glomerular = any(kw in text for kw in _BASKET_GLOMERULAR_KEYWORDS)
+
+    if not ents:
+        return "Generic basket"
+    if len(rheum_in) >= 3:
+        return "Pan-rheum (≥3)"
+    if len(rheum_in) == 2:
+        return "Rheum dual"
+    if rheum_in and has_neuro:
+        return "Rheum + neuro"
+    if rheum_in and has_glomerular:
+        return "Rheum + glomerular"
+    if has_neuro and not rheum_in:
+        return "Neuro multi-disease"
+    return "Other multi-disease"
+
+
+# Slate-tone palette ordered from "most-specific multi-disease" (dark) to
+# "least informative" (light). Used inside the Basket/Multidisease branch
+# of the sunburst so the L2 ring carries clinical-archetype signal.
+_BASKET_ARCHETYPE_COLORS = {
+    "Pan-rheum (≥3)":      "#475569",  # slate-600 — densest archetype
+    "Rheum dual":          "#64748b",  # slate-500
+    "Rheum + neuro":       "#7c3aed",  # violet — matches the neuro family accent
+    "Rheum + glomerular":  "#0e7490",  # cyan — renal accent
+    "Neuro multi-disease": "#a855f7",  # lighter violet
+    "Other multi-disease": "#94a3b8",  # slate-400
+    "Generic basket":      "#cbd5e1",  # slate-300 — lightest, least informative
+}
+
+
 def _disease_family(
     entity: str,
     trial_design: str | None = None,
@@ -2671,7 +2751,10 @@ with tab_overview:
         st.subheader("Disease hierarchy at a glance")
         st.markdown(
             f'<p class="small-note" style="color:{THEME["muted"]}">Click a wedge to zoom in. '
-            'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
+            'Inner ring: disease family · middle ring: indication '
+            '(or, for the basket branch, the clinical archetype — '
+            'Pan-rheum / Rheum dual / Rheum+neuro / Rheum+glomerular / '
+            'Neuro multi / Generic) · outer ring: antigen target. '
             'Basket / multi-disease trials form their own branch.</p>',
             unsafe_allow_html=True,
         )
@@ -2723,11 +2806,17 @@ with tab_overview:
         if _neuro_mask.any():
             _sb.loc[_neuro_mask, "_L2"] = _sub_text[_neuro_mask].apply(_neuro_disease)
 
-        # Override 3 (highest priority): basket trials always get the
-        # Basket/Multidisease label regardless of the prior overrides.
+        # Override 3 (highest priority): basket trials get a clinical-
+        # archetype L2 label (Pan-rheum / Rheum dual / Rheum+neuro /
+        # Rheum+glomerular / Neuro multi / Other multi / Generic basket)
+        # so the inner ring (L1=Basket/Multidisease) and middle ring (L2)
+        # don't repeat the same label. Each basket trial maps to exactly
+        # ONE archetype so trial counts stay correct.
         _basket_mask = _sb["TrialDesign"].eq("Basket/Multidisease")
         if _basket_mask.any():
-            _sb.loc[_basket_mask, "_L2"] = "Basket/Multidisease"
+            _sb.loc[_basket_mask, "_L2"] = (
+                _sb[_basket_mask].apply(_basket_archetype, axis=1)
+            )
 
         # L3: target with the unclear bucket folded.
         _sb["_L3"] = _fold_unclear_target(_sb["TargetCategory"])
@@ -2750,22 +2839,44 @@ with tab_overview:
                 }]))
         _sb_counts = pd.concat(_simplified, ignore_index=True) if _simplified else _sb_counts
 
+        # Iterate families in _FAMILY_ORDER (rheum triad first: Connective
+        # tissue → Inflammatory arthritis → Vasculitis, then Neurologic
+        # autoimmune → Other autoimmune → Basket → Other/Unclassified).
+        # Plotly's sunburst lays children out in input order, so the
+        # classical-rheumatology categories form a contiguous arc rather
+        # than being separated alphabetically.
+        _present_families = [
+            f for f in _FAMILY_ORDER
+            if f in set(_sb_counts["_L1"].unique())
+        ]
         _ids, _labels, _parents, _values, _colors = [], [], [], [], []
-        for _fam, _fd in _sb_counts.groupby("_L1"):
+        for _fam in _present_families:
+            _fd = _sb_counts[_sb_counts["_L1"] == _fam]
             _fam_color = _FAMILY_COLORS.get(_fam, "#64748b")
             _ids.append(_fam); _labels.append(_fam); _parents.append("")
             _values.append(int(_fd["Trials"].sum()))
             _colors.append(_fam_color)
-            for _dis, _dd in _fd.groupby("_L2"):
+            # Within each family, order L2 wedges by trial count (busiest
+            # indication first) so the radial layout is information-dense.
+            _l2_totals = (
+                _fd.groupby("_L2")["Trials"].sum().sort_values(ascending=False)
+            )
+            for _dis in _l2_totals.index:
+                _dd = _fd[_fd["_L2"] == _dis]
                 # Inside the Other autoimmune family the L2 label is a
                 # sub-family — give it its own colour (neuro = violet,
-                # everything else = slate variants). All children inherit
-                # the L2 colour so the outer ring reads as one branch.
-                _l2_color = (
-                    _SUBFAMILY_COLORS.get(_dis, _fam_color)
-                    if _fam == "Other autoimmune"
-                    else _fam_color
-                )
+                # everything else = slate variants). Inside the
+                # Basket/Multidisease family the L2 label is a clinical
+                # archetype (Pan-rheum / Rheum dual / Generic basket /
+                # …) — slate-tone gradient ordered by archetype density.
+                # All children inherit the L2 colour so the outer ring
+                # reads as one branch.
+                if _fam == "Other autoimmune":
+                    _l2_color = _SUBFAMILY_COLORS.get(_dis, _fam_color)
+                elif _fam == "Basket/Multidisease":
+                    _l2_color = _BASKET_ARCHETYPE_COLORS.get(_dis, _fam_color)
+                else:
+                    _l2_color = _fam_color
                 _dis_id = f"{_fam}/{_dis}"
                 _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
                 _values.append(int(_dd["Trials"].sum()))
@@ -3777,16 +3888,52 @@ with tab_deepdive:
 
     def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
         """Explode trials with pipe-joined DiseaseEntities into one row per
-        entity, preserving the rest of the trial record. Used by the
-        by-disease landscape so a basket trial appears once under every
-        entity it enrols rather than only under its primary."""
+        entity, preserving the rest of the trial record.
+
+        For trials whose primary entity is the uninformative
+        "Other immune-mediated" or "cGVHD" bucket, the row is split by
+        the same sub-family / neuro-disease classifier the sunburst uses,
+        so the by-disease landscape surfaces "Myasthenia / MS / NMOSD /
+        Pemphigus / Cytopenias / Endocrine autoimmune / …" rather than a
+        single opaque "Other immune-mediated" line. Same record can fan
+        out into multiple rows; users asking "what's IN that bucket?"
+        get a real answer."""
         rows = []
         for _, r in df_in.iterrows():
-            ents = [e.strip() for e in str(r.get("DiseaseEntities", "")).split("|") if e.strip()]
+            rd = r.to_dict()
+            ents = [e.strip() for e in str(rd.get("DiseaseEntities", "")).split("|") if e.strip()]
             if not ents:
-                ents = [str(r.get("DiseaseEntity", "Unclassified"))]
+                ents = [str(rd.get("DiseaseEntity", "Unclassified"))]
+            # Promote uninformative bucket entries to their sub-family /
+            # neuro-disease label using the same helpers the sunburst L2
+            # consumes. Keeps the landscape table consistent with the
+            # radial figure.
+            promoted: list[str] = []
+            text = (
+                str(rd.get("Conditions", "") or "") + " "
+                + str(rd.get("BriefTitle", "") or "")
+            )
             for e in ents:
-                rr = r.to_dict()
+                if e == "Other immune-mediated":
+                    sub = _system_subfamily(text)
+                    if sub == "Neurologic autoimmune":
+                        # Drill one level further into the specific
+                        # neurologic disease so the landscape doesn't
+                        # collapse 30+ neuro trials into one wedge.
+                        promoted.append(_neuro_disease(text))
+                    elif sub != "Other autoimmune":
+                        promoted.append(sub)
+                    else:
+                        promoted.append("Other autoimmune (unclassified)")
+                elif e == "cGVHD":
+                    # cGVHD is a strict-map entity, but the by-disease
+                    # landscape benefits from preserving the GVHD label
+                    # as-is rather than rolling into Other autoimmune.
+                    promoted.append("cGVHD")
+                else:
+                    promoted.append(e)
+            for e in promoted:
+                rr = dict(rd)
                 rr["_Disease"] = e
                 rows.append(rr)
         return pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -4681,6 +4828,7 @@ with tab_pub:
             paper_bgcolor="white", plot_bgcolor="white",
             font=PUB_FONT,
             margin=dict(l=0, r=0, t=10, b=0),
+            height=400,
             geo=dict(
                 bgcolor="white", lakecolor="#ddeeff", landcolor="#eeeeee",
                 showframe=False,
@@ -4690,14 +4838,13 @@ with tab_pub:
             coloraxis_colorbar=dict(
                 title=dict(text="Trials", font=dict(size=11, color=_AX_COLOR)),
                 tickfont=dict(size=10, color=_AX_COLOR),
-                thickness=14, len=0.55, outlinewidth=0.5, outlinecolor="#aaaaaa",
+                thickness=12, len=0.55, outlinewidth=0.5, outlinecolor="#aaaaaa",
             ),
         )
-        st.plotly_chart(fig3_map, width='stretch', config=PUB_EXPORT)
 
         top10 = geo_counts.head(10).sort_values("Trials", ascending=True)
         fig3_bar = px.bar(
-            top10, x="Trials", y="Country", orientation="h", height=380,
+            top10, x="Trials", y="Country", orientation="h", height=400,
             color_discrete_sequence=[NEJM_BLUE], template="plotly_white",
             text="Trials",
         )
@@ -4709,19 +4856,31 @@ with tab_pub:
         fig3_bar.update_layout(
             **PUB_BASE,
             xaxis_title="Number of trials", yaxis_title=None, showlegend=False,
-            margin=dict(l=100, r=56, t=24, b=56),
+            margin=dict(l=90, r=44, t=24, b=44),
             yaxis=_H_YAXIS,
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 1rem; '
-            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">3b — Top 10 countries by number of trials</strong>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(fig3_bar, width='stretch', config=PUB_EXPORT)
+        # Side-by-side: map carries the global pattern, bar names the
+        # leading countries — same vertical real estate as one stacked
+        # figure used to consume.
+        _f3_map_col, _f3_bar_col = st.columns([0.60, 0.40])
+        with _f3_map_col:
+            st.markdown(
+                '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
+                '<strong style="color: #0b1220;">3a — Choropleth of trial counts by country</strong>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig3_map, width='stretch', config=PUB_EXPORT)
+        with _f3_bar_col:
+            st.markdown(
+                '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
+                '<strong style="color: #0b1220;">3b — Top 10 countries</strong>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig3_bar, width='stretch', config=PUB_EXPORT)
 
         total_geo = geo_counts["Trials"].sum()
         top3_geo = geo_counts.head(3)
@@ -4770,15 +4929,8 @@ with tab_pub:
         _ENROLL_CAP = 1000
         _over_cap = df_enroll_known[df_enroll_known["EnrollmentCount"] > _ENROLL_CAP]
         df_enroll_plot = df_enroll_known[df_enroll_known["EnrollmentCount"] <= _ENROLL_CAP]
-        st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 1rem; '
-            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">4a — Distribution of planned enrollment</strong>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
         fig4a = px.histogram(
-            df_enroll_plot, x="EnrollmentCount", nbins=40, height=400,
+            df_enroll_plot, x="EnrollmentCount", nbins=40, height=360,
             color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
             labels={"EnrollmentCount": "Planned enrollment (patients)"},
         )
@@ -4799,16 +4951,6 @@ with tab_pub:
                 font=dict(size=10, color=NEJM_RED), xanchor="left",
             )],
         )
-        st.plotly_chart(fig4a, width='stretch', config=PUB_EXPORT)
-        if len(_over_cap) > 0:
-            st.markdown(
-                f'<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
-                f'{len(_over_cap)} trial(s) with planned enrollment &gt; {_ENROLL_CAP:,} '
-                f'excluded from this panel for readability; '
-                f'included in all summary statistics above.'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
 
         # 4b — Median enrollment by phase
         _phase_enroll = (
@@ -4826,15 +4968,8 @@ with tab_pub:
             lambda r: f"{r['Median']} (n={r['N']})", axis=1
         )
 
-        st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 1rem; '
-            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">4b — Median enrollment by trial phase</strong>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
         fig4b = px.bar(
-            _phase_enroll, x="Phase", y="Median", height=380,
+            _phase_enroll, x="Phase", y="Median", height=360,
             color_discrete_sequence=[NEJM_AMBER], template="plotly_white",
             text="label",
             error_y=_phase_enroll["Q3"] - _phase_enroll["Median"],
@@ -4852,13 +4987,44 @@ with tab_pub:
             yaxis_title="Median planned enrollment (patients)",
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig4b, width='stretch', config=PUB_EXPORT)
-        st.markdown(
-            '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
-            'Whiskers = IQR (Q1–Q3).'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+
+        # Side-by-side: distribution (4a) on the left, phase-stratified
+        # medians (4b) on the right. Same total vertical space as either
+        # panel alone used to take when stacked.
+        _f4a_col, _f4b_col = st.columns(2)
+        with _f4a_col:
+            st.markdown(
+                '<div class="pub-fig-sub" style="margin-top: 1rem; '
+                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+                '<strong style="color: #0b1220;">4a — Distribution of planned enrollment</strong>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig4a, width='stretch', config=PUB_EXPORT)
+            if len(_over_cap) > 0:
+                st.markdown(
+                    f'<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
+                    f'{len(_over_cap)} trial(s) with planned enrollment &gt; {_ENROLL_CAP:,} '
+                    f'excluded from this panel for readability; '
+                    f'included in all summary statistics above.'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        with _f4b_col:
+            st.markdown(
+                '<div class="pub-fig-sub" style="margin-top: 1rem; '
+                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
+                '<strong style="color: #0b1220;">4b — Median enrollment by trial phase</strong>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig4b, width='stretch', config=PUB_EXPORT)
+            st.markdown(
+                '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
+                'Whiskers = IQR (Q1–Q3).'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
         # (Former 4c — disease-level enrollment — has been merged into Fig 5.)
 
@@ -5519,22 +5685,32 @@ with tab_pub:
         def _phase_max_label(series: pd.Series) -> str:
             """Most-advanced phase reached among a Series of PhaseOrdered
             values, expressed as a short label ('P1' / 'P1/2' / 'P2' /
-            'P3'). Falls back to '—' on no data."""
-            phase_strs = [str(p) for p in series.dropna()]
+            'P3'). Returns '' when no phase signal is available — caller
+            can suppress the suffix in the annotation rather than render
+            'Unknown'."""
+            phase_strs = [
+                str(p) for p in series.dropna()
+                if str(p).strip() and str(p).strip().lower() != "unknown"
+            ]
             if not phase_strs:
-                return "—"
+                return ""
             try:
                 cat = pd.Categorical(phase_strs, categories=PHASE_ORDER, ordered=True)
                 if len(cat) == 0:
-                    return "—"
-                full = PHASE_LABELS.get(str(cat.max()), str(cat.max()))
+                    return ""
+                top = str(cat.max())
+                if not top or top.lower() == "unknown":
+                    return ""
+                full = PHASE_LABELS.get(top, top)
+                if not full or str(full).lower() == "unknown":
+                    return ""
                 return (
                     full.replace("Phase ", "P")
                         .replace("Early Phase ", "EP")
                         .replace("/Phase ", "/")
                 )
             except Exception:
-                return "—"
+                return ""
 
         # Build the matrix: count + furthest phase per (antigen, modality).
         # Returning a scalar from the lambda keeps pandas happy when the
@@ -5582,6 +5758,9 @@ with tab_pub:
                 "Trials: %{customdata}<br>"
                 "<extra></extra>"
             ),
+            # Suppress hover on empty / unstudied cells — without this
+            # plotly shows "Trials: NaN" which reads as broken.
+            hoverongaps=False,
         ))
         fig8.update_layout(
             template="plotly_white",
@@ -5592,17 +5771,22 @@ with tab_pub:
             xaxis=dict(side="bottom", tickangle=-30),
             font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
         )
-        # Annotate populated cells with "n · P-label"
+        # Annotate populated cells: count, plus "·P-label" only when a
+        # real phase signal exists. Skipping the suffix on phase-empty
+        # cells keeps the figure clean — most phase-empty rows are
+        # CT.gov records with no Phase field, and rendering "Unknown"
+        # text in every such cell looks unfinished.
         for i, modality in enumerate(_trials_pivot.index):
             for j, antigen in enumerate(_trials_pivot.columns):
                 n = _trials_pivot.iloc[i, j]
                 if pd.notna(n) and n > 0:
                     n_int = int(n)
-                    phase = str(_phase_pivot.iloc[i, j] or "—")
+                    phase = str(_phase_pivot.iloc[i, j] or "").strip()
+                    suffix = f"·{phase}" if phase else ""
                     color = "#ffffff" if n_int >= 25 else THEME["text"]
                     fig8.add_annotation(
                         x=antigen, y=modality,
-                        text=f"<b>{n_int}</b>·{phase}",
+                        text=f"<b>{n_int}</b>{suffix}",
                         showarrow=False,
                         font=dict(size=10, color=color, family=FONT_FAMILY),
                     )
