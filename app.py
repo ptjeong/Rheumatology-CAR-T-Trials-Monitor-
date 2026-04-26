@@ -17,12 +17,23 @@ from pipeline import (
     save_snapshot,
     BASE_URL,
     _normalize_text,
-    _term_in_text,
-    _row_text,
-    _DISEASE_TERMS,
-    compute_confidence_factors,
-    compute_classification_rationale,
 )
+# compute_confidence_factors and compute_classification_rationale shipped
+# in commits 9a15cda + 4cce635. Wrap the import so a stale deploy (e.g.
+# Streamlit Cloud running an older pipeline.py from before these commits
+# landed) degrades the rationale UI to a no-op instead of crashing the
+# whole app at import time. The UI helpers below have try/except around
+# every call site, so a missing function bottoms out at a silent skip.
+try:
+    from pipeline import compute_confidence_factors  # type: ignore[attr-defined]
+except ImportError:
+    def compute_confidence_factors(*_args, **_kwargs):
+        return {"score": 0.0, "level": "—", "factors": {}, "drivers": []}
+try:
+    from pipeline import compute_classification_rationale  # type: ignore[attr-defined]
+except ImportError:
+    def compute_classification_rationale(_row):
+        return {}
 from config import (
     DISEASE_ENTITIES,
     EXCLUDED_INDICATION_TERMS,
