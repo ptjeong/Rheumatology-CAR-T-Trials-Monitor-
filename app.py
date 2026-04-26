@@ -17,6 +17,9 @@ from pipeline import (
     save_snapshot,
     BASE_URL,
     _normalize_text,
+    _term_in_text,
+    _row_text,
+    _DISEASE_TERMS,
 )
 from config import (
     DISEASE_ENTITIES,
@@ -349,6 +352,106 @@ def _disease_family(
         if _system_subfamily(text) == "Neurologic autoimmune":
             return "Neurologic autoimmune"
     return _DISEASE_FAMILY_MAP.get(str(entity), "Other / Unclassified")
+
+
+# ── Per-trial classification rationale (Phase 2 of REVIEW.md) ────────────────
+# Plain-language explanations attached to each TargetSource / ProductTypeSource
+# value so the audit trail shown in the trial-detail panel is self-explanatory
+# without the reader having to open pipeline.py.
+_TARGET_SOURCE_RATIONALE = {
+    "explicit_marker": "Antigen named directly in the trial text (e.g. 'CD19', 'BCMA' as a CAR target).",
+    "named_product":   "Resolved via a named-product alias (e.g. 'KYV-101' → CD19).",
+    "car_core_fallback": "Generic 'CAR-T' language with no specific antigen disclosed.",
+    "unknown":         "No CAR-T construct or antigen signal found.",
+    "legacy_snapshot": "Inherited from an older snapshot taken before per-source attribution was added.",
+}
+_PTYPE_SOURCE_RATIONALE = {
+    "explicit_autologous":              "Trial text explicitly says autologous (e.g. 'autologous CD19 CAR-T').",
+    "explicit_allogeneic":              "Trial text explicitly says allogeneic / off-the-shelf / donor-derived.",
+    "explicit_in_vivo_title":           "Title explicitly says 'in vivo' / 'in-vivo CAR-T'.",
+    "explicit_in_vivo_text":            "Brief summary or interventions explicitly describe in-vivo CAR-T (e.g. mRNA-LNP delivery).",
+    "named_product":                    "Resolved via a named-product alias (e.g. 'NKX019' → Allogeneic).",
+    "weak_allogeneic_marker":           "Weak allogeneic marker (donor lymphocyte, off-the-shelf hint) without an explicit autologous statement.",
+    "default_autologous_no_allo_markers": "Default = Autologous: a confirmed CAR-T target is present and no allogeneic markers were found.",
+    "no_signal":                        "No product-type signal in the trial text.",
+    "legacy_snapshot":                  "Inherited from an older snapshot taken before per-source attribution was added.",
+}
+_CONFIDENCE_RATIONALE = {
+    "high":   "All three classification axes resolved cleanly (explicit target + explicit product type + recognised disease, or an LLM override is in force).",
+    "medium": "One axis is ambiguous (target unclear OR product type defaulted to Autologous without explicit markers).",
+    "low":    "Disease is Unclassified, or both target and product type are ambiguous — investigate before citing this row.",
+}
+
+
+def _disease_explainer(rec: dict) -> None:
+    """Show which terms in the strict disease vocabulary matched, and which
+    fallback path was taken when none did."""
+    text = _row_text(rec)
+    matches = []
+    for entity, terms in _DISEASE_TERMS.items():
+        hit_terms = [t for t in terms if _term_in_text(text, t)]
+        if hit_terms:
+            matches.append((entity, hit_terms))
+    primary = rec.get("DiseaseEntity") or "Unclassified"
+    design = rec.get("TrialDesign") or "Single disease"
+    st.markdown(f"**Disease →** `{primary}` ({design})")
+    if rec.get("LLMOverride"):
+        st.caption(
+            "Source: per-trial LLM override (see `llm_overrides.json`). "
+            "Strict-vocabulary matching was bypassed."
+        )
+    elif matches:
+        n_systemic = sum(1 for e, _ in matches if e in (
+            "SLE", "SSc", "Sjogren", "CTD_other", "IIM", "AAV", "RA",
+            "IgG4-RD", "Behcet", "cGVHD",
+        ))
+        if n_systemic >= 2:
+            st.caption(f"Multi-systemic match (≥2 systemic diseases) → promoted to Basket/Multidisease.")
+        else:
+            st.caption("Strict-vocabulary match (high precision):")
+        for entity, hit_terms in matches:
+            st.markdown(
+                f"- `{entity}` ← matched: " +
+                ", ".join(f"`{h}`" for h in hit_terms[:6])
+                + (f" *(+{len(hit_terms) - 6} more)*" if len(hit_terms) > 6 else "")
+            )
+    elif primary == "Other immune-mediated":
+        st.caption("No strict-vocabulary match; matched the OTHER_IMMUNE_MEDIATED_TERMS fallback (e.g. neurologic / dermatologic / endocrine autoimmune).")
+    elif primary == "Basket/Multidisease":
+        st.caption("No strict-vocabulary match; matched a generic basket phrase ('B-cell mediated autoimmune disease', 'systemic autoimmune disease', etc.).")
+    else:
+        st.caption("No vocabulary match — landed in 'Unclassified'. Curation candidate.")
+
+
+def _target_explainer(rec: dict) -> None:
+    target = rec.get("TargetCategory") or "Unknown"
+    src = rec.get("TargetSource") or "—"
+    st.markdown(f"**Target →** `{target}`  *(source: `{src}`)*")
+    rationale = _TARGET_SOURCE_RATIONALE.get(src)
+    if rationale:
+        st.caption(rationale)
+
+
+def _product_explainer(rec: dict) -> None:
+    ptype = rec.get("ProductType") or "Unclear"
+    src = rec.get("ProductTypeSource") or "—"
+    st.markdown(f"**Product type →** `{ptype}`  *(source: `{src}`)*")
+    rationale = _PTYPE_SOURCE_RATIONALE.get(src)
+    if rationale:
+        st.caption(rationale)
+    if rec.get("ProductName"):
+        st.caption(f"Recognised named product: **{rec['ProductName']}**")
+
+
+def _confidence_explainer(rec: dict) -> None:
+    conf = rec.get("ClassificationConfidence") or "—"
+    st.markdown(f"**Confidence →** `{conf}`")
+    rationale = _CONFIDENCE_RATIONALE.get(str(conf).lower())
+    if rationale:
+        st.caption(rationale)
+    if rec.get("LLMOverride"):
+        st.caption("LLM override is in force for this trial — see `llm_overrides.json`.")
+
 
 THEME = {
     "bg":      "#ffffff",            # pure white canvas
@@ -2668,6 +2771,21 @@ with tab_data:
                 if rec.get("BriefSummary"):
                     st.markdown("**Brief summary:**")
                     st.write(str(rec["BriefSummary"]))
+
+                # ── Classification rationale (Phase 2 of REVIEW.md) ─────────
+                # Surfaces WHICH terms drove each axis's classification so a
+                # clinical reader can audit individual trials without reading
+                # the pipeline source. Re-runs the classifier on the row to
+                # capture matched terms; cheap (<1ms per row).
+                with st.expander("How was this classified?"):
+                    _rec_dict = rec.to_dict()
+                    _disease_explainer(_rec_dict)
+                    st.markdown("---")
+                    _target_explainer(_rec_dict)
+                    st.markdown("---")
+                    _product_explainer(_rec_dict)
+                    st.markdown("---")
+                    _confidence_explainer(_rec_dict)
         else:
             st.info("Select a row in the table above to see the full trial record and classification reasoning.")
 
