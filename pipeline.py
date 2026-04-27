@@ -276,6 +276,98 @@ _NON_RHEUM_BASKET_TEXT_SIGNALS = (
 )
 
 
+# OIM-cluster labels that the pipeline emits as DiseaseEntities for
+# neuro-autoimmune baskets (`_classify_disease` adds these for basket
+# trials when the conditions/title text matches the cluster terms).
+# Used by `is_neuro_basket` to detect baskets whose constituents are
+# exclusively neuro — those land in the Neurologic autoimmune family
+# rather than the generic Basket/Multidisease bucket.
+_NEURO_OIM_CLUSTER_ENTITIES = {
+    "MS", "NMOSD", "CIDP", "MOGAD", "AIE", "Myasthenia", "Stiff_person",
+}
+
+# Text signals for neuro autoimmune diseases — the same set used by
+# `_NON_RHEUM_BASKET_TEXT_SIGNALS` above, exposed here for the
+# neuro-basket detector.
+_NEURO_BASKET_TEXT_SIGNALS = (
+    "multiple sclerosis", "myasthenia", "neuromyelitis", "nmosd",
+    "demyelinating", "cidp", "encephalitis", "mogad", "stiff person",
+)
+
+# Text signals from OTHER non-neuro families — if any of these appear
+# in conditions/title, the basket is mixed-class and must NOT land in
+# the neuro family. Mirrors `_NON_RHEUM_BASKET_TEXT_SIGNALS` minus the
+# neuro keywords.
+_NON_NEURO_BASKET_TEXT_SIGNALS = (
+    # Rheum (CTD / IA / Vasculitis)
+    "lupus", "systemic sclerosis", "sjogren", "rheumatoid arthritis",
+    "inflammatory myopath", "vasculitis", "anca-associated",
+    "igg4", "behcet", "mixed connective", "antiphospholipid",
+    # Glomerular / renal
+    "iga nephropathy", "igan ", "membranous nephropathy",
+    "fsgs", "focal segmental glomer", "minimal change",
+    # GVHD
+    "graft-versus-host", "graft versus host", "gvhd",
+    # Cytopenias
+    "hemolytic anemia", "aiha", "immune thrombocytopen", " itp ",
+    "evans syndrome", "aplastic anemia",
+    # Dermatologic
+    "pemphigus", "pemphigoid", "hidradenitis",
+    # Endocrine
+    "type 1 diabetes", "t1dm", "graves", "hashimoto",
+)
+
+
+def is_neuro_basket(
+    entities_str: str | None,
+    conditions: str | None = None,
+    brief_title: str | None = None,
+) -> bool:
+    """Return True iff a basket trial enrols ≥2 distinct neuro autoimmune
+    diseases AND no entities or text signals from any other family.
+
+    Detection sources (either is sufficient):
+      1. DiseaseEntities column lists ≥2 of {MS, NMOSD, CIDP, MOGAD, AIE,
+         Myasthenia, Stiff_person} (the OIM-cluster labels emitted by
+         `_classify_disease`).
+      2. Conditions/title text matches ≥2 distinct neuro disease keywords.
+
+    Disqualifiers (any is sufficient):
+      - DiseaseEntities lists ANY non-neuro classifier-emitted entity
+        (e.g., SLE, RA, cGVHD, IgAN — these mean the basket is mixed).
+      - Conditions/title text matches ANY rheum / glomerular / GVHD /
+        cytopenia / dermatologic / endocrine keyword.
+
+    Used by app.py's `_disease_family()` to route neuro-only baskets to
+    the Neurologic autoimmune family wedge (per round-9 user spec) so
+    they cluster with single-disease neuro trials rather than sitting
+    under the slate generic-basket bucket.
+    """
+    ents = {
+        e.strip()
+        for e in str(entities_str or "").split("|")
+        if e.strip()
+        and e.strip() not in (
+            "Basket/Multidisease", "Unclassified", "Other immune-mediated",
+        )
+    }
+    # Any non-neuro entity disqualifies (rheum / glomerular / etc.)
+    non_neuro_ents = ents - _NEURO_OIM_CLUSTER_ENTITIES
+    if non_neuro_ents:
+        return False
+    text = f"{conditions or ''} {brief_title or ''}".lower()
+    # Any non-neuro text signal disqualifies — defensive against
+    # classifier misses that left a non-neuro constituent un-flagged.
+    if any(kw in text for kw in _NON_NEURO_BASKET_TEXT_SIGNALS):
+        return False
+    # Need ≥2 distinct neuro signals (entities OR text).
+    n_neuro_ents = len(ents & _NEURO_OIM_CLUSTER_ENTITIES)
+    if n_neuro_ents >= 2:
+        return True
+    n_neuro_text_hits = sum(1 for kw in _NEURO_BASKET_TEXT_SIGNALS if kw in text)
+    return n_neuro_text_hits >= 2
+
+
 def is_classical_rheum_basket(
     entities_str: str | None,
     conditions: str | None = None,

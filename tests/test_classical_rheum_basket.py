@@ -27,7 +27,9 @@ import pytest
 
 from pipeline import (
     _CLASSICAL_RHEUM_ENTITIES,
+    _NEURO_OIM_CLUSTER_ENTITIES,
     is_classical_rheum_basket,
+    is_neuro_basket,
 )
 
 
@@ -164,3 +166,103 @@ class TestEdgeCases:
         # Sentinel "Basket/Multidisease" listed alongside real entities —
         # should be stripped, leaving SLE+RA which qualifies.
         assert is_classical_rheum_basket("SLE|RA|Basket/Multidisease")
+
+
+# ---------------------------------------------------------------------------
+# Neuro-basket detector tests (round-9 user spec: neuro-only baskets roll
+# into the Neurologic autoimmune family wedge rather than the slate
+# generic-basket bucket).
+# ---------------------------------------------------------------------------
+
+
+class TestNeuroBasketEntitySet:
+    """Lock the canonical neuro OIM-cluster set."""
+
+    def test_set_contains_canonical_neuro_diseases(self):
+        assert {"MS", "NMOSD", "CIDP", "MOGAD", "AIE",
+                "Myasthenia", "Stiff_person"} == _NEURO_OIM_CLUSTER_ENTITIES
+
+    def test_no_overlap_with_classical_rheum(self):
+        """Neuro and rheum entity sets must be disjoint — same trial
+        can't qualify as both."""
+        assert _NEURO_OIM_CLUSTER_ENTITIES.isdisjoint(_CLASSICAL_RHEUM_ENTITIES)
+
+
+class TestNeuroBasketQualifies:
+    """Trials that SHOULD be flagged as neuro-only baskets."""
+
+    def test_two_neuro_entities_in_pipe(self):
+        # MS + NMOSD — both neuro, qualifies
+        assert is_neuro_basket("MS|NMOSD")
+
+    def test_three_neuro_entities(self):
+        assert is_neuro_basket("MS|NMOSD|CIDP")
+
+    def test_two_text_keyword_hits(self):
+        # Entity column empty / sentinel-only; qualifies via text alone
+        assert is_neuro_basket(
+            "",
+            conditions="multiple sclerosis; neuromyelitis optica",
+            brief_title="CD19 CAR-T for refractory neuro autoimmune disease",
+        )
+
+    def test_text_with_clean_entities(self):
+        # Matched OIM cluster + clean text
+        assert is_neuro_basket(
+            "MS|NMOSD",
+            conditions="Multiple sclerosis (MS); NMOSD",
+            brief_title="Phase 1 CAR-T in neuro autoimmune basket",
+        )
+
+
+class TestNeuroBasketDoesNotQualify:
+    """Trials that should NOT be flagged as neuro baskets."""
+
+    def test_single_neuro_entity(self):
+        # Only 1 neuro entity → not a neuro spread
+        assert not is_neuro_basket("MS")
+
+    def test_empty(self):
+        assert not is_neuro_basket("")
+        assert not is_neuro_basket(None)
+
+    def test_neuro_plus_rheum_entity(self):
+        # MS + SLE — mixed-class, NOT neuro-only
+        assert not is_neuro_basket("MS|SLE")
+
+    def test_neuro_plus_glomerular_entity(self):
+        # MS + IgAN — IgAN disqualifies
+        assert not is_neuro_basket("MS|IgAN")
+
+    def test_neuro_text_with_rheum_text_disqualifies(self):
+        # Text mentions both MS and SLE → mixed
+        assert not is_neuro_basket(
+            "MS|NMOSD",
+            conditions="Multiple sclerosis; NMOSD; systemic lupus erythematosus",
+        )
+
+    def test_neuro_text_with_glomerular_text_disqualifies(self):
+        assert not is_neuro_basket(
+            "MS|NMOSD",
+            conditions="MS; NMOSD; iga nephropathy",
+        )
+
+    def test_neuro_text_with_gvhd_disqualifies(self):
+        assert not is_neuro_basket(
+            "",
+            brief_title="CAR-T in multiple sclerosis, NMOSD, and graft-versus-host disease",
+        )
+
+
+class TestNeuroBasketEdgeCases:
+
+    def test_one_text_hit_alone_does_not_qualify(self):
+        # Single neuro keyword → only 1 distinct neuro signal → fails
+        assert not is_neuro_basket(
+            "",
+            conditions="multiple sclerosis",
+        )
+
+    def test_classifier_emitted_neuro_entities_count(self):
+        # Two distinct OIM cluster entities (no text) → qualifies
+        assert is_neuro_basket("CIDP|MOGAD")
