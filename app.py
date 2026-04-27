@@ -3138,20 +3138,17 @@ with tab_overview:
             sort=False,
         ))
         _fig_sb.update_layout(
-            # Sized down from 560 → 360 (~60%) per user feedback that the
-            # sunburst was dominating the dashboard hero. Centred in a
-            # 60%-wide column below so the figure reads as a focused
-            # diagram, not a page-wide poster.
-            height=360, margin=dict(l=4, r=4, t=4, b=4),
+            # Restored to original 560 px tall, full width, per user
+            # feedback after the 60% downsize ("increase size of sunburst
+            # diagram to original size"). The hero figure is meant to
+            # dominate the Overview tab — it's the single most-cited
+            # visual in the dashboard.
+            height=560, margin=dict(l=8, r=8, t=8, b=8),
             paper_bgcolor="white", plot_bgcolor="white",
-            font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-            uniformtext=dict(minsize=9, mode="hide"),
+            font=dict(family=FONT_FAMILY, size=12, color=THEME["text"]),
+            uniformtext=dict(minsize=10, mode="hide"),
         )
-        # Centre the sunburst in a 60%-wide slot so it stays a focal
-        # diagram rather than stretching across the full Streamlit page.
-        _sb_l, _sb_c, _sb_r = st.columns([0.2, 0.6, 0.2])
-        with _sb_c:
-            st.plotly_chart(_fig_sb, width='stretch')
+        st.plotly_chart(_fig_sb, width='stretch')
 
         # Family headline row
         _fam_counts = _sb["_L1"].value_counts().rename_axis("Family").reset_index(name="Trials")

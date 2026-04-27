@@ -506,6 +506,36 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
 
         return _normalize_disease_result(all_matched, "Single disease", all_matched[0])
 
+    # Pure-OIM basket detection (no rheum anchor). The block above only runs
+    # when at least one strict rheum disease matched, which means trials
+    # spanning multiple neuro / glomerular / etc. autoimmune diseases (with
+    # NO rheum constituent) silently fell through to the "Other immune-
+    # mediated" Single-disease path below. Live evidence on the 2026-04-25
+    # snapshot: 8 trials with conditions like "Multiple sclerosis | NMOSD |
+    # Myasthenia | Encephalitis | Stiff Person Syndrome" were classified as
+    # Single + Other-immune-mediated — they should be Basket trials, and
+    # `is_neuro_basket()` + `_disease_family()` should then route them to
+    # the Neurologic autoimmune family wedge.
+    distinct_oim_clusters: set[str] = set()
+    for chunk in condition_chunks:
+        for cluster_label, cluster_terms in _OIM_CLUSTERS.items():
+            if any(_term_in_text(chunk, t) for t in cluster_terms):
+                distinct_oim_clusters.add(cluster_label)
+                break  # at most one OIM cluster per chunk
+    # Also scan the full title/conditions text for clusters that weren't
+    # captured by a chunk-level match (some trials list diseases in the
+    # brief title or as a single un-pipe-split condition string).
+    for cluster_label, cluster_terms in _OIM_CLUSTERS.items():
+        if cluster_label in distinct_oim_clusters:
+            continue
+        if any(_term_in_text(full_text, t) for t in cluster_terms):
+            distinct_oim_clusters.add(cluster_label)
+    if len(distinct_oim_clusters) >= 2:
+        cluster_entities = sorted(distinct_oim_clusters)
+        return _normalize_disease_result(
+            cluster_entities, "Basket/Multidisease", "Basket/Multidisease",
+        )
+
     if _contains_any(full_text, OTHER_IMMUNE_MEDIATED_TERMS):
         return _normalize_disease_result(["Other immune-mediated"], "Single disease", "Other immune-mediated")
 
