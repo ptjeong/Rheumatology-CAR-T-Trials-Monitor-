@@ -2,7 +2,7 @@
 
 Companion app to the main Rheumatology-CAR-T-Trials-Monitor dashboard.
 Two clinical raters (PJ + collaborator) independently classify a locked
-random sample of 100 trials on five axes; Cohen's κ between raters
+random sample of 100 trials on six axes; Cohen's κ between raters
 is the primary outcome (with bootstrap 95% CI), agreement with
 the pipeline is a secondary outcome.
 
@@ -11,8 +11,10 @@ Methodology (locked, see docs/methods.md § Inter-rater κ):
     pre-registered in commit before raters enrolled)
   - 100 trials stratified by DiseaseEntity (≥3 per entity that has
     ≥5 trials in the source snapshot)
-  - Five axes: DiseaseEntity, TargetCategory, ProductType, TrialDesign,
-    SponsorType (rheum is single-branch — no Branch / DiseaseCategory)
+  - Six axes: DiseaseFamily (the rheum analogue of onc's Branch),
+    DiseaseEntity, TrialDesign, TargetCategory, ProductType, SponsorType.
+    DiseaseFamily was added in round-9 cross-app sync (2026-04-27);
+    earlier rater data may carry only the original 5 axes.
   - "Unsure" is a first-class option on every axis (don't force a
     guess — better to mark unscorable than fabricate)
   - Pipeline labels are HIDDEN during rating (no anchoring)
@@ -60,7 +62,7 @@ sys.path.insert(0, str(REPO_ROOT))
 # ---------------------------------------------------------------------------
 
 SCHEMA_VERSION = "1.0"
-APP_VERSION = "0.5.1"  # bump when rater UX changes
+APP_VERSION = "0.6.0"  # bump when rater UX changes (round-9: 6th axis + 3-row layout)
 SAMPLE_PATH = APP_DIR / "sample_v1.json"
 RESPONSES_DIR = APP_DIR / "responses"
 LOCAL_BACKUP_DIR = Path("/tmp/validation_responses")
@@ -68,7 +70,20 @@ LOCAL_BACKUP_DIR.mkdir(exist_ok=True, parents=True)
 
 # Axis options — kept in sync with config.py / app.py's _FLAG_AXIS_OPTIONS.
 # "Unsure" is appended to every axis as a first-class option.
+#
+# DiseaseFamily was added in round-9 cross-app sync (mirroring onc's
+# Branch axis). Rheum uses the L1 family layer as the analogue: it gives
+# raters a coarse, low-controversy first call ("is this CTD vs IA vs
+# Vasculitis vs neuro vs other autoimmune vs basket?") before the
+# disease-entity disambiguation. Keeping the family options to a tight
+# 6-bucket set so the horizontal radio fits in the 1100px container
+# width without wrapping. (The dashboard's 8-family taxonomy collapses
+# the rheum-blue "Classical rheumatology basket" into the same Basket
+# bucket here — too inside-baseball for a rater pass.)
 AXIS_OPTIONS = {
+    "DiseaseFamily": ["Connective tissue", "Inflammatory arthritis",
+                      "Vasculitis", "Neurologic autoimmune",
+                      "Other autoimmune", "Basket/Multidisease", "Unsure"],
     "DiseaseEntity": None,            # free text + autocomplete (rheum vocab)
     "TargetCategory": None,           # free text + autocomplete
     "ProductType": ["Autologous", "Allogeneic/Off-the-shelf", "In vivo",
@@ -77,7 +92,38 @@ AXIS_OPTIONS = {
     "SponsorType": ["Industry", "Academic", "Government", "Other", "Unsure"],
 }
 
+# Human-readable labels — replaces the CamelCase axis keys when shown
+# to raters. Storage schema (JSON keys, _pipeline columns) stays on the
+# canonical CamelCase form. Mirrors onc's aa83683 AXIS_LABEL pattern.
+AXIS_LABEL = {
+    "DiseaseFamily":  "Disease family",
+    "DiseaseEntity":  "Disease entity",
+    "TrialDesign":    "Trial design",
+    "TargetCategory": "Target category",
+    "ProductType":    "Product type",
+    "SponsorType":    "Sponsor type",
+}
+
+# Layout per round-9 cross-app sync spec: 3 horizontal rows that group
+# axes semantically rather than the previous 3 left + 3 right column
+# split. The full-width Disease family row gives its 6-option horizontal
+# radio enough room (~1100px) to lay out without wrapping vertically.
+#   Row 1: Disease family (full width)
+#   Row 2: Disease entity | Trial design   (2 cols, autocomplete needs space)
+#   Row 3: Product type | Target category | Sponsor type
+AXIS_LAYOUT = [
+    ["DiseaseFamily"],
+    ["DiseaseEntity", "TrialDesign"],
+    ["ProductType", "TargetCategory", "SponsorType"],
+]
+
 AXIS_HELP = {
+    "DiseaseFamily": "Top-level family: connective tissue (SLE/SSc/Sjogren/"
+                     "IIM/CTD/IgG4), inflammatory arthritis (RA), vasculitis "
+                     "(AAV/Behcet), neurologic autoimmune (MS/myasthenia/"
+                     "NMOSD/etc), other autoimmune (cGVHD/cytopenias/"
+                     "glomerular/dermatologic/endocrine), or basket trial "
+                     "spanning ≥2 families.",
     "DiseaseEntity": "Most specific rheumatologic / immune-mediated disease "
                      "(SLE, SSc, Sjogren, IIM, AAV, RA, IgG4-RD, Behcet, "
                      "CTD_other, cGVHD). Use 'Other immune-mediated' for "
@@ -124,6 +170,33 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* System font on body content. Scoped narrowly so Streamlit's icon
+       font (Material Symbols Outlined, used for expander chevrons +
+       tab indicators) is NOT overridden. Mirrors the onc validation
+       app's aa83683 fix preventatively — rheum's CSS doesn't currently
+       use the broken `[class*="st-"]` pattern, but the icon-font
+       allow-list locks the contract in. */
+    html, body {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter",
+                     "SF Pro Text", "Segoe UI", Roboto,
+                     "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    .stApp, .stMarkdown, .stText, .stDataFrame,
+    [data-testid="stMarkdownContainer"] {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter",
+                     "SF Pro Text", "Segoe UI", Roboto,
+                     "Helvetica Neue", Arial, sans-serif;
+    }
+    /* Explicitly preserve Streamlit's icon font so expanders + tabs
+       continue to render their chevrons/arrows correctly. */
+    .material-symbols-outlined,
+    [class*="material-symbols"],
+    span[data-testid*="icon"] {
+        font-family: 'Material Symbols Outlined', 'Material Icons' !important;
+    }
+
     /* Tighter, calmer typography for a long rater session */
     .block-container { max-width: 1100px; padding-top: 2rem; }
     .stRadio > div { gap: 0.4rem; }
@@ -497,15 +570,22 @@ def _render_axis_input(axis: str, sample: dict, key: str) -> str:
     """Render a single axis input. Returns the chosen value (or "").
 
     Three input modes by axis type:
-      - Enumerable (ProductType / TrialDesign / SponsorType): radio buttons
+      - Enumerable (DiseaseFamily / ProductType / TrialDesign /
+        SponsorType): horizontal radio buttons
       - Categorical with many levels (legacy "_dynamic" — unused in
         rheum): dropdown + "Other (specify)" text fallback
       - Free-text-with-suggestions (DiseaseEntity / TargetCategory):
         selectbox of the canonical vocabulary + "Other (specify)" text
         fallback. Standardizes spelling so κ doesn't get artificially
         deflated by 'Lupus' vs 'SLE'.
+
+    Uses the friendly AXIS_LABEL (e.g. "Disease entity") for the visible
+    label; the canonical CamelCase axis key is preserved for storage /
+    analysis. Mirrors onc's aa83683 friendly-label pattern.
     """
     options = AXIS_OPTIONS.get(axis)
+    label = AXIS_LABEL.get(axis, axis)
+    helptext = AXIS_HELP.get(axis, "")
 
     if options == "_dynamic":
         # DiseaseCategory — populated from the sample's pipeline labels
@@ -515,13 +595,13 @@ def _render_axis_input(axis: str, sample: dict, key: str) -> str:
         } - {""})
         options = cats + ["Other (specify)", "Unsure"]
         choice = st.selectbox(
-            axis, options=[""] + options, key=key,
-            help=AXIS_HELP[axis], index=0,
+            label, options=[""] + options, key=key,
+            help=helptext, index=0,
             format_func=lambda x: "(pick one)" if not x else x,
         )
         if choice == "Other (specify)":
             other = st.text_input(
-                f"Specify {axis}", key=f"{key}_other",
+                f"Specify {label.lower()}", key=f"{key}_other",
                 placeholder="Type the category you'd use",
             ).strip()
             return other or ""
@@ -532,14 +612,14 @@ def _render_axis_input(axis: str, sample: dict, key: str) -> str:
         vocab = sample.get("autocomplete_vocab", {}).get(axis, [])
         choices = [""] + sorted(vocab) + ["Other (specify)", "Unsure"]
         choice = st.selectbox(
-            axis, options=choices, key=key,
-            help=AXIS_HELP[axis], index=0,
+            label, options=choices, key=key,
+            help=helptext, index=0,
             format_func=lambda x: ("(pick from canonical list, "
                                     "or 'Other' to type)" if not x else x),
         )
         if choice == "Other (specify)":
             other = st.text_input(
-                f"Specify {axis}", key=f"{key}_other",
+                f"Specify {label.lower()}", key=f"{key}_other",
                 placeholder="Type the value you'd use",
             ).strip()
             return other or ""
@@ -547,8 +627,8 @@ def _render_axis_input(axis: str, sample: dict, key: str) -> str:
 
     # Enumerable axis — horizontal radio for tightness
     return st.radio(
-        axis, options=options, key=key, horizontal=True,
-        help=AXIS_HELP[axis], index=None,
+        label, options=options, key=key, horizontal=True,
+        help=helptext, index=None,
     ) or ""
 
 
@@ -622,7 +702,8 @@ def _render_rater(rater_id: str) -> None:
     _format_trial_for_rater(trial)
     st.divider()
 
-    st.markdown(f"#### Classify this trial across the six axes")
+    n_axes = sum(len(row) for row in AXIS_LAYOUT)
+    st.markdown(f"#### Classify this trial across the {n_axes} axes")
     st.caption("Pipeline labels are deliberately hidden. If you can't make a "
                "confident call, mark **Unsure** — that's data, not failure.")
 
@@ -631,16 +712,28 @@ def _render_rater(rater_id: str) -> None:
     if timer_key not in st.session_state:
         st.session_state[timer_key] = time.time()
 
-    # Two-column layout for the six axes (3 left, 3 right)
-    axes = list(AXIS_OPTIONS.keys())
-    col_l, col_r = st.columns(2)
+    # Axis layout — 3 horizontal layers per AXIS_LAYOUT spec:
+    #   row 1: Disease family (full width — 6 horizontal radios fit in
+    #          the 1100px container without wrapping)
+    #   row 2: Disease entity | Trial design (2 cols, autocomplete needs space)
+    #   row 3: Product type | Target category | Sponsor type (3 cols)
+    # Single-axis rows render full-width; multi-axis rows use
+    # st.columns(len(row)) for equal partitioning. Future axis
+    # additions only require updating AXIS_OPTIONS / AXIS_LABEL /
+    # AXIS_HELP / AXIS_LAYOUT — no render-loop changes.
     user_labels: dict[str, str] = {}
-    with col_l:
-        for axis in axes[:3]:
-            user_labels[axis] = _render_axis_input(axis, sample, key=f"input_{nct}_{axis}")
-    with col_r:
-        for axis in axes[3:]:
-            user_labels[axis] = _render_axis_input(axis, sample, key=f"input_{nct}_{axis}")
+    for row in AXIS_LAYOUT:
+        if len(row) == 1:
+            user_labels[row[0]] = _render_axis_input(
+                row[0], sample, key=f"input_{nct}_{row[0]}",
+            )
+        else:
+            cols = st.columns(len(row))
+            for col, axis in zip(cols, row):
+                with col:
+                    user_labels[axis] = _render_axis_input(
+                        axis, sample, key=f"input_{nct}_{axis}",
+                    )
 
     notes = st.text_input(
         "Notes (optional)",

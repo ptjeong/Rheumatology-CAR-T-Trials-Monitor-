@@ -230,6 +230,89 @@ _BROAD_BASKET_TERMS = [
     "severe refractory systemic autoimmune rheumatic disease",
 ]
 
+
+# ── Classical-rheumatology basket detection ────────────────────────────────
+# Used by app.py's `_disease_family()` to split basket trials into:
+#   - "Classical rheumatology basket" (constituents are ALL CTD/IA/Vasc,
+#     no non-rheum text signal) → rheum-blue wedge in the sunburst, sits
+#     adjacent to the CTD/IA/Vasc arc so the reader sees these as part
+#     of the rheum cluster rather than a separate slate basket bucket.
+#   - "Basket/Multidisease" (everything else — mixed-class baskets with
+#     ≥1 neuro/glomerular/GVHD/etc constituent).
+# Lives in pipeline.py rather than app.py so `is_classical_rheum_basket`
+# is importable in tests without spinning up Streamlit.
+_CLASSICAL_RHEUM_ENTITIES = {
+    # Connective tissue
+    "SLE", "SSc", "Sjogren", "IIM", "CTD_other", "IgG4-RD",
+    # Inflammatory arthritis
+    "RA",
+    # Vasculitis
+    "AAV", "Behcet",
+}
+# cGVHD is intentionally EXCLUDED — it lives under "Other autoimmune"; a
+# basket spanning cGVHD + a rheum entity is mixed-class, not classical-rheum.
+
+# Text signals that disqualify a basket from being "classical-rheum-only"
+# even if the DiseaseEntities column lists only CTD/IA/Vasc entities. Catches
+# trials where the entity classifier missed a non-rheum constituent but the
+# conditions/title text reveals it (defensive — keeps the
+# "Classical rheumatology basket" wedge clean).
+_NON_RHEUM_BASKET_TEXT_SIGNALS = (
+    # Neurologic
+    "multiple sclerosis", "myasthenia", "neuromyelitis", "nmosd",
+    "demyelinating", "cidp", "encephalitis", "mogad", "stiff person",
+    # Glomerular / renal
+    "iga nephropathy", "igan ", "membranous nephropathy",
+    "fsgs", "focal segmental glomer", "minimal change",
+    # GVHD
+    "graft-versus-host", "graft versus host", "gvhd",
+    # Cytopenias
+    "hemolytic anemia", "aiha", "immune thrombocytopen", " itp ",
+    "evans syndrome", "aplastic anemia",
+    # Dermatologic
+    "pemphigus", "pemphigoid", "hidradenitis",
+    # Endocrine
+    "type 1 diabetes", "t1dm", "graves", "hashimoto",
+)
+
+
+def is_classical_rheum_basket(
+    entities_str: str | None,
+    conditions: str | None = None,
+    brief_title: str | None = None,
+) -> bool:
+    """Return True iff a basket trial enrols ≥2 distinct classical-rheum
+    entities (CTD / IA / Vasculitis) AND no entities outside that triad
+    AND no conditions/title text signals a non-rheum constituent.
+
+    The defensive text-scan catches the rare case where the entity
+    classifier missed a non-rheum disease but the trial title clearly
+    names it (e.g., a trial classified as SLE|RA in DiseaseEntities whose
+    title also mentions "multiple sclerosis").
+
+    Used by app.py's `_disease_family()` to route the trial to the
+    rheum-blue "Classical rheumatology basket" wedge versus the generic
+    slate "Basket/Multidisease" bucket.
+    """
+    ents = {
+        e.strip()
+        for e in str(entities_str or "").split("|")
+        if e.strip()
+        and e.strip() not in (
+            "Basket/Multidisease", "Unclassified", "Other immune-mediated",
+        )
+    }
+    if not ents:
+        return False
+    rheum_in = ents & _CLASSICAL_RHEUM_ENTITIES
+    non_rheum = ents - _CLASSICAL_RHEUM_ENTITIES
+    if len(rheum_in) < 2 or non_rheum:
+        return False
+    text = f"{conditions or ''} {brief_title or ''}".lower()
+    if any(kw in text for kw in _NON_RHEUM_BASKET_TEXT_SIGNALS):
+        return False
+    return True
+
 _BROAD_AUTOIMMUNE_PHRASES = [
     "autoimmune disease", "autoimmune diseases",
     "relapsed refractory autoimmune disease", "relapsed refractory autoimmune diseases",
