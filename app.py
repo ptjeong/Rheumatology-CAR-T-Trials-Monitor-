@@ -1369,10 +1369,26 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
     /* ── Reset / base ─────────────────────────────────────────────────── */
-    html, body, [class*="css"] {{
+    /* System font on body content. Scoped narrowly so Streamlit's icon
+       font (Material Symbols Outlined, used for expander chevrons +
+       similar) is NOT overridden. The previous [class*="css"] selector
+       was too greedy and risked breaking icon rendering on Streamlit
+       upgrades that use emotion class names containing "css". */
+    html, body {{
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
+    }}
+    .stApp, .stMarkdown, .stText, .stDataFrame,
+    [data-testid="stMarkdownContainer"] {{
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    /* Explicitly preserve Streamlit's icon font so expanders + tabs
+       continue to render their chevrons/arrows correctly. */
+    .material-symbols-outlined,
+    [class*="material-symbols"],
+    span[data-testid*="icon"] {{
+        font-family: 'Material Symbols Outlined', 'Material Icons' !important;
     }}
 
     .stApp {{
@@ -2485,6 +2501,139 @@ _sync_filters_to_query(_sync_opt_map)
 
 
 # ---------------------------------------------------------------------------
+# PRISMA ledger — financial-statement-style accounting of the selection
+# pipeline. Replaces an earlier dataframe-in-an-expander layout that was
+# functional but too quiet for what is the dataset's headline audit trail.
+#
+# Design rationale (ported from onc commit bdc3786): PRISMA is conceptually
+# a P&L of trials — running totals on the left, exclusions branching off
+# via indentation. No arrows, no boxes, no SVG geometry: indentation IS the
+# flow indicator. ~180px tall, scannable in 2 seconds, print-friendly.
+#
+# Rheum-specific row: an `n_llm_excluded` step (LLM-curation flagged) sits
+# between the hard-exclusion and indication-mismatch steps — surfaces the
+# LLM-validation pass that the onc app doesn't run.
+# ---------------------------------------------------------------------------
+
+_PRISMA_LEDGER_CSS = """
+<style>
+    .prisma-ledger {
+        max-width: 540px;
+        margin: 8px 0 14px 0;
+        font-family: Arial, Helvetica, sans-serif;
+        font-variant-numeric: tabular-nums;
+    }
+    .prisma-ledger .row {
+        display: flex; align-items: baseline;
+        justify-content: space-between;
+        padding: 5px 4px;
+        border-bottom: 1px dotted #e5e7eb;
+    }
+    .prisma-ledger .row.kept .label {
+        font-size: 13px; color: #111827; font-weight: 500;
+    }
+    .prisma-ledger .row.kept .num {
+        font-size: 13.5px; color: #111827; font-weight: 600;
+    }
+    .prisma-ledger .row.excl .label {
+        font-size: 12px; color: #6b7280; font-weight: 400;
+        padding-left: 22px;
+    }
+    .prisma-ledger .row.excl .num {
+        font-size: 12px; color: #6b7280; font-weight: 400;
+    }
+    .prisma-ledger .row.final {
+        border-top: 2px solid #1e40af;
+        border-bottom: none;
+        padding-top: 10px; margin-top: 4px;
+    }
+    .prisma-ledger .row.final .label {
+        font-size: 13px; color: #0b3d91; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .prisma-ledger .row.final .num {
+        font-size: 18px; color: #0b3d91; font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+</style>
+"""
+
+
+def _render_prisma_ledger(prisma: dict | None) -> None:
+    """Render the per-stage trial flow as a compact ledger.
+
+    Skips silently when `prisma` is empty / missing — callers don't need
+    to guard. The CSS block is injected once per call (Streamlit dedupes
+    identical <style> blocks within a single page render).
+    """
+    if not prisma:
+        return
+    n_fetched = int(prisma.get("n_fetched", 0) or 0)
+    n_dups = int(prisma.get("n_duplicates_removed", 0) or 0)
+    n_dedup = int(prisma.get("n_after_dedup", n_fetched - n_dups) or 0)
+    n_hard = int(prisma.get("n_hard_excluded", 0) or 0)
+    n_llm = int(prisma.get("n_llm_excluded", 0) or 0)
+    n_indic = int(prisma.get("n_indication_excluded", 0) or 0)
+    n_inc = int(prisma.get("n_included", 0) or 0)
+
+    n_after_hard = max(0, n_dedup - n_hard)
+    n_after_llm = max(0, n_after_hard - n_llm)
+    # n_after_indic equals n_inc when all stages add up; computed for
+    # display robustness when the underlying counts disagree.
+    n_after_indic = max(0, n_after_llm - n_indic)
+
+    st.markdown(_PRISMA_LEDGER_CSS, unsafe_allow_html=True)
+    # The LLM-curation row only renders when n_llm > 0 — keeps the ledger
+    # clean for snapshots that pre-date the LLM-validation pass.
+    _llm_block = (
+        f'<div class="row excl">'
+        f'<span class="label">− LLM-curation flagged · high/medium confidence</span>'
+        f'<span class="num">−{n_llm:,}</span>'
+        f'</div>'
+        f'<div class="row kept">'
+        f'<span class="label">After LLM-curation exclusion</span>'
+        f'<span class="num">{n_after_llm:,}</span>'
+        f'</div>'
+    ) if n_llm > 0 else ""
+    st.markdown(
+        f"""
+        <div class="prisma-ledger">
+          <div class="row kept">
+            <span class="label">Records identified · CT.gov v2 API</span>
+            <span class="num">{n_fetched:,}</span>
+          </div>
+          <div class="row excl">
+            <span class="label">− duplicates removed</span>
+            <span class="num">−{n_dups:,}</span>
+          </div>
+          <div class="row kept">
+            <span class="label">After de-duplication</span>
+            <span class="num">{n_dedup:,}</span>
+          </div>
+          <div class="row excl">
+            <span class="label">− hard-excluded · curated NCT list</span>
+            <span class="num">−{n_hard:,}</span>
+          </div>
+          <div class="row kept">
+            <span class="label">After hard-exclusion list</span>
+            <span class="num">{n_after_hard:,}</span>
+          </div>
+          {_llm_block}
+          <div class="row excl">
+            <span class="label">− oncology / haematologic indications</span>
+            <span class="num">−{n_indic:,}</span>
+          </div>
+          <div class="row final">
+            <span class="label">Included in analysis</span>
+            <span class="num">{n_inc:,}</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # CSV provenance helper — adds a '#'-prefixed metadata header to exports.
 # Readable via pandas: pd.read_csv(path, comment='#').
 # ---------------------------------------------------------------------------
@@ -3218,33 +3367,13 @@ with tab_overview:
                 st.plotly_chart(_fig_ov4, width='stretch')
 
     # -----------------------------------------------------------------
-    # PRISMA — now a collapsed expander at the bottom. Full narrative
-    # and methodological detail live in the Methods & Appendix tab.
+    # PRISMA — collapsed expander at the bottom of the Overview. Full
+    # methodological detail (and the same ledger as a numbered figure)
+    # lives in the Methods & Appendix tab.
     # -----------------------------------------------------------------
     if prisma_counts:
         with st.expander("Study selection (PRISMA flow)", expanded=False):
-            st.caption("Summary PRISMA-style flow of records from ClinicalTrials.gov API to the final analysis set. "
-                       "Full methods in the **Methods & Appendix** tab.")
-            prisma_rows = [
-                {"Step": "Records identified via ClinicalTrials.gov API", "n": prisma_counts.get("n_fetched", "—"), "Note": ""},
-                {"Step": "Duplicate records removed", "n": prisma_counts.get("n_duplicates_removed", "—"), "Note": "Same NCT ID"},
-                {"Step": "Records screened", "n": prisma_counts.get("n_after_dedup", "—"), "Note": ""},
-                {"Step": "Excluded: pre-specified NCT IDs", "n": prisma_counts.get("n_hard_excluded", "—"), "Note": "Manually curated exclusion list"},
-                {"Step": "Excluded: LLM-curation flagged", "n": prisma_counts.get("n_llm_excluded", 0), "Note": "LLM validation (high/medium confidence, exclude=true)"},
-                {"Step": "Excluded: oncology / haematologic malignancy indications", "n": prisma_counts.get("n_indication_excluded", "—"), "Note": "Keyword-based exclusion"},
-                {"Step": "Studies included in analysis", "n": prisma_counts.get("n_included", "—"), "Note": "Final dataset"},
-            ]
-            prisma_df = pd.DataFrame(prisma_rows)
-            st.dataframe(
-                prisma_df,
-                width='stretch',
-                hide_index=True,
-                column_config={
-                    "Step": st.column_config.TextColumn("Step", width="large"),
-                    "n": st.column_config.NumberColumn("n", width="small"),
-                    "Note": st.column_config.TextColumn("Note", width="medium"),
-                },
-            )
+            _render_prisma_ledger(prisma_counts)
 
 with tab_geo:
     st.subheader("Global studies by country")
@@ -6361,6 +6490,14 @@ with tab_methods:
     n_inc = len(df_filt)
 
     methods_text = _build_methods_text(prisma_counts, snap_date, n_inc)
+
+    # Ledger PRISMA at the top of the Methods tab — the dataset's audit
+    # trail belongs here rather than buried in an expander on Overview.
+    # No editorial caption (per "no need to tell a story or sell").
+    if prisma_counts:
+        st.subheader("Figure — PRISMA selection flow")
+        _render_prisma_ledger(prisma_counts)
+        st.markdown("---")
 
     st.subheader("Methods section (auto-generated)")
     st.markdown(
