@@ -17,11 +17,14 @@ from pipeline import (
     save_snapshot,
     BASE_URL,
     _normalize_text,
-    # Used by `_disease_family()` to split basket trials into the rheum-
-    # blue "Classical rheumatology basket" wedge versus the generic slate
-    # "Basket/Multidisease" bucket. Lives in pipeline.py so it's
-    # importable in pytest without spinning up Streamlit.
+    # Used by `_disease_family()` to split basket trials by family:
+    #  - Classical-rheum basket  → "Classical rheumatology basket" wedge
+    #  - Neuro-only basket       → rolled into "Neurologic autoimmune"
+    #  - Anything else           → generic "Basket/Multidisease"
+    # Lives in pipeline.py so both helpers are importable in pytest
+    # without spinning up Streamlit.
     is_classical_rheum_basket as _is_classical_rheum_basket,
+    is_neuro_basket as _is_neuro_basket,
 )
 # compute_confidence_factors and compute_classification_rationale shipped
 # in commits 9a15cda + 4cce635. Wrap the import so a stale deploy (e.g.
@@ -236,21 +239,24 @@ _FAMILY_ORDER = [
     "Basket/Multidisease",
     "Other / Unclassified",
 ]
-# Unified palette: rheumatology families share a blue ramp (CTD/IA/Vasc) so a
-# reader sees them as one super-family at a glance; non-rheum buckets sit in a
-# distinct slate range. Shared by sunburst and Deep Dive charts.
+# Unified palette: ALL four classical-rheumatology families (CTD + IA +
+# Vasculitis + Classical-rheum basket) share a single NEJM navy so the
+# rheum cluster reads as ONE block at L1 — strict color discipline per
+# round-9 user feedback ("classical rheum should receive same color").
+# Within-rheum entity differentiation is preserved at L2 by size + label;
+# the previous trio gradient (navy/mid/light) was visually informative
+# but cluttered the cluster identity at L1. Non-rheum families keep
+# their distinct hues. Shared by sunburst and Deep Dive charts.
+_RHEUM_NAVY = "#0b3d91"
 _FAMILY_COLORS = {
-    "Connective tissue":              "#0b3d91",   # deep navy   — rheum
-    "Inflammatory arthritis":         "#2e6dbf",   # mid blue    — rheum
-    "Vasculitis":                     "#5fa3d9",   # light blue  — rheum
-    # Saturated blue-700 — clearly part of the rheum-blue family but
-    # distinct from CTD/IA/Vasc so the wedge reads as "the multi-disease
-    # extension of the rheum arc" rather than a fourth specific entity.
-    "Classical rheumatology basket":  "#1d4ed8",
-    "Neurologic autoimmune":          "#7c3aed",   # violet-600  — own clinical specialty
-    "Other autoimmune":               "#475569",   # slate-600
-    "Basket/Multidisease":            "#94a3b8",   # slate-400
-    "Other / Unclassified":           "#cbd5e1",   # slate-300
+    "Connective tissue":              _RHEUM_NAVY,  # rheum cluster — L1 unified
+    "Inflammatory arthritis":         _RHEUM_NAVY,  # rheum cluster — L1 unified
+    "Vasculitis":                     _RHEUM_NAVY,  # rheum cluster — L1 unified
+    "Classical rheumatology basket":  _RHEUM_NAVY,  # rheum cluster — L1 unified
+    "Neurologic autoimmune":          "#7c3aed",    # violet-600  — own clinical specialty
+    "Other autoimmune":               "#475569",    # slate-600
+    "Basket/Multidisease":            "#94a3b8",    # slate-400
+    "Other / Unclassified":           "#cbd5e1",    # slate-300
 }
 
 # Sub-family palette — used only on the sunburst L2 ring inside the
@@ -454,11 +460,17 @@ def _disease_family(
 ) -> str:
     """Map a disease entity to its top-level family.
 
-    Basket trials are split:
+    Basket trials are split three ways:
       - "Classical rheumatology basket" — constituents are ALL classical
         rheum (CTD/IA/Vasc) AND text shows no non-rheum signal; visually
-        extends the rheum arc with a saturated rheum-blue wedge.
-      - "Basket/Multidisease" — everything else (mixed-class baskets).
+        extends the rheum arc.
+      - "Neurologic autoimmune" — neuro-only baskets (≥2 of MS / NMOSD /
+        CIDP / MOGAD / AIE / Myasthenia / Stiff_person, no other family)
+        roll into the existing neuro family wedge (per round-9 user spec
+        — neuro baskets are clinically a neuro problem, not a generic
+        multidisease problem).
+      - "Basket/Multidisease" — everything else (true mixed-class baskets
+        spanning two or more families).
 
     Trials whose pipeline entity is a non-specific autoimmune bucket
     ('Other immune-mediated' / 'cGVHD') and whose conditions/title flag
@@ -469,6 +481,8 @@ def _disease_family(
     if trial_design == "Basket/Multidisease":
         if _is_classical_rheum_basket(entities_str, conditions, brief_title):
             return "Classical rheumatology basket"
+        if _is_neuro_basket(entities_str, conditions, brief_title):
+            return "Neurologic autoimmune"
         return "Basket/Multidisease"
     if not entity or entity in ("Unclassified", ""):
         return "Other / Unclassified"
@@ -2960,10 +2974,10 @@ with tab_overview:
         st.markdown(
             f'<p class="small-note" style="color:{THEME["muted"]}">Click a wedge to zoom in. '
             'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
-            'Basket / multi-disease trials are split into <em>Classical rheumatology basket</em> '
-            '(rheum-blue, ≥2 of CTD / IA / Vasculitis with no non-rheum constituents — visually '
-            'extends the rheum arc) and the generic slate <em>Basket/Multidisease</em> wedge '
-            '(mixed-class baskets with neuro / glomerular / GVHD / etc. constituents).</p>',
+            'Classical rheumatology (CTD / IA / Vasculitis + the matching multi-disease basket) '
+            'is rendered as one navy block. Neuro-only basket trials roll into the Neurologic '
+            'autoimmune wedge. The slate <em>Basket/Multidisease</em> wedge holds only true '
+            'broad / mixed-family baskets.</p>',
             unsafe_allow_html=True,
         )
 
@@ -3009,10 +3023,19 @@ with tab_overview:
             _sb.loc[_oa_mask, "_L2"] = _sub_text[_oa_mask].apply(_system_subfamily)
 
         # Override 2: rows in the Neurologic autoimmune family get a
-        # specific neuro disease label.
+        # specific neuro disease label. Neuro-only basket trials (which
+        # `_disease_family()` routes here) instead get the L2 label
+        # "Neuro multi-disease" so they form their own wedge inside the
+        # Neuro family rather than being collapsed to "Neurology_other"
+        # by the multi-match guard in `_neuro_disease`.
         _neuro_mask = _sb["DiseaseFamily"].eq("Neurologic autoimmune")
         if _neuro_mask.any():
             _sb.loc[_neuro_mask, "_L2"] = _sub_text[_neuro_mask].apply(_neuro_disease)
+            _neuro_basket_mask = (
+                _neuro_mask & _sb["TrialDesign"].eq("Basket/Multidisease")
+            )
+            if _neuro_basket_mask.any():
+                _sb.loc[_neuro_basket_mask, "_L2"] = "Neuro multi-disease"
 
         # Override 3 (highest priority): basket trials get an L2 label
         # that depends on which basket family they belong to. Classical-
