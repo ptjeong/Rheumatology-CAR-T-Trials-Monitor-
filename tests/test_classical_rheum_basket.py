@@ -1,7 +1,7 @@
 """Regression tests for the classical-rheumatology basket detector.
 
 The detector splits basket/multidisease trials into:
-  - "Classical rheumatology basket" — constituents are ALL CTD/IA/Vasc,
+  - "Rheumatology basket" — constituents are ALL CTD/IA/Vasc,
     no non-rheum text signal. Surfaced as a rheum-blue wedge in the Fig 1
     sunburst, contiguous with the CTD → IA → Vasculitis arc.
   - "Basket/Multidisease" — everything else (mixed-class baskets).

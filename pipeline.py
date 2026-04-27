@@ -233,7 +233,7 @@ _BROAD_BASKET_TERMS = [
 
 # ── Classical-rheumatology basket detection ────────────────────────────────
 # Used by app.py's `_disease_family()` to split basket trials into:
-#   - "Classical rheumatology basket" (constituents are ALL CTD/IA/Vasc,
+#   - "Rheumatology basket" (constituents are ALL CTD/IA/Vasc,
 #     no non-rheum text signal) → rheum-blue wedge in the sunburst, sits
 #     adjacent to the CTD/IA/Vasc arc so the reader sees these as part
 #     of the rheum cluster rather than a separate slate basket bucket.
@@ -256,7 +256,7 @@ _CLASSICAL_RHEUM_ENTITIES = {
 # even if the DiseaseEntities column lists only CTD/IA/Vasc entities. Catches
 # trials where the entity classifier missed a non-rheum constituent but the
 # conditions/title text reveals it (defensive — keeps the
-# "Classical rheumatology basket" wedge clean).
+# "Rheumatology basket" wedge clean).
 _NON_RHEUM_BASKET_TEXT_SIGNALS = (
     # Neurologic
     "multiple sclerosis", "myasthenia", "neuromyelitis", "nmosd",
@@ -383,7 +383,7 @@ def is_classical_rheum_basket(
     title also mentions "multiple sclerosis").
 
     Used by app.py's `_disease_family()` to route the trial to the
-    rheum-blue "Classical rheumatology basket" wedge versus the generic
+    rheum-blue "Rheumatology basket" wedge versus the generic
     slate "Basket/Multidisease" bucket.
     """
     ents = {
