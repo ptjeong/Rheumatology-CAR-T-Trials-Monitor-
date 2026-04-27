@@ -815,7 +815,7 @@ _FLAG_AXIS_OPTIONS: dict[str, list[str]] = {
         + ["Other immune-mediated", "Basket/Multidisease", "Unclassified"]
     ),
     "TargetCategory": [
-        "CD19", "CD20", "CD7", "CD70", "BCMA", "BAFF", "CD6",
+        "CD19", "CD20", "CD7", "CD70", "BCMA", "BAFF", "BAFF-R", "CD6",
         "CD19/BCMA dual", "CD19/CD20 dual", "CD19/BAFF dual", "BCMA/CD70 dual",
         "CAR-Treg", "CAAR-T",
         "CAR-T_unspecified", "Other_or_unknown",

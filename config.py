@@ -263,6 +263,25 @@ CAR_SPECIFIC_TARGET_TERMS = {
         "bcma-targeted",
         "b cell maturation antigen",
     ],
+    # Ligand-based CAR convention (synced from onc 2026-04-27).
+    # BAFF-CAR (LMY-920 etc.) uses BAFF as the binding domain; the
+    # receptor on the B cell is BAFF-R / TACI / BCMA. Record the
+    # dominant therapeutic receptor (BAFF-R for autoimmune B-cell
+    # depletion). Synonyms are construct-anchored (no bare "baff")
+    # to avoid false matches in eligibility text discussing BAFF
+    # biology.
+    "BAFF-R": [
+        "baff-r",
+        "baff r",
+        "baff receptor",
+        "tnfrsf13c",
+        "baff car",
+        "baff-car",
+        "baff car-t",
+        "baff cart",
+        "baff-car-t",
+        "baff-cart",
+    ],
     "CD20": [
         "cd20",
         "anti-cd20",

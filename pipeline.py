@@ -599,6 +599,12 @@ def _assign_target(row: dict) -> tuple[str, str]:
     has_cd19 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD19"]) or ("cd19" in text)
     has_bcma = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BCMA"]) or ("bcma" in text)
     has_baff = "baff" in text
+    # Construct-anchored BAFF-R detection (synced from onc 2026-04-27).
+    # `has_baff` (bare token) is kept for the CD19/BAFF dual-target case
+    # below; `has_baff_r` is the precise ligand-CAR detector that maps
+    # BAFF-CAR designs (LMY-920, BAFF-R CART) to the receptor (BAFF-R)
+    # per the ligand-CAR convention used across the onc + rheum pipelines.
+    has_baff_r = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BAFF-R"])
     # "cd19/20" notation (e.g. "universal CD19/20 CAR-T") — slash is preserved by normalizer
     has_cd20 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD20"]) or ("cd20" in text) or ("cd19/20" in text)
     has_cd70 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD70"]) or ("cd70" in text)
@@ -630,6 +636,11 @@ def _assign_target(row: dict) -> tuple[str, str]:
         return "CD19", "explicit_marker"
     if has_bcma:
         return "BCMA", "explicit_marker"
+    # Ligand-CAR: BAFF-CAR → BAFF-R (ahead of the bare-baff fall-through
+    # so LMY-920-style trials route to the precise receptor instead of
+    # the "BAFF" ligand label or CAR-T_unspecified).
+    if has_baff_r:
+        return "BAFF-R", "explicit_marker"
     if has_cd20:
         return "CD20", "explicit_marker"
     if has_cd70:
