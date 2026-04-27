@@ -253,11 +253,39 @@ _FAMILY_COLORS = {
     "Inflammatory arthritis":         _RHEUM_NAVY,  # rheum cluster — L1 unified
     "Vasculitis":                     _RHEUM_NAVY,  # rheum cluster — L1 unified
     "Classical rheumatology basket":  _RHEUM_NAVY,  # rheum cluster — L1 unified
+    # SUPER-FAMILY label used ONLY by the sunburst's L1 ring. The four
+    # rheum sub-families above collapse to a single "Rheumatology" L1
+    # wedge so the inner ring carries one bucket per clinical specialty
+    # rather than four nearly-indistinguishable navy slices. Headline
+    # tiles, deep-dive charts, and filter widgets keep using the
+    # granular families.
+    "Rheumatology":                   _RHEUM_NAVY,
     "Neurologic autoimmune":          "#7c3aed",    # violet-600  — own clinical specialty
     "Other autoimmune":               "#475569",    # slate-600
     "Basket/Multidisease":            "#94a3b8",    # slate-400
     "Other / Unclassified":           "#cbd5e1",    # slate-300
 }
+
+# Sunburst-only super-family map: the four classical-rheum sub-families
+# collapse to a single "Rheumatology" L1 wedge. All other families
+# pass through unchanged.
+_SUNBURST_L1_SUPERFAMILY = {
+    "Connective tissue":              "Rheumatology",
+    "Inflammatory arthritis":         "Rheumatology",
+    "Vasculitis":                     "Rheumatology",
+    "Classical rheumatology basket":  "Rheumatology",
+}
+
+# Sunburst L1 iteration order — uses the super-family naming so the
+# inner ring renders as Rheumatology → Neurology → Other autoimmune →
+# Basket/Multidisease → Other / Unclassified (5 wedges instead of 8).
+_SUNBURST_L1_ORDER = [
+    "Rheumatology",
+    "Neurologic autoimmune",
+    "Other autoimmune",
+    "Basket/Multidisease",
+    "Other / Unclassified",
+]
 
 # Sub-family palette — used only on the sunburst L2 ring inside the
 # "Other autoimmune" family. Neurologic gets a distinct violet accent (per
@@ -2973,11 +3001,10 @@ with tab_overview:
         st.subheader("Disease hierarchy at a glance")
         st.markdown(
             f'<p class="small-note" style="color:{THEME["muted"]}">Click a wedge to zoom in. '
-            'Inner ring: disease family · middle ring: indication · outer ring: antigen target. '
-            'Classical rheumatology (CTD / IA / Vasculitis + the matching multi-disease basket) '
-            'is rendered as one navy block. Neuro-only basket trials roll into the Neurologic '
-            'autoimmune wedge. The slate <em>Basket/Multidisease</em> wedge holds only true '
-            'broad / mixed-family baskets.</p>',
+            'Inner ring: clinical specialty (Rheumatology / Neurology / Other autoimmune / '
+            'mixed-family basket / unclassified) · middle ring: indication · outer ring: antigen '
+            'target. Headline tiles below preserve the within-rheumatology breakdown (CTD / '
+            'IA / Vasc / Classical-rheum basket).</p>',
             unsafe_allow_html=True,
         )
 
@@ -3003,7 +3030,12 @@ with tab_overview:
         # _system_subfamily / _neuro_disease helpers on the small subset of
         # rows that actually need them.
         _sb = df_filt.copy()
-        _sb["_L1"] = _sb["DiseaseFamily"]
+        # L1 collapses the four classical-rheum families into one
+        # "Rheumatology" wedge so the inner ring carries one bucket per
+        # clinical specialty. All other families pass through unchanged.
+        _sb["_L1"] = _sb["DiseaseFamily"].map(
+            lambda f: _SUNBURST_L1_SUPERFAMILY.get(f, f)
+        )
 
         # L2 default: raw DiseaseEntity (unchanged for the majority of rows)
         _entity_str = _sb["DiseaseEntity"].fillna("Unclassified").astype(str)
@@ -3081,14 +3113,14 @@ with tab_overview:
                 }]))
         _sb_counts = pd.concat(_simplified, ignore_index=True) if _simplified else _sb_counts
 
-        # Iterate families in _FAMILY_ORDER (rheum triad first: Connective
-        # tissue → Inflammatory arthritis → Vasculitis, then Neurologic
-        # autoimmune → Other autoimmune → Basket → Other/Unclassified).
-        # Plotly's sunburst lays children out in input order, so the
-        # classical-rheumatology categories form a contiguous arc rather
-        # than being separated alphabetically.
+        # Iterate L1 super-families: Rheumatology → Neurologic autoimmune
+        # → Other autoimmune → Basket/Multidisease → Other/Unclassified
+        # (5 wedges instead of 8 — the four rheum sub-families collapse
+        # into the single Rheumatology wedge per user feedback "remove
+        # the L1 ring and unify it to rheumatology"). Plotly lays children
+        # out in input order with sort=False on the trace.
         _present_families = [
-            f for f in _FAMILY_ORDER
+            f for f in _SUNBURST_L1_ORDER
             if f in set(_sb_counts["_L1"].unique())
         ]
         _ids, _labels, _parents, _values, _colors = [], [], [], [], []
@@ -3150,8 +3182,11 @@ with tab_overview:
         )
         st.plotly_chart(_fig_sb, width='stretch')
 
-        # Family headline row
-        _fam_counts = _sb["_L1"].value_counts().rename_axis("Family").reset_index(name="Trials")
+        # Family headline row — uses the granular DiseaseFamily (CTD / IA /
+        # Vasc / Classical-rheum basket / etc.) so the tile breakdown stays
+        # informative even though the sunburst's L1 ring above collapsed
+        # the rheum sub-families into one "Rheumatology" wedge.
+        _fam_counts = _sb["DiseaseFamily"].value_counts().rename_axis("Family").reset_index(name="Trials")
         _fam_counts = _fam_counts.set_index("Family").reindex(_FAMILY_ORDER).dropna().reset_index()
         _fam_counts["Trials"] = _fam_counts["Trials"].astype(int)
         if not _fam_counts.empty:
