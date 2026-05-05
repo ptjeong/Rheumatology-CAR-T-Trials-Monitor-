@@ -240,15 +240,14 @@ _FAMILY_ORDER = [
     "Multidisease basket",       # was "Basket/Multidisease" (display only)
     "Other / Unclassified",
 ]
-# Unified palette: ALL four classical-rheumatology families (CTD + IA +
-# Vasculitis + Classical-rheum basket) share a single NEJM navy so the
-# rheum cluster reads as ONE block at L1 — strict color discipline per
-# round-9 user feedback ("classical rheum should receive same color").
-# Within-rheum entity differentiation is preserved at L2 by size + label;
-# the previous trio gradient (navy/mid/light) was visually informative
-# but cluttered the cluster identity at L1. Non-rheum families keep
-# their distinct hues. Shared by sunburst and Deep Dive charts.
-_RHEUM_NAVY = "#0b3d91"
+# Unified palette: each family is anchored to the DEEPEST shade of its
+# L2-entity gradient so the sunburst reads dark-center → light-rim
+# (the rheum cluster's L1 wedge matches SLE which is the deepest L2;
+# neuro L1 matches MS deepest L2; Other autoimmune L1 matches the stone
+# anchor). Shared by sunburst and Deep Dive charts. Strict color
+# discipline per user feedback ("classical rheum should receive same
+# color" + "more elegant").
+_RHEUM_NAVY = "#0c4a6e"   # sky-900 — matches ENTITY_COLORS["SLE"] anchor
 _FAMILY_COLORS = {
     "Connective tissue":          _RHEUM_NAVY,  # rheum cluster — L1 unified
     "Inflammatory arthritis":     _RHEUM_NAVY,  # rheum cluster — L1 unified
@@ -261,8 +260,15 @@ _FAMILY_COLORS = {
     # tiles, deep-dive charts, and filter widgets keep using the
     # granular families.
     "Rheumatology":               _RHEUM_NAVY,
-    "Neurologic autoimmune":      "#7c3aed",    # violet-600 — own clinical specialty
-    "Other autoimmune":           "#475569",    # slate-600
+    # Violet-800 anchor matches ENTITY_COLORS["MS"] so the L1 wedge
+    # transitions cleanly into the L2 violet gradient (MS deepest →
+    # Neurology_other lightest).
+    "Neurologic autoimmune":      "#5b21b6",    # violet-800
+    # Stone-700 (warm-gray) replaces slate-600 (cool blue-gray) so the
+    # Other autoimmune wedge reads as warm-neutral, distinct from the
+    # cool rheum / neuro clusters above. Anchors the all-stone L2
+    # gradient inside this family.
+    "Other autoimmune":           "#44403c",    # stone-700
     "Multidisease basket":        "#94a3b8",    # slate-400 — true mixed-family baskets
     "Other / Unclassified":       "#cbd5e1",    # slate-300
 }
@@ -354,19 +360,21 @@ ENTITY_COLORS = {
     "Neurology_other":  "#ede9fe",   # violet-100 — catch-all
     "Neuro multi-disease": "#4c1d95",  # violet-900 — neuro-basket anchor
 
-    # ── Other autoimmune: muted warm tones (stone with subtle amber accents) ──
-    # Desaturated vs the previous Oranges palette — the bright orange/red was
-    # visually competing with the rheum-cluster cool tones. The current
-    # treatment keeps "warmth = different cluster" as the cue but tones it
-    # down for editorial harmony with the rest of the figure.
-    "Other immune-mediated":   "#78716c",   # stone-500 — neutral anchor
-    "cGVHD":                   "#57534e",   # stone-700
-    "Autoimmune cytopenias":   "#92400e",   # amber-800 — single deep accent
-    "Glomerular / renal":      "#b45309",   # amber-700
-    "Endocrine autoimmune":    "#a8a29e",   # stone-400
-    "Dermatologic autoimmune": "#d6d3d1",   # stone-300
-    "GVHD":                    "#a16207",   # yellow-700 — sub-family accent
-    "Other autoimmune":        "#78716c",   # fallback (matches Other immune-mediated)
+    # ── Other autoimmune: pure stone gradient (warm-neutral, single hue) ──
+    # Sub-families differentiated by LIGHTNESS only — no amber/yellow
+    # accents (those were creating a busy mix of rust/stone/yellow that
+    # competed with the rheum cluster for attention). Reader sees one
+    # warm-gray cluster identity and parses sub-families by size + label.
+    # Order mirrors clinical prevalence: cGVHD/cytopenias most common,
+    # GVHD sub-family rarest.
+    "Other immune-mediated":   "#44403c",   # stone-700 (anchor — matches family L1)
+    "cGVHD":                   "#57534e",   # stone-600
+    "Autoimmune cytopenias":   "#78716c",   # stone-500
+    "Glomerular / renal":      "#a8a29e",   # stone-400
+    "Endocrine autoimmune":    "#d6d3d1",   # stone-300
+    "Dermatologic autoimmune": "#e7e5e4",   # stone-200
+    "GVHD":                    "#f5f5f4",   # stone-100 (lightest sub-family)
+    "Other autoimmune":        "#44403c",   # fallback (matches family L1)
 
     # ── Baskets ──
     "Combined CTD / IA / Vasculitis": "#082f49",   # sky-950 — deepest blue, anchors rheum
