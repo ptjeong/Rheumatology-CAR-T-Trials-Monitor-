@@ -288,6 +288,96 @@ _SUNBURST_L1_ORDER = [
     "Other / Unclassified",
 ]
 
+# CANONICAL entity-level palette — every disease label that appears as
+# an L2 sunburst wedge, a stacked-area lane (Fig 1), a bar segment
+# (Fig 5), or a per-entity legend entry resolves to ITS OWN distinct
+# colour here. Designed so within-family hues cluster (same family =
+# same colour neighbourhood) AND each disease is individually
+# distinguishable per user feedback "improve colour coding to better
+# differentiate the diseases — universally applied to all figures".
+# Strategy:
+#   - Connective tissue → cool blues (navy → sky)
+#   - Inflammatory arthritis → teal-600
+#   - Vasculitis → emerald greens
+#   - Neurologic → violet / purple / fuchsia / indigo / pink gamut
+#   - Other autoimmune → warm earth tones (stone / amber / red / orange)
+#     so the family reads as visually distinct from the cool rheum cluster
+#   - Baskets / Unclassified → neutral slate / gray
+ENTITY_COLORS = {
+    # ── Connective tissue ──
+    "SLE":              "#0b3d91",   # navy-900 — most-prevalent rheum entity
+    "SSc":              "#1d4ed8",   # blue-700
+    "Sjogren":          "#3b82f6",   # blue-500
+    "IIM":              "#06b6d4",   # cyan-500
+    "CTD_other":        "#7dd3fc",   # sky-300
+    "IgG4-RD":          "#bae6fd",   # sky-200
+
+    # ── Inflammatory arthritis ──
+    "RA":               "#0d9488",   # teal-600
+
+    # ── Vasculitis ──
+    "AAV":              "#10b981",   # emerald-500
+    "Behcet":           "#86efac",   # emerald-300
+
+    # ── Neurologic autoimmune ──
+    "MS":               "#7c3aed",   # violet-600
+    "Myasthenia":       "#c026d3",   # fuchsia-600
+    "NMOSD":            "#a855f7",   # purple-500
+    "CIDP":             "#6366f1",   # indigo-500
+    "MOGAD":            "#c084fc",   # purple-400
+    "AIE":              "#4338ca",   # indigo-700
+    "Stiff_person":     "#db2777",   # pink-600
+    "Stiff-person":     "#db2777",   # alias for the L2 label
+    "Neurology_other":  "#a78bfa",   # violet-400 (catch-all)
+    "Neuro multi-disease": "#581c87",  # purple-900 — neuro-basket L2
+
+    # ── Other autoimmune (warm earth tones — visually distinct from rheum) ──
+    "Other immune-mediated":   "#78716c",   # stone-500
+    "cGVHD":                   "#a16207",   # yellow-700
+    "Autoimmune cytopenias":   "#dc2626",   # red-600
+    "Glomerular / renal":      "#b45309",   # amber-700
+    "Endocrine autoimmune":    "#92400e",   # amber-800
+    "Dermatologic autoimmune": "#9a3412",   # orange-800
+    "GVHD":                    "#ca8a04",   # yellow-600 (sub-family inside Other autoimmune)
+    "Other autoimmune":        "#78716c",   # stone-500 (fallback)
+
+    # ── Baskets ──
+    "Combined CTD / IA / Vasculitis": "#1e3a8a",   # blue-900 — clearly rheum
+    "Basket/Multidisease":            "#94a3b8",   # slate-400
+
+    # ── Sentinels ──
+    "Unclassified": "#d1d5db",   # gray-300
+    "Other":        "#e5e7eb",   # gray-200
+}
+
+# Plotly modebar PNG-export config — tuned for presentation use.
+# 1920×1080 matches the native PowerPoint / Keynote 16:9 slide canvas;
+# scale=3 multiplies both axes so the rendered raster is 5760×3240 px,
+# which prints sharply at 4K-projector resolution and embeds at ~300 DPI
+# in a 12-inch-wide slide. Was 1600×900 / scale=2 (effective 3200×1800)
+# — adequate for screens but visibly soft when projected at 4K.
+# Defined at module top (rather than near the per-figure layout
+# constants further down) so every `st.plotly_chart(..., config=
+# PUB_EXPORT)` call works regardless of where in the script flow the
+# chart sits — Streamlit executes top-to-bottom and the early Overview
+# tab needs PUB_EXPORT in scope before its sunburst renders.
+# `displaylogo: False` strips the Plotly watermark; `modeBarButtonsToRemove`
+# trims interactive-only buttons (lasso / box select / pan) that don't
+# matter for static export and clutter the chart hover affordance.
+PUB_EXPORT = {
+    "toImageButtonOptions": {
+        "format": "png",
+        "width": 1920,
+        "height": 1080,
+        "scale": 3,
+    },
+    "displaylogo": False,
+    "modeBarButtonsToRemove": [
+        "lasso2d", "select2d", "autoScale2d", "hoverClosestCartesian",
+        "hoverCompareCartesian", "toggleSpikelines",
+    ],
+}
+
 # Sub-family palette — used only on the sunburst L2 ring inside the
 # "Other autoimmune" family. Neurologic gets a distinct violet accent (per
 # convention); other sub-buckets stay in the slate family so they read as
@@ -3145,14 +3235,18 @@ with tab_overview:
             )
             for _dis in _l2_totals.index:
                 _dd = _fd[_fd["_L2"] == _dis]
-                # Inside the Other autoimmune family the L2 label is a
-                # sub-family — give it its own colour (neuro = violet,
-                # everything else = slate variants). All children inherit
-                # the L2 colour so the outer ring reads as one branch.
+                # L2 colour resolution priority:
+                #   1. ENTITY_COLORS (canonical per-disease palette) —
+                #      guarantees universal differentiation across every
+                #      entity-grouped chart in the dashboard.
+                #   2. _SUBFAMILY_COLORS — only for sub-family labels
+                #      that appear as L2 inside Other autoimmune.
+                #   3. _fam_color — final fallback (rare; means the
+                #      label was added without updating ENTITY_COLORS).
                 _l2_color = (
-                    _SUBFAMILY_COLORS.get(_dis, _fam_color)
-                    if _fam == "Other autoimmune"
-                    else _fam_color
+                    ENTITY_COLORS.get(_dis)
+                    or (_SUBFAMILY_COLORS.get(_dis) if _fam == "Other autoimmune" else None)
+                    or _fam_color
                 )
                 _dis_id = f"{_fam}/{_dis}"
                 _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
@@ -3188,7 +3282,7 @@ with tab_overview:
             font=dict(family=FONT_FAMILY, size=12, color=THEME["text"]),
             uniformtext=dict(minsize=10, mode="hide"),
         )
-        st.plotly_chart(_fig_sb, width='stretch')
+        st.plotly_chart(_fig_sb, width='stretch', config=PUB_EXPORT)
 
         # Family headline row — uses the granular DiseaseFamily (CTD / IA /
         # Vasc / Classical-rheum basket / etc.) so the tile breakdown stays
@@ -3336,7 +3430,7 @@ with tab_overview:
                     yaxis_title=None, xaxis_title="Number of trials",
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
-                st.plotly_chart(_fig_ov1, width='stretch')
+                st.plotly_chart(_fig_ov1, width='stretch', config=PUB_EXPORT)
 
         # Panel 2: Antigen target, colored stack by family
         _tg_ov = df_filt.copy()
@@ -3370,7 +3464,7 @@ with tab_overview:
                     yaxis_title=None, xaxis_title="Number of trials",
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
-                st.plotly_chart(_fig_ov2, width='stretch')
+                st.plotly_chart(_fig_ov2, width='stretch', config=PUB_EXPORT)
 
         _ov_c, _ov_d = st.columns(2)
 
@@ -3398,7 +3492,7 @@ with tab_overview:
                 xaxis_title="Phase", yaxis_title="Number of trials",
                 font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
             )
-            st.plotly_chart(_fig_ov3, width='stretch')
+            st.plotly_chart(_fig_ov3, width='stretch', config=PUB_EXPORT)
 
         # Panel 4: Trials by start year, stacked area by family
         _yr_ov = df_filt.dropna(subset=["StartYear"]).copy()
@@ -3427,7 +3521,7 @@ with tab_overview:
                     xaxis_title="Start year", yaxis_title="Number of trials",
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
-                st.plotly_chart(_fig_ov4, width='stretch')
+                st.plotly_chart(_fig_ov4, width='stretch', config=PUB_EXPORT)
 
     # -----------------------------------------------------------------
     # PRISMA — collapsed expander at the bottom of the Overview. Full
@@ -3534,7 +3628,7 @@ with tab_geo:
                     lonaxis=dict(range=[-175, 190]),
                 ),
             )
-            st.plotly_chart(fig_world, width='stretch')
+            st.plotly_chart(fig_world, width='stretch', config=PUB_EXPORT)
             if "Open sites" in _layers and not geo_sites.empty:
                 st.caption(
                     f"{len(geo_sites):,} open / recruiting site locations plotted. "
@@ -3552,7 +3646,7 @@ with tab_geo:
             st.markdown("**Top countries**")
             st.plotly_chart(
                 make_bar(country_counts.head(12), "Country", "Count", height=320, color=THEME["primary"]),
-                width='stretch',
+                width='stretch', config=PUB_EXPORT,
             )
     else:
         st.info("No country information available for the current filter selection.")
@@ -3672,7 +3766,7 @@ with tab_geo:
                             fitbounds="locations",
                         ),
                     )
-                    st.plotly_chart(fig_country_geo, width='stretch')
+                    st.plotly_chart(fig_country_geo, width='stretch', config=PUB_EXPORT)
                     _max_trials = int(_hub["Trials"].max()) if not _hub.empty else 0
                     _top_city = (
                         _hub.sort_values("Trials", ascending=False).iloc[0]["City"]
@@ -3689,7 +3783,7 @@ with tab_geo:
                     make_bar(country_city_counts, "City", "OpenSiteCount",
                              height=_panel_h,
                              color=THEME["primary"]),
-                    width='stretch',
+                    width='stretch', config=PUB_EXPORT,
                 )
 
             st.markdown(f"**{selected_country} city table**")
@@ -4105,8 +4199,6 @@ _H_YAXIS = dict(
     ticks="outside", ticklen=4, tickwidth=1.2,
     tickfont=dict(size=_TICK_SZ, color=_AX_COLOR),
 )
-PUB_EXPORT = {"toImageButtonOptions": {"format": "png", "width": 1600, "height": 900, "scale": 2}}
-
 
 def pub_bar(df_plot, x, y, color=NEJM_BLUE, title="", xlab="", ylab="Number of trials", height=420):
     """Title kept as a no-op kwarg for back-compat; the journal-style title
@@ -4433,7 +4525,7 @@ with tab_deepdive:
                     if not _ents.empty:
                         st.plotly_chart(
                             make_bar(_ents, "Entity", "Trials", height=280),
-                            width="stretch",
+                            width="stretch", config=PUB_EXPORT,
                         )
 
                     st.markdown("**Modality breakdown**")
@@ -4461,7 +4553,7 @@ with tab_deepdive:
                     if not _phase_counts.empty:
                         st.plotly_chart(
                             make_bar(_phase_counts, "Phase", "Count", height=280),
-                            width="stretch",
+                            width="stretch", config=PUB_EXPORT,
                         )
 
                     st.markdown("**Disease family split**")
@@ -4843,31 +4935,15 @@ with tab_pub:
         ),
     )
 
-    # ── Stacking groups: top-N disease entities + 'Other' ──────────────────
-    # Rheumatology entities all sit in a navy → light-blue ramp so they read as
-    # one super-family; non-rheum buckets sit in a distinct slate range.
-    _ENTITY_COLORS = {
-        # Connective tissue (deep navy → light navy)
-        "SLE":                   "#0b3d91",
-        "SSc":                   "#1e40af",
-        "IIM":                   "#2563eb",
-        "Sjogren":               "#3b82f6",
-        "CTD_other":             "#60a5fa",
-        "IgG4-RD":               "#93c5fd",
-        # Inflammatory arthritis
-        "RA":                    "#2e6dbf",
-        # Vasculitis
-        "AAV":                   "#5fa3d9",
-        "Behcet":                "#7dd3fc",
-        # Neurologic autoimmune (own family, violet accent)
-        "Neurologic autoimmune": "#7c3aed",
-        # Other autoimmune (slate)
-        "Other immune-mediated": "#475569",   # slate-600
-        # Multi/Other
-        "Basket/Multidisease":   "#94a3b8",   # slate-400
-        "Unclassified":          "#cbd5e1",   # slate-300
-        "Other":                 "#e2e8f0",   # slate-200
-    }
+    # Use the canonical ENTITY_COLORS palette (defined at module top) so
+    # the temporal-trends stack matches every other entity-grouped chart
+    # in the dashboard. The local override below maps two virtual groups
+    # the stacked-area uses ("Neurologic autoimmune" as a roll-up of
+    # specific neuro entities, and "Other" as the long-tail catch-all)
+    # to consistent colours.
+    _ENTITY_COLORS = dict(ENTITY_COLORS)
+    _ENTITY_COLORS["Neurologic autoimmune"] = ENTITY_COLORS["MS"]   # violet anchor
+    _ENTITY_COLORS["Other"] = ENTITY_COLORS.get("Other", "#e5e7eb")
 
     # cGVHD trials are folded into "Other immune-mediated"; neurology trials
     # (now their own L1 family) are split out from "Other immune-mediated"
@@ -5554,6 +5630,12 @@ with tab_pub:
         disease_sorted["TotalEnrolled"] = disease_sorted["TotalEnrolled"].fillna(0).astype(int)
         _disease_order = disease_sorted["Disease"].tolist()
 
+        # Per-entity bar colours so the reader can match a disease across
+        # this figure and the rest of the dashboard. ENTITY_COLORS is the
+        # canonical palette; unmatched labels fall back to slate.
+        _bar_colors = [
+            ENTITY_COLORS.get(_d, "#94a3b8") for _d in disease_sorted["Disease"]
+        ]
         _row_h = max(380, len(disease_sorted) * 36 + 120)
         fig5 = make_subplots(
             rows=1, cols=2,
@@ -5564,7 +5646,7 @@ with tab_pub:
         fig5.add_trace(
             go.Bar(
                 x=disease_sorted["Trials"], y=disease_sorted["Disease"],
-                orientation="h", marker_color=NEJM_AMBER,
+                orientation="h", marker_color=_bar_colors,
                 text=disease_sorted["Trials"], textposition="outside",
                 textfont=dict(size=10, color=_AX_COLOR),
                 hovertemplate="<b>%{y}</b><br>%{x} trials<extra></extra>",
@@ -5575,7 +5657,7 @@ with tab_pub:
         fig5.add_trace(
             go.Bar(
                 x=disease_sorted["TotalEnrolled"], y=disease_sorted["Disease"],
-                orientation="h", marker_color=NEJM_BLUE,
+                orientation="h", marker_color=_bar_colors,
                 text=disease_sorted["TotalEnrolled"].apply(lambda v: f"{v:,}" if v else ""),
                 textposition="outside",
                 textfont=dict(size=10, color=_AX_COLOR),
