@@ -331,54 +331,60 @@ _SUNBURST_L1_ORDER = [
 #      when hue collapses for a CB reader.
 
 ENTITY_COLORS = {
-    # ── Rheumatology cluster: cool sky/cyan/teal continuum ──
-    # CTD uses Tailwind sky-9 (deep) → sky-400 (light), prevalence-ordered.
-    # Slightly desaturated vs ColorBrewer Blues for editorial calm.
-    "SLE":              "#0c4a6e",   # sky-900 — anchor (most prevalent CTD)
+    # Each family uses a NARROWED shade range (6 mid-band shades) to
+    # avoid stark "outlier" wedges at the extreme lightest/darkest ends
+    # of the Tailwind scale. Previously violet-100 (Neurology_other) and
+    # stone-100 (GVHD) read as near-white outliers next to mid-shade
+    # neighbours; sky-950 (Combined-rheum basket) read as deeper than
+    # its own family L1. The mid-band approach keeps within-family
+    # contrast subtle and editorial.
+    #
+    # Anchor convention: each family's deepest entity matches the
+    # family's L1 wedge colour, and that family's basket-label entry
+    # also matches the anchor (so the basket wedge reads as "the
+    # multi-disease version of the anchor entity" rather than as a
+    # separate colour).
+
+    # ── Rheumatology cluster: sky-900 → sky-400 (6 shades) ──
+    "SLE":              "#0c4a6e",   # sky-900 — anchor (matches family L1)
     "SSc":              "#075985",   # sky-800
     "Sjogren":          "#0369a1",   # sky-700
     "IIM":              "#0284c7",   # sky-600
     "IgG4-RD":          "#0ea5e9",   # sky-500
     "CTD_other":        "#38bdf8",   # sky-400 — catch-all
 
-    # IA — teal-700 (cool, distinct hue from CTD-sky but still rheum-cluster cool)
+    # IA + Vasc — distinct cool hues (still rheum cluster)
     "RA":               "#0f766e",   # teal-700
-
-    # Vasculitis — cyan family (cool, between CTD sky and IA teal)
     "AAV":              "#0e7490",   # cyan-700 — anchor
     "Behcet":           "#06b6d4",   # cyan-500
 
-    # ── Neurologic autoimmune: Tailwind violet family, prevalence-ordered ──
-    "MS":               "#5b21b6",   # violet-800 — anchor (most prevalent neuro)
+    # ── Neurologic autoimmune: violet-800 → violet-200 (7 shades) ──
+    "MS":               "#5b21b6",   # violet-800 — anchor (matches family L1)
     "NMOSD":            "#6d28d9",   # violet-700
     "Myasthenia":       "#7c3aed",   # violet-600
     "CIDP":             "#8b5cf6",   # violet-500
     "AIE":              "#a78bfa",   # violet-400
     "MOGAD":            "#c4b5fd",   # violet-300
-    "Stiff_person":     "#ddd6fe",   # violet-200
-    "Stiff-person":     "#ddd6fe",   # alias for the L2 label
-    "Neurology_other":  "#ede9fe",   # violet-100 — catch-all
-    "Neuro multi-disease": "#4c1d95",  # violet-900 — neuro-basket anchor
+    "Stiff_person":     "#c4b5fd",   # violet-300 — shares MOGAD shade (both rare)
+    "Stiff-person":     "#c4b5fd",   # alias for the L2 label
+    "Neurology_other":  "#ddd6fe",   # violet-200 — catch-all (was violet-100; too pale)
+    "Neuro multi-disease": "#5b21b6",  # violet-800 — matches MS anchor (was violet-900; too dark)
 
-    # ── Other autoimmune: pure stone gradient (warm-neutral, single hue) ──
-    # Sub-families differentiated by LIGHTNESS only — no amber/yellow
-    # accents (those were creating a busy mix of rust/stone/yellow that
-    # competed with the rheum cluster for attention). Reader sees one
-    # warm-gray cluster identity and parses sub-families by size + label.
-    # Order mirrors clinical prevalence: cGVHD/cytopenias most common,
-    # GVHD sub-family rarest.
-    "Other immune-mediated":   "#44403c",   # stone-700 (anchor — matches family L1)
+    # ── Other autoimmune: stone-700 → stone-200 (6 shades) ──
+    # Pure stone gradient, no amber/yellow accents — sub-families read
+    # by lightness alone within one warm-gray cluster.
+    "Other immune-mediated":   "#44403c",   # stone-700 — anchor (matches family L1)
     "cGVHD":                   "#57534e",   # stone-600
     "Autoimmune cytopenias":   "#78716c",   # stone-500
     "Glomerular / renal":      "#a8a29e",   # stone-400
     "Endocrine autoimmune":    "#d6d3d1",   # stone-300
     "Dermatologic autoimmune": "#e7e5e4",   # stone-200
-    "GVHD":                    "#f5f5f4",   # stone-100 (lightest sub-family)
+    "GVHD":                    "#e7e5e4",   # stone-200 — shares dermatologic shade (was stone-100; too pale)
     "Other autoimmune":        "#44403c",   # fallback (matches family L1)
 
     # ── Baskets ──
-    "Combined CTD / IA / Vasculitis": "#082f49",   # sky-950 — deepest blue, anchors rheum
-    "Basket/Multidisease":            "#94a3b8",   # slate-400 — neutral mixed-class
+    "Combined CTD / IA / Vasculitis": "#0c4a6e",   # sky-900 — matches SLE anchor (was sky-950)
+    "Basket/Multidisease":            "#94a3b8",   # slate-400
 
     # ── Sentinels ──
     "Unclassified": "#e2e8f0",   # slate-200
