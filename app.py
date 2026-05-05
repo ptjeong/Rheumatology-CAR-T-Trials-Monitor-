@@ -325,50 +325,56 @@ _SUNBURST_L1_ORDER = [
 #      when hue collapses for a CB reader.
 
 ENTITY_COLORS = {
-    # ── Connective tissue (Blues 6-class, prevalence-ordered) ──
-    "SLE":              "#08519c",   # blues-7 — anchor (most prevalent)
-    "SSc":              "#2171b5",
-    "Sjogren":          "#4292c6",
-    "IIM":              "#6baed6",
-    "IgG4-RD":          "#9ecae1",
-    "CTD_other":        "#c6dbef",   # lightest — catch-all
+    # ── Rheumatology cluster: cool sky/cyan/teal continuum ──
+    # CTD uses Tailwind sky-9 (deep) → sky-400 (light), prevalence-ordered.
+    # Slightly desaturated vs ColorBrewer Blues for editorial calm.
+    "SLE":              "#0c4a6e",   # sky-900 — anchor (most prevalent CTD)
+    "SSc":              "#075985",   # sky-800
+    "Sjogren":          "#0369a1",   # sky-700
+    "IIM":              "#0284c7",   # sky-600
+    "IgG4-RD":          "#0ea5e9",   # sky-500
+    "CTD_other":        "#38bdf8",   # sky-400 — catch-all
 
-    # ── Inflammatory arthritis (single — teal accent between blue & green) ──
-    "RA":               "#0d9488",   # teal-600
+    # IA — teal-700 (cool, distinct hue from CTD-sky but still rheum-cluster cool)
+    "RA":               "#0f766e",   # teal-700
 
-    # ── Vasculitis (Cyans 2-shade — cool but distinct from CTD blue) ──
-    "AAV":              "#0891b2",   # cyan-700 — anchor
-    "Behcet":           "#67e8f9",   # cyan-300
+    # Vasculitis — cyan family (cool, between CTD sky and IA teal)
+    "AAV":              "#0e7490",   # cyan-700 — anchor
+    "Behcet":           "#06b6d4",   # cyan-500
 
-    # ── Neurologic autoimmune (Purples 8-class, prevalence-ordered) ──
-    "MS":               "#3f007d",   # purples-8 — anchor (most prevalent neuro)
-    "NMOSD":            "#54278f",
-    "Myasthenia":       "#6a51a3",
-    "CIDP":             "#807dba",
-    "AIE":              "#9e9ac8",
-    "MOGAD":            "#bcbddc",
-    "Stiff_person":     "#dadaeb",
-    "Stiff-person":     "#dadaeb",   # alias for the L2 label
-    "Neurology_other":  "#efedf5",   # lightest — catch-all
-    "Neuro multi-disease": "#2d004b",  # extra-deep — signals "multi-disease basket"
+    # ── Neurologic autoimmune: Tailwind violet family, prevalence-ordered ──
+    "MS":               "#5b21b6",   # violet-800 — anchor (most prevalent neuro)
+    "NMOSD":            "#6d28d9",   # violet-700
+    "Myasthenia":       "#7c3aed",   # violet-600
+    "CIDP":             "#8b5cf6",   # violet-500
+    "AIE":              "#a78bfa",   # violet-400
+    "MOGAD":            "#c4b5fd",   # violet-300
+    "Stiff_person":     "#ddd6fe",   # violet-200
+    "Stiff-person":     "#ddd6fe",   # alias for the L2 label
+    "Neurology_other":  "#ede9fe",   # violet-100 — catch-all
+    "Neuro multi-disease": "#4c1d95",  # violet-900 — neuro-basket anchor
 
-    # ── Other autoimmune (Oranges/Reds — warm earth tones, distinct from cool rheum) ──
-    "Other immune-mediated":   "#d94801",   # oranges-6 — anchor
-    "cGVHD":                   "#a63603",   # oranges-7
-    "Autoimmune cytopenias":   "#7f2704",   # oranges-8 (deepest — cell-destruction)
-    "Glomerular / renal":      "#f16913",   # oranges-5
-    "Endocrine autoimmune":    "#fd8d3c",   # oranges-4
-    "Dermatologic autoimmune": "#fdae6b",   # oranges-3
-    "GVHD":                    "#fdd0a2",   # oranges-2 (lightest sub-family)
-    "Other autoimmune":        "#d94801",   # fallback (matches Other immune-mediated)
+    # ── Other autoimmune: muted warm tones (stone with subtle amber accents) ──
+    # Desaturated vs the previous Oranges palette — the bright orange/red was
+    # visually competing with the rheum-cluster cool tones. The current
+    # treatment keeps "warmth = different cluster" as the cue but tones it
+    # down for editorial harmony with the rest of the figure.
+    "Other immune-mediated":   "#78716c",   # stone-500 — neutral anchor
+    "cGVHD":                   "#57534e",   # stone-700
+    "Autoimmune cytopenias":   "#92400e",   # amber-800 — single deep accent
+    "Glomerular / renal":      "#b45309",   # amber-700
+    "Endocrine autoimmune":    "#a8a29e",   # stone-400
+    "Dermatologic autoimmune": "#d6d3d1",   # stone-300
+    "GVHD":                    "#a16207",   # yellow-700 — sub-family accent
+    "Other autoimmune":        "#78716c",   # fallback (matches Other immune-mediated)
 
     # ── Baskets ──
-    "Combined CTD / IA / Vasculitis": "#08306b",   # blues-9 (deepest) — anchors the rheum cluster
+    "Combined CTD / IA / Vasculitis": "#082f49",   # sky-950 — deepest blue, anchors rheum
     "Basket/Multidisease":            "#94a3b8",   # slate-400 — neutral mixed-class
 
     # ── Sentinels ──
-    "Unclassified": "#d1d5db",   # gray-300
-    "Other":        "#e5e7eb",   # gray-200
+    "Unclassified": "#e2e8f0",   # slate-200
+    "Other":        "#f1f5f9",   # slate-100
 }
 
 # Plotly modebar PNG-export config — tuned for presentation use.
@@ -3286,7 +3292,11 @@ with tab_overview:
         _fig_sb = go.Figure(go.Sunburst(
             ids=_ids, labels=_labels, parents=_parents, values=_values,
             branchvalues="total",
-            marker=dict(colors=_colors, line=dict(color="white", width=1.2)),
+            # Finer hairline separators (0.6 vs 1.2) for editorial
+            # restraint — 1.2 made the figure feel like a stained-glass
+            # window; 0.6 is the JAMA / NEJM standard for radial
+            # sub-divisions.
+            marker=dict(colors=_colors, line=dict(color="white", width=0.6)),
             hovertemplate="<b>%{label}</b><br>%{value} trials<br>%{percentRoot:.0%} of filtered total<extra></extra>",
             insidetextorientation="auto",
             maxdepth=3,
@@ -3305,7 +3315,12 @@ with tab_overview:
             height=560, margin=dict(l=8, r=8, t=8, b=8),
             paper_bgcolor="white", plot_bgcolor="white",
             font=dict(family=FONT_FAMILY, size=12, color=THEME["text"]),
-            uniformtext=dict(minsize=10, mode="hide"),
+            # uniformtext.minsize=12 hides labels on wedges too small to
+            # render text legibly (was 10 → too many tiny labels
+            # overlapping near the rim, especially for the long-tail
+            # neuro and Other-autoimmune entities). Bigger labels on
+            # only the substantive wedges read more elegantly.
+            uniformtext=dict(minsize=12, mode="hide"),
         )
         st.plotly_chart(_fig_sb, width='stretch', config=PUB_EXPORT)
 
@@ -3439,16 +3454,28 @@ with tab_overview:
             )
             with _ov_a:
                 st.markdown("**Trials by disease**")
+                # Per-bar entity colour from the canonical ENTITY_COLORS
+                # palette so this chart matches the sunburst L2 ring,
+                # Fig 1 stacked area, and Fig 5 bars exactly. Falls back
+                # to the family colour when a roll-up label (e.g.
+                # "Neurologic autoimmune") isn't in ENTITY_COLORS.
+                _ent_counts["_BarColor"] = _ent_counts.apply(
+                    lambda r: ENTITY_COLORS.get(
+                        r["_DisplayDisease"],
+                        _FAMILY_COLORS.get(r["_Family"], "#94a3b8"),
+                    ),
+                    axis=1,
+                )
                 _fig_ov1 = px.bar(
-                    _ent_counts, x="Trials", y="_DisplayDisease", color="_Family",
+                    _ent_counts, x="Trials", y="_DisplayDisease",
                     orientation="h",
-                    color_discrete_map=_FAMILY_COLORS,
-                    category_orders={"_Family": _FAMILY_ORDER},
-                    labels={"_DisplayDisease": "Disease", "_Family": "Family"},
                     template="plotly_white",
                     height=_PANEL_HEIGHT,
                 )
-                _fig_ov1.update_traces(marker_line_width=0, opacity=1)
+                _fig_ov1.update_traces(
+                    marker_color=_ent_counts["_BarColor"].tolist(),
+                    marker_line_width=0, opacity=1,
+                )
                 _fig_ov1.update_layout(
                     margin=dict(l=140, r=24, t=12, b=56),
                     showlegend=False,
