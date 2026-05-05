@@ -2467,6 +2467,44 @@ if "SponsorType" not in df.columns and "LeadSponsor" in df.columns:
     except Exception:
         pass
 
+# ── Chart export format ────────────────────────────────────────────────
+# User-controlled toggle that drives every chart's modebar download
+# button. PNG is the default — universal compatibility with PowerPoint /
+# Keynote / Google Slides, embeds without import friction. SVG is the
+# alternative for journal submission or post-editing in Illustrator /
+# Inkscape / Figma — vector, infinite resolution, individual elements
+# editable. Stored in session_state so the choice persists across reruns.
+with st.sidebar.expander("Chart export format", expanded=False):
+    _export_choice = st.radio(
+        "Default download format",
+        options=["PNG (slides, 5× resolution)",
+                 "SVG (vector — journal / Illustrator)"],
+        index=0,
+        key="chart_export_fmt",
+        help=(
+            "PNG — best for presentations, slide decks, and quick "
+            "embedding. Renders at 5× the chart's natural size for "
+            "crisp 4K-projection / 300-DPI print quality.\n\n"
+            "SVG — best for journal submission requiring vector graphics, "
+            "or for post-editing in Illustrator / Inkscape / Figma. "
+            "Infinite resolution; every wedge / bar / label is an "
+            "editable element."
+        ),
+    )
+# Mutate the module-level PUB_EXPORT in place so every chart's modebar
+# uses the chosen format. Plotly's downloadImage supports png / jpeg /
+# webp / svg — for PDF the user should download SVG and convert in
+# Illustrator (kaleido server-side rendering is the alternative but
+# adds a 30 MB dependency for a niche use case).
+if _export_choice.startswith("SVG"):
+    PUB_EXPORT["toImageButtonOptions"]["format"] = "svg"
+    # SVG is vector — no scale factor needed; setting scale=1 keeps the
+    # output dimensions matching the figure's natural rendered size.
+    PUB_EXPORT["toImageButtonOptions"]["scale"] = 1
+else:
+    PUB_EXPORT["toImageButtonOptions"]["format"] = "png"
+    PUB_EXPORT["toImageButtonOptions"]["scale"] = 5
+
 st.sidebar.header("Filters")
 
 _FILTER_KEYS = (
