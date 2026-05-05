@@ -426,7 +426,7 @@ ENTITY_COLORS = {
 PUB_EXPORT = {
     "toImageButtonOptions": {
         "format": "png",
-        "scale": 4,
+        "scale": 5,
     },
     "displaylogo": False,
     "modeBarButtonsToRemove": [
@@ -434,6 +434,70 @@ PUB_EXPORT = {
         "hoverCompareCartesian", "toggleSpikelines",
     ],
 }
+
+
+# ── SVG sidekick to the modebar PNG button ────────────────────────────
+# Plotly's modebar shows a "Download as PNG" button via PUB_EXPORT
+# above. To complete the presentation/publication export story we
+# need an SVG button right next to it — vector for journal submission
+# or post-editing in Illustrator / Inkscape / Figma. Plotly's modebar
+# can't host a second download format without a custom JS component,
+# so we render SVG server-side via kaleido and expose it as a small
+# Streamlit download button immediately below each chart. Cached by
+# figure JSON so re-renders (filter changes don't touch most charts)
+# are instant; first page load pays the kaleido warm-up + render cost
+# only on each chart's initial appearance.
+@st.cache_data(show_spinner=False, max_entries=64)
+def _figure_to_svg_bytes(fig_json_str: str) -> bytes | None:
+    """Render a Plotly figure JSON to SVG bytes via kaleido.
+
+    Returns None if kaleido is unavailable or the render fails — the
+    caller silently skips the SVG download button in that case so the
+    PNG modebar export remains the user's working option.
+    """
+    try:
+        import json as _json
+        fig = go.Figure(_json.loads(fig_json_str))
+        return fig.to_image(format="svg")
+    except Exception:
+        return None
+
+
+def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None) -> None:
+    """Render a Plotly chart with both PNG (modebar) and SVG (button below).
+
+    Drop-in replacement for `_chart(fig, key='fig', width='stretch', config=PUB_EXPORT)` at every chart call site. The PNG download
+    lives on Plotly's modebar (camera icon, top-right of the chart);
+    the SVG download is a small right-aligned button rendered
+    immediately below the chart so the two formats sit visually
+    adjacent. `key` is required and must be unique per chart so the
+    download_button doesn't collide with sibling charts on the same page.
+    """
+    st.plotly_chart(fig, width=width, config=config or PUB_EXPORT)
+    # Server-side SVG render — cached so re-renders are instant.
+    try:
+        svg_bytes = _figure_to_svg_bytes(fig.to_json())
+    except Exception:
+        svg_bytes = None
+    if svg_bytes:
+        # Right-aligned narrow column so the SVG button visually pairs
+        # with the modebar PNG icon at the top-right of the chart above.
+        _l, _r = st.columns([5, 1])
+        with _r:
+            st.download_button(
+                label="↓ SVG",
+                data=svg_bytes,
+                file_name=f"{key}.svg",
+                mime="image/svg+xml",
+                key=f"svg_{key}",
+                help=(
+                    "Download as vector SVG — for journal submission "
+                    "(NEJM/JAMA/Lancet accept SVG via PDF wrap) or "
+                    "post-editing in Illustrator / Inkscape / Figma. "
+                    "PNG download lives on the chart's modebar above."
+                ),
+                use_container_width=True,
+            )
 
 # Sub-family palette — used only on the sunburst L2 ring inside the
 # "Other autoimmune" family. Neurologic gets a distinct violet accent (per
@@ -2467,44 +2531,6 @@ if "SponsorType" not in df.columns and "LeadSponsor" in df.columns:
     except Exception:
         pass
 
-# ── Chart export format ────────────────────────────────────────────────
-# User-controlled toggle that drives every chart's modebar download
-# button. PNG is the default — universal compatibility with PowerPoint /
-# Keynote / Google Slides, embeds without import friction. SVG is the
-# alternative for journal submission or post-editing in Illustrator /
-# Inkscape / Figma — vector, infinite resolution, individual elements
-# editable. Stored in session_state so the choice persists across reruns.
-with st.sidebar.expander("Chart export format", expanded=False):
-    _export_choice = st.radio(
-        "Default download format",
-        options=["PNG (slides, 5× resolution)",
-                 "SVG (vector — journal / Illustrator)"],
-        index=0,
-        key="chart_export_fmt",
-        help=(
-            "PNG — best for presentations, slide decks, and quick "
-            "embedding. Renders at 5× the chart's natural size for "
-            "crisp 4K-projection / 300-DPI print quality.\n\n"
-            "SVG — best for journal submission requiring vector graphics, "
-            "or for post-editing in Illustrator / Inkscape / Figma. "
-            "Infinite resolution; every wedge / bar / label is an "
-            "editable element."
-        ),
-    )
-# Mutate the module-level PUB_EXPORT in place so every chart's modebar
-# uses the chosen format. Plotly's downloadImage supports png / jpeg /
-# webp / svg — for PDF the user should download SVG and convert in
-# Illustrator (kaleido server-side rendering is the alternative but
-# adds a 30 MB dependency for a niche use case).
-if _export_choice.startswith("SVG"):
-    PUB_EXPORT["toImageButtonOptions"]["format"] = "svg"
-    # SVG is vector — no scale factor needed; setting scale=1 keeps the
-    # output dimensions matching the figure's natural rendered size.
-    PUB_EXPORT["toImageButtonOptions"]["scale"] = 1
-else:
-    PUB_EXPORT["toImageButtonOptions"]["format"] = "png"
-    PUB_EXPORT["toImageButtonOptions"]["scale"] = 5
-
 st.sidebar.header("Filters")
 
 _FILTER_KEYS = (
@@ -3386,7 +3412,7 @@ with tab_overview:
             # only the substantive wedges read more elegantly.
             uniformtext=dict(minsize=12, mode="hide"),
         )
-        st.plotly_chart(_fig_sb, width='stretch', config=PUB_EXPORT)
+        _chart(_fig_sb, key='fig_sb', width='stretch', config=PUB_EXPORT)
 
         # Family headline row — uses the granular DiseaseFamily (CTD / IA /
         # Vasc / Classical-rheum basket / etc.) so the tile breakdown stays
@@ -3558,7 +3584,7 @@ with tab_overview:
                     yaxis_title=None, xaxis_title="Number of trials",
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
-                st.plotly_chart(_fig_ov1, width='stretch', config=PUB_EXPORT)
+                _chart(_fig_ov1, key='fig_ov1', width='stretch', config=PUB_EXPORT)
 
         # Panel 2: Antigen target, colored stack by family
         _tg_ov = df_filt.copy()
@@ -3592,7 +3618,7 @@ with tab_overview:
                     yaxis_title=None, xaxis_title="Number of trials",
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
-                st.plotly_chart(_fig_ov2, width='stretch', config=PUB_EXPORT)
+                _chart(_fig_ov2, key='fig_ov2', width='stretch', config=PUB_EXPORT)
 
         _ov_c, _ov_d = st.columns(2)
 
@@ -3620,7 +3646,7 @@ with tab_overview:
                 xaxis_title="Phase", yaxis_title="Number of trials",
                 font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
             )
-            st.plotly_chart(_fig_ov3, width='stretch', config=PUB_EXPORT)
+            _chart(_fig_ov3, key='fig_ov3', width='stretch', config=PUB_EXPORT)
 
         # Panel 4: Trials by start year, stacked area by family
         _yr_ov = df_filt.dropna(subset=["StartYear"]).copy()
@@ -3649,7 +3675,7 @@ with tab_overview:
                     xaxis_title="Start year", yaxis_title="Number of trials",
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                 )
-                st.plotly_chart(_fig_ov4, width='stretch', config=PUB_EXPORT)
+                _chart(_fig_ov4, key='fig_ov4', width='stretch', config=PUB_EXPORT)
 
     # -----------------------------------------------------------------
     # PRISMA — collapsed expander at the bottom of the Overview. Full
@@ -3756,7 +3782,7 @@ with tab_geo:
                     lonaxis=dict(range=[-175, 190]),
                 ),
             )
-            st.plotly_chart(fig_world, width='stretch', config=PUB_EXPORT)
+            _chart(fig_world, key='fig_world', width='stretch', config=PUB_EXPORT)
             if "Open sites" in _layers and not geo_sites.empty:
                 st.caption(
                     f"{len(geo_sites):,} open / recruiting site locations plotted. "
@@ -3772,9 +3798,9 @@ with tab_geo:
                          height=320, hide_index=True)
         with c2:
             st.markdown("**Top countries**")
-            st.plotly_chart(
+            _chart(
                 make_bar(country_counts.head(12), "Country", "Count", height=320, color=THEME["primary"]),
-                width='stretch', config=PUB_EXPORT,
+                key="top_countries", width='stretch', config=PUB_EXPORT,
             )
     else:
         st.info("No country information available for the current filter selection.")
@@ -3894,7 +3920,7 @@ with tab_geo:
                             fitbounds="locations",
                         ),
                     )
-                    st.plotly_chart(fig_country_geo, width='stretch', config=PUB_EXPORT)
+                    _chart(fig_country_geo, key='fig_country_geo', width='stretch', config=PUB_EXPORT)
                     _max_trials = int(_hub["Trials"].max()) if not _hub.empty else 0
                     _top_city = (
                         _hub.sort_values("Trials", ascending=False).iloc[0]["City"]
@@ -3907,11 +3933,11 @@ with tab_geo:
                         )
             with c2:
                 st.markdown("**Open sites by city**")
-                st.plotly_chart(
+                _chart(
                     make_bar(country_city_counts, "City", "OpenSiteCount",
                              height=_panel_h,
                              color=THEME["primary"]),
-                    width='stretch', config=PUB_EXPORT,
+                    key=f"city_sites_{selected_country}", width='stretch', config=PUB_EXPORT,
                 )
 
             st.markdown(f"**{selected_country} city table**")
@@ -4651,9 +4677,9 @@ with tab_deepdive:
                         .rename_axis("Entity").reset_index(name="Trials")
                     )
                     if not _ents.empty:
-                        st.plotly_chart(
+                        _chart(
                             make_bar(_ents, "Entity", "Trials", height=280),
-                            width="stretch", config=PUB_EXPORT,
+                            key=f"focus_entity_{focus_label}", width="stretch", config=PUB_EXPORT,
                         )
 
                     st.markdown("**Modality breakdown**")
@@ -4679,9 +4705,9 @@ with tab_deepdive:
                     )
                     _phase_counts = _phase_counts[_phase_counts["Count"] > 0]
                     if not _phase_counts.empty:
-                        st.plotly_chart(
+                        _chart(
                             make_bar(_phase_counts, "Phase", "Count", height=280),
-                            width="stretch", config=PUB_EXPORT,
+                            key=f"focus_phase_{focus_label}", width="stretch", config=PUB_EXPORT,
                         )
 
                     st.markdown("**Disease family split**")
@@ -5170,7 +5196,7 @@ with tab_pub:
                 font=dict(size=10, color=THEME["muted"]),
                 yanchor="bottom", xanchor="center",
             )
-        st.plotly_chart(fig1, width='stretch', config=PUB_EXPORT)
+        _chart(fig1, key='fig1', width='stretch', config=PUB_EXPORT)
 
         # Key statistics — use yearly totals, restricted to the displayed year
         # window so the CAGR baseline matches what the reader actually sees.
@@ -5261,7 +5287,7 @@ with tab_pub:
             ),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        st.plotly_chart(fig2, width='stretch', config=PUB_EXPORT)
+        _chart(fig2, key='fig2', width='stretch', config=PUB_EXPORT)
 
         total_ph = phase_counts["Trials"].sum()
         early = phase_counts.loc[phase_counts["Phase"].isin(["Early Phase I", "Phase I"]), "Trials"].sum()
@@ -5356,7 +5382,7 @@ with tab_pub:
                 '</div>',
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(fig3_map, width='stretch', config=PUB_EXPORT)
+            _chart(fig3_map, key='fig3_map', width='stretch', config=PUB_EXPORT)
         with _f3_bar_col:
             st.markdown(
                 '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
@@ -5364,7 +5390,7 @@ with tab_pub:
                 '</div>',
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(fig3_bar, width='stretch', config=PUB_EXPORT)
+            _chart(fig3_bar, key='fig3_bar', width='stretch', config=PUB_EXPORT)
 
         total_geo = geo_counts["Trials"].sum()
         top3_geo = geo_counts.head(3)
@@ -5488,7 +5514,7 @@ with tab_pub:
                 '</div>',
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(fig4a, width='stretch', config=PUB_EXPORT)
+            _chart(fig4a, key='fig4a', width='stretch', config=PUB_EXPORT)
             if len(_over_cap) > 0:
                 st.markdown(
                     f'<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
@@ -5506,7 +5532,7 @@ with tab_pub:
                 '</div>',
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(fig4b, width='stretch', config=PUB_EXPORT)
+            _chart(fig4b, key='fig4b', width='stretch', config=PUB_EXPORT)
             st.markdown(
                 '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
                 'Whiskers = IQR (Q1–Q3).'
@@ -5693,7 +5719,7 @@ with tab_pub:
             ),
             showlegend=False,
         )
-        st.plotly_chart(fig4d, width='stretch', config=PUB_EXPORT)
+        _chart(fig4d, key='fig4d', width='stretch', config=PUB_EXPORT)
         st.markdown(
             '<div class="pub-fig-caption" style="margin-top: 0.1rem;">'
             f'Whiskers = IQR (Q1–Q3). Dashed line marks the overall median ({_overall_median} patients).'
@@ -5818,7 +5844,7 @@ with tab_pub:
         )
         fig5.update_xaxes(title_text="Number of trials", row=1, col=1)
         fig5.update_xaxes(title_text="Total planned patients (reported trials)", row=1, col=2)
-        st.plotly_chart(fig5, width='stretch', config=PUB_EXPORT)
+        _chart(fig5, key='fig5', width='stretch', config=PUB_EXPORT)
 
         total_dis = disease_counts["Trials"].sum()
         top3 = disease_counts.head(3)
@@ -5948,7 +5974,7 @@ with tab_pub:
                 title_text="",
             ),
         )
-        st.plotly_chart(fig6, width='stretch', config=PUB_EXPORT)
+        _chart(fig6, key='fig6', width='stretch', config=PUB_EXPORT)
 
         total_tg = target_counts["Trials"].sum()
         cd19_n = int(target_counts.loc[target_counts["Target"] == "CD19", "Trials"].sum())
@@ -6030,7 +6056,7 @@ with tab_pub:
             xaxis=_H_XAXIS,
             uniformtext_minsize=9, uniformtext_mode="hide",
         )
-        st.plotly_chart(fig7a, width='stretch', config=PUB_EXPORT)
+        _chart(fig7a, key='fig7a', width='stretch', config=PUB_EXPORT)
 
         # 7b: Modality over time (stacked bar shows composition and inflection points)
         st.markdown(
@@ -6106,7 +6132,7 @@ with tab_pub:
                 xaxis_title="Start year",
                 yaxis_title=_y_title,
             )
-            st.plotly_chart(fig7b, width='stretch', config=PUB_EXPORT)
+            _chart(fig7b, key='fig7b', width='stretch', config=PUB_EXPORT)
             st.caption("Restricted to trials with start year ≥ 2019.")
 
         _render_fig7b(_mod_year_base)
@@ -6303,7 +6329,7 @@ with tab_pub:
                         showarrow=False,
                         font=dict(size=10, color=color, family=FONT_FAMILY),
                     )
-        st.plotly_chart(fig8, width='stretch', config=PUB_EXPORT)
+        _chart(fig8, key='fig8', width='stretch', config=PUB_EXPORT)
 
         _n_cells_filled = int((_trials_pivot.notna() & (_trials_pivot > 0)).sum().sum())
         _n_cells_total = _trials_pivot.size
@@ -6444,7 +6470,7 @@ with tab_pub:
                             showarrow=False,
                             font=dict(size=10, color=_color, family=FONT_FAMILY),
                         )
-            st.plotly_chart(fig9, width='stretch', config=PUB_EXPORT)
+            _chart(fig9, key='fig9', width='stretch', config=PUB_EXPORT)
 
             _top_pair = max(_co.items(), key=lambda kv: kv[1])
             # Surface the rheum-only vs mixed-class basket split so the
