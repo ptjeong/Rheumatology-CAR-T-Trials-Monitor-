@@ -553,11 +553,13 @@ def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None)
     # flips every chart's palette) — the per-chart placement keeps the
     # control "next to the save-as-png button" per user spec.
     _hc_active = bool(st.session_state.get("high_contrast", False))
-    _l, _svg_col, _hc_col = st.columns([3, 1, 1])
+    # Wider button columns (1.5 each) so labels like "🎨 High-contrast"
+    # don't truncate on narrow screens or inside nested-column charts.
+    _l, _svg_col, _hc_col = st.columns([2, 1.5, 1.5])
     if svg_bytes:
         with _svg_col:
             st.download_button(
-                label="↓ SVG",
+                label="↓ Save as SVG",
                 data=svg_bytes,
                 file_name=f"{key}.svg",
                 mime="image/svg+xml",
@@ -573,19 +575,24 @@ def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None)
     with _hc_col:
         # Label flips to indicate what the click WILL DO (the new state),
         # not the current state — matches the convention of OS toggle
-        # buttons ("Turn on" vs "Turn off").
-        _label = "◐ standard" if _hc_active else "◑ high-contrast"
+        # buttons ("Turn on" vs "Turn off"). Emoji prefix makes it
+        # visually distinct from the SVG download next to it so the
+        # reader doesn't mistake one for the other at a glance.
+        _label = (
+            "🎨 Standard palette" if _hc_active
+            else "🎨 High-contrast"
+        )
         if st.button(
             _label,
             key=f"hc_{key}",
             use_container_width=True,
             help=(
-                "Switch every chart's palette to a high-contrast mode "
-                "where every disease entity gets a maximally distinct "
-                "colour (Tableau-20 based). Useful when the default "
-                "family-clustered palette makes similarly-prevalent "
-                "diseases hard to tell apart in dense charts. Page-"
-                "level — toggling on any chart flips all charts."
+                "Toggle a high-contrast disease-entity palette where "
+                "every disease gets a maximally distinct colour "
+                "(Tableau-20 based). Useful when the default family-"
+                "clustered palette makes similarly-prevalent diseases "
+                "hard to tell apart. Page-level: toggling on any "
+                "chart flips all charts."
             ),
         ):
             st.session_state["high_contrast"] = not _hc_active
