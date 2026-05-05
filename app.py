@@ -403,6 +403,74 @@ ENTITY_COLORS = {
     "Other":        "#f1f5f9",   # slate-100
 }
 
+# Snapshot of the default palette so the high-contrast swap can revert.
+_ENTITY_COLORS_DEFAULT = dict(ENTITY_COLORS)
+_FAMILY_COLORS_DEFAULT = dict(_FAMILY_COLORS)
+
+# ── High-contrast disease-entity palette (toggleable via per-chart button) ──
+# Trades the default's family-cluster cohesion (where some entities share
+# shades for editorial calm) for maximum within-figure differentiation.
+# Built on Tableau-20, hand-assigned per entity so similarly-prevalent
+# diseases don't end up with adjacent hues. Activated when
+# st.session_state["high_contrast"] is True; the _chart helper offers a
+# toggle button next to the per-chart SVG download.
+_ENTITY_COLORS_HIGH_CONTRAST = {
+    # Rheumatology (CTD + IA + Vasc)
+    "SLE":              "#1f77b4",   # tableau blue
+    "SSc":              "#ff7f0e",   # tableau orange
+    "Sjogren":          "#2ca02c",   # tableau green
+    "IIM":              "#d62728",   # tableau red
+    "IgG4-RD":          "#9467bd",   # tableau purple
+    "CTD_other":        "#8c564b",   # tableau brown
+    "RA":               "#e377c2",   # tableau pink
+    "AAV":              "#7f7f7f",   # tableau gray
+    "Behcet":           "#bcbd22",   # tableau olive
+    # Neurologic
+    "MS":               "#17becf",   # tableau cyan
+    "NMOSD":            "#aec7e8",   # tableau light-blue
+    "Myasthenia":       "#ffbb78",   # tableau light-orange
+    "CIDP":             "#98df8a",   # tableau light-green
+    "AIE":              "#ff9896",   # tableau light-red
+    "MOGAD":            "#c5b0d5",   # tableau light-purple
+    "Stiff_person":     "#c49c94",   # tableau light-brown
+    "Stiff-person":     "#c49c94",
+    "Neurology_other":  "#f7b6d2",   # tableau light-pink
+    "Neuro multi-disease": "#dbdb8d", # tableau light-olive
+    # Other autoimmune
+    "Other immune-mediated":   "#9edae5",   # tableau light-cyan
+    "cGVHD":                   "#393b79",   # deep purple
+    "Autoimmune cytopenias":   "#637939",   # deep olive
+    "Glomerular / renal":      "#8c6d31",   # mustard
+    "Endocrine autoimmune":    "#843c39",   # brick
+    "Dermatologic autoimmune": "#7b4173",   # plum
+    "GVHD":                    "#5254a3",   # indigo
+    "Other autoimmune":        "#393b79",
+    # Baskets — anchored to deepest family hue
+    "Combined CTD / IA / Vasculitis": "#08306b",   # navy-deepest
+    "Rheumatology basket":            "#08306b",
+    "Neurology basket":               "#3f007d",   # violet-deepest
+    "Multidisease basket":            "#000000",   # black for max contrast
+    "Basket/Multidisease":            "#000000",
+    # Sentinels
+    "Unclassified": "#bbbbbb",
+    "Other":        "#dddddd",
+}
+
+# Family-level high-contrast palette — kept in lockstep with the entity
+# palette anchors so headline tiles, family-stacked bars, and the
+# sunburst L1 ring all flip together.
+_FAMILY_COLORS_HIGH_CONTRAST = {
+    "Connective tissue":          "#1f77b4",   # blue (matches SLE anchor)
+    "Inflammatory arthritis":     "#e377c2",   # pink (matches RA)
+    "Vasculitis":                 "#7f7f7f",   # gray (matches AAV)
+    "Rheumatology basket":        "#08306b",   # navy
+    "Rheumatology":               "#1f77b4",   # super-family — blue
+    "Neurologic autoimmune":      "#17becf",   # cyan (matches MS)
+    "Other autoimmune":           "#393b79",   # deep purple (matches cGVHD)
+    "Multidisease basket":        "#000000",   # black
+    "Other / Unclassified":       "#bbbbbb",
+}
+
 # Plotly modebar PNG-export config — tuned for presentation use.
 # Strategy: NO fixed width/height in toImageButtonOptions, just `scale=4`.
 # That tells Plotly "render at 4x the figure's natural dimensions",
@@ -479,11 +547,15 @@ def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None)
         svg_bytes = _figure_to_svg_bytes(fig.to_json())
     except Exception:
         svg_bytes = None
+    # Action row right-aligned below the chart: [↓ SVG] [contrast toggle].
+    # Visually pairs with the modebar PNG icon at the top-right of the
+    # chart above. Contrast toggle is page-level (clicking on any chart
+    # flips every chart's palette) — the per-chart placement keeps the
+    # control "next to the save-as-png button" per user spec.
+    _hc_active = bool(st.session_state.get("high_contrast", False))
+    _l, _svg_col, _hc_col = st.columns([3, 1, 1])
     if svg_bytes:
-        # Right-aligned narrow column so the SVG button visually pairs
-        # with the modebar PNG icon at the top-right of the chart above.
-        _l, _r = st.columns([5, 1])
-        with _r:
+        with _svg_col:
             st.download_button(
                 label="↓ SVG",
                 data=svg_bytes,
@@ -498,6 +570,26 @@ def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None)
                 ),
                 use_container_width=True,
             )
+    with _hc_col:
+        # Label flips to indicate what the click WILL DO (the new state),
+        # not the current state — matches the convention of OS toggle
+        # buttons ("Turn on" vs "Turn off").
+        _label = "◐ standard" if _hc_active else "◑ high-contrast"
+        if st.button(
+            _label,
+            key=f"hc_{key}",
+            use_container_width=True,
+            help=(
+                "Switch every chart's palette to a high-contrast mode "
+                "where every disease entity gets a maximally distinct "
+                "colour (Tableau-20 based). Useful when the default "
+                "family-clustered palette makes similarly-prevalent "
+                "diseases hard to tell apart in dense charts. Page-"
+                "level — toggling on any chart flips all charts."
+            ),
+        ):
+            st.session_state["high_contrast"] = not _hc_active
+            st.rerun()
 
 # Sub-family palette — used only on the sunburst L2 ring inside the
 # "Other autoimmune" family. Neurologic gets a distinct violet accent (per
@@ -2530,6 +2622,25 @@ if "SponsorType" not in df.columns and "LeadSponsor" in df.columns:
         )
     except Exception:
         pass
+
+# ── High-contrast palette swap ─────────────────────────────────────────
+# Mutates ENTITY_COLORS and _FAMILY_COLORS in place when the toggle is
+# active so every chart that reads from these dicts (sunburst L2, Fig 1
+# stacked area, Fig 5 bars, Overview Panel 1, family-rollup charts)
+# picks up the new shades on the next rerun. No-op when the toggle is
+# off — the dicts retain their default values.
+if st.session_state.get("high_contrast", False):
+    ENTITY_COLORS.clear()
+    ENTITY_COLORS.update(_ENTITY_COLORS_HIGH_CONTRAST)
+    _FAMILY_COLORS.clear()
+    _FAMILY_COLORS.update(_FAMILY_COLORS_HIGH_CONTRAST)
+else:
+    # Defensive — restore defaults in case a previous run mutated them
+    # and an exception prevented the cleanup.
+    ENTITY_COLORS.clear()
+    ENTITY_COLORS.update(_ENTITY_COLORS_DEFAULT)
+    _FAMILY_COLORS.clear()
+    _FAMILY_COLORS.update(_FAMILY_COLORS_DEFAULT)
 
 st.sidebar.header("Filters")
 
