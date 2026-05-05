@@ -542,61 +542,12 @@ def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None)
     download_button doesn't collide with sibling charts on the same page.
     """
     st.plotly_chart(fig, width=width, config=config or PUB_EXPORT)
-    # Server-side SVG render — cached so re-renders are instant.
-    try:
-        svg_bytes = _figure_to_svg_bytes(fig.to_json())
-    except Exception:
-        svg_bytes = None
-    # Action row right-aligned below the chart: [↓ SVG] [contrast toggle].
-    # Visually pairs with the modebar PNG icon at the top-right of the
-    # chart above. Contrast toggle is page-level (clicking on any chart
-    # flips every chart's palette) — the per-chart placement keeps the
-    # control "next to the save-as-png button" per user spec.
-    _hc_active = bool(st.session_state.get("high_contrast", False))
-    # Wider button columns (1.5 each) so labels like "🎨 High-contrast"
-    # don't truncate on narrow screens or inside nested-column charts.
-    _l, _svg_col, _hc_col = st.columns([2, 1.5, 1.5])
-    if svg_bytes:
-        with _svg_col:
-            st.download_button(
-                label="↓ Save as SVG",
-                data=svg_bytes,
-                file_name=f"{key}.svg",
-                mime="image/svg+xml",
-                key=f"svg_{key}",
-                help=(
-                    "Download as vector SVG — for journal submission "
-                    "(NEJM/JAMA/Lancet accept SVG via PDF wrap) or "
-                    "post-editing in Illustrator / Inkscape / Figma. "
-                    "PNG download lives on the chart's modebar above."
-                ),
-                use_container_width=True,
-            )
-    with _hc_col:
-        # Label flips to indicate what the click WILL DO (the new state),
-        # not the current state — matches the convention of OS toggle
-        # buttons ("Turn on" vs "Turn off"). Emoji prefix makes it
-        # visually distinct from the SVG download next to it so the
-        # reader doesn't mistake one for the other at a glance.
-        _label = (
-            "🎨 Standard palette" if _hc_active
-            else "🎨 High-contrast"
-        )
-        if st.button(
-            _label,
-            key=f"hc_{key}",
-            use_container_width=True,
-            help=(
-                "Toggle a high-contrast disease-entity palette where "
-                "every disease gets a maximally distinct colour "
-                "(Tableau-20 based). Useful when the default family-"
-                "clustered palette makes similarly-prevalent diseases "
-                "hard to tell apart. Page-level: toggling on any "
-                "chart flips all charts."
-            ),
-        ):
-            st.session_state["high_contrast"] = not _hc_active
-            st.rerun()
+    # Per-chart action buttons removed (commit 4dceaed → reverted): the
+    # SVG download + high-contrast toggle now live in the sidebar's
+    # "Display options" expander. The modebar's PNG/SVG download (driven
+    # by PUB_EXPORT.toImageButtonOptions.format which the sidebar radio
+    # mutates) is the single download path; the palette swap mutates
+    # ENTITY_COLORS / _FAMILY_COLORS in place before any chart renders.
 
 # Sub-family palette — used only on the sunburst L2 ring inside the
 # "Other autoimmune" family. Neurologic gets a distinct violet accent (per
@@ -2447,6 +2398,291 @@ def uniq_join(series):
     return " | ".join(vals)
 
 
+# ── Deep Dive figure helpers ──────────────────────────────────────────
+# Compact reusable Plotly idioms for the four Deep Dive sub-tabs +
+# the new By-geography / By-time tabs. Each returns a go.Figure and
+# delegates rendering to the caller via _chart() so it inherits the
+# global PUB_EXPORT (PNG/SVG toggle).
+
+def _deepdive_heatmap(
+    df_xy: pd.DataFrame,
+    *,
+    x_col: str, y_col: str, value_col: str = "Trials",
+    x_label: str = "", y_label: str = "",
+    height: int | None = None,
+    max_x: int = 20, max_y: int = 20,
+    colorscale: str = "Blues",
+) -> go.Figure:
+    """Render a Disease × Target style heatmap with cell-count
+    annotations. Caps each axis at `max_x` / `max_y` rows to keep
+    dense matrices legible; the trimmed axis labels are sorted by
+    total trial volume so the heaviest co-occurrences stay in view.
+    """
+    if df_xy.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            annotations=[dict(
+                text="No data for this slice", showarrow=False,
+                xref="paper", yref="paper", x=0.5, y=0.5,
+                font=dict(family=FONT_FAMILY, size=12, color=THEME["muted"]),
+            )],
+            height=height or 360,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=8, r=8, t=8, b=8),
+        )
+        return fig
+    pivot = (
+        df_xy.groupby([y_col, x_col])[value_col].sum().unstack(fill_value=0)
+        if value_col in df_xy.columns
+        else df_xy.groupby([y_col, x_col]).size().unstack(fill_value=0)
+    )
+    # Sort axes by total volume so the dense corner is top-left
+    pivot = pivot.loc[
+        pivot.sum(axis=1).sort_values(ascending=False).index,
+        pivot.sum(axis=0).sort_values(ascending=False).index,
+    ]
+    pivot = pivot.iloc[:max_y, :max_x]
+    # Cell-count annotations — only for non-zero cells, threshold-styled
+    annotations = []
+    z_max = float(pivot.values.max()) if pivot.size else 0.0
+    for i, row_label in enumerate(pivot.index):
+        for j, col_label in enumerate(pivot.columns):
+            v = int(pivot.iloc[i, j])
+            if v == 0:
+                continue
+            text_color = "#ffffff" if v >= z_max * 0.55 else THEME["text"]
+            annotations.append(dict(
+                x=col_label, y=row_label, text=str(v),
+                showarrow=False,
+                font=dict(family=FONT_FAMILY, size=10, color=text_color),
+            ))
+    fig = go.Figure(data=go.Heatmap(
+        z=pivot.values,
+        x=list(pivot.columns), y=list(pivot.index),
+        colorscale=colorscale, showscale=True,
+        colorbar=dict(thickness=10, len=0.7, x=1.02, title="Trials"),
+        hovertemplate=(
+            f"<b>%{{y}}</b> ⨯ <b>%{{x}}</b><br>"
+            f"%{{z}} trials<extra></extra>"
+        ),
+        zmin=0,
+    ))
+    fig.update_layout(
+        height=height or max(280, 28 * len(pivot.index) + 90),
+        margin=dict(l=140, r=80, t=12, b=110),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(
+            title=x_label or x_col,
+            tickangle=-30, side="bottom",
+            tickfont=dict(family=FONT_FAMILY, size=10),
+        ),
+        yaxis=dict(
+            title=y_label or y_col, autorange="reversed",
+            tickfont=dict(family=FONT_FAMILY, size=10),
+        ),
+        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+        annotations=annotations,
+    )
+    return fig
+
+
+def _deepdive_phase_stack(
+    df_in: pd.DataFrame, *, group_col: str,
+    height: int | None = None, normalize: bool = False,
+) -> go.Figure:
+    """Stacked bar of phase distribution across `group_col` (e.g., disease,
+    target, sponsor type). When normalize=True the bars sum to 100%.
+    """
+    if df_in.empty or group_col not in df_in.columns or "PhaseLabel" not in df_in.columns:
+        return go.Figure()
+    counts = (
+        df_in.groupby([group_col, "PhaseLabel"]).size().reset_index(name="Trials")
+    )
+    if counts.empty:
+        return go.Figure()
+    # Ordering: by total trial count desc on group_col, by canonical phase order on PhaseLabel
+    grp_order = (
+        counts.groupby(group_col)["Trials"].sum().sort_values(ascending=False)
+        .head(15).index.tolist()
+    )
+    counts = counts[counts[group_col].isin(grp_order)].copy()
+    phase_label_order = [PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(counts["PhaseLabel"])]
+    if normalize:
+        # Convert per-row Trials to % of group total
+        grp_totals = counts.groupby(group_col)["Trials"].transform("sum")
+        counts["Pct"] = 100.0 * counts["Trials"] / grp_totals
+        y_col = "Pct"
+        y_axis_title = "Phase mix (%)"
+        hover = "<b>%{x}</b><br>%{fullData.name}: %{y:.1f}%<extra></extra>"
+    else:
+        y_col = "Trials"
+        y_axis_title = "Trials"
+        hover = "<b>%{x}</b><br>%{fullData.name}: %{y} trials<extra></extra>"
+    # Phase palette — ordinal blues from light early-phase → dark late-phase
+    phase_palette = {
+        "Early Phase I": "#bae6fd",  # sky-200
+        "Phase I":       "#7dd3fc",  # sky-300
+        "Phase I/II":    "#0ea5e9",  # sky-500
+        "Phase II":      "#0369a1",  # sky-700
+        "Phase II/III":  "#075985",  # sky-800
+        "Phase III":     "#0c4a6e",  # sky-900
+        "Phase IV":      "#082f49",  # sky-950
+        "Unknown":       "#cbd5e1",  # slate-300
+    }
+    fig = px.bar(
+        counts,
+        x=group_col, y=y_col, color="PhaseLabel",
+        category_orders={
+            group_col: grp_order,
+            "PhaseLabel": phase_label_order,
+        },
+        color_discrete_map=phase_palette,
+        template="plotly_white",
+        height=height or 360,
+    )
+    fig.update_traces(marker_line_width=0, hovertemplate=hover)
+    fig.update_layout(
+        margin=dict(l=12, r=12, t=24, b=80),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis_title=None,
+        yaxis_title=y_axis_title,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=-0.35, x=0,
+            font=dict(family=FONT_FAMILY, size=10),
+            title=dict(text=""),
+        ),
+        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+        bargap=0.35,
+    )
+    fig.update_xaxes(tickangle=-30)
+    return fig
+
+
+def _deepdive_timeline(
+    df_in: pd.DataFrame, *, group_col: str,
+    height: int | None = None, top_n: int = 6,
+) -> go.Figure:
+    """Annual trial-start line chart sliced by `group_col`. Lines for the
+    top-N groups (by total trials) plus an "Other" rollup. Years before
+    the first ≥1-trial year for any group are trimmed."""
+    if df_in.empty or "StartYear" not in df_in.columns or group_col not in df_in.columns:
+        return go.Figure()
+    df = df_in.copy()
+    df["StartYear"] = pd.to_numeric(df["StartYear"], errors="coerce")
+    df = df.dropna(subset=["StartYear"])
+    df["StartYear"] = df["StartYear"].astype(int)
+    if df.empty:
+        return go.Figure()
+    top_groups = (
+        df.groupby(group_col).size().sort_values(ascending=False)
+        .head(top_n).index.tolist()
+    )
+    df["_Group"] = df[group_col].where(df[group_col].isin(top_groups), "Other")
+    counts = (
+        df.groupby(["StartYear", "_Group"]).size().reset_index(name="Trials")
+    )
+    # Per-group palette: ENTITY_COLORS for known disease entities, fall
+    # back to Plotly default for non-entity group columns (sponsor type
+    # etc.). The "Other" rollup gets a muted slate.
+    color_map = {g: ENTITY_COLORS.get(g, None) for g in counts["_Group"].unique()}
+    color_map["Other"] = "#94a3b8"
+    color_map = {k: v for k, v in color_map.items() if v is not None}
+    fig = px.line(
+        counts, x="StartYear", y="Trials", color="_Group",
+        markers=True, line_shape="spline",
+        category_orders={"_Group": top_groups + ["Other"]},
+        color_discrete_map=color_map or None,
+        template="plotly_white",
+        height=height or 320,
+    )
+    fig.update_traces(line=dict(width=2.0), marker=dict(size=6))
+    fig.update_layout(
+        margin=dict(l=12, r=12, t=8, b=70),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis_title="Trial start year",
+        yaxis_title="Trials",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=-0.32, x=0,
+            font=dict(family=FONT_FAMILY, size=10),
+            title=dict(text=""),
+        ),
+        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+    )
+    return fig
+
+
+def _deepdive_donut(
+    counts_df: pd.DataFrame, *, label_col: str, value_col: str = "Trials",
+    height: int = 280, color_map: dict | None = None,
+) -> go.Figure:
+    """Compact donut chart for split breakdowns (e.g., sponsor type within
+    a disease, modality within a target). Values shown as count + %."""
+    if counts_df.empty:
+        return go.Figure()
+    fig = go.Figure(data=[go.Pie(
+        labels=counts_df[label_col].tolist(),
+        values=counts_df[value_col].tolist(),
+        hole=0.55,
+        textinfo="label+percent",
+        textposition="outside",
+        marker=dict(
+            colors=[
+                (color_map or {}).get(l, None) for l in counts_df[label_col]
+            ] if color_map else None,
+            line=dict(color="white", width=1.0),
+        ),
+        hovertemplate="<b>%{label}</b><br>%{value} trials (%{percent})<extra></extra>",
+    )])
+    fig.update_layout(
+        height=height,
+        margin=dict(l=8, r=8, t=8, b=8),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        font=dict(family=FONT_FAMILY, size=10, color=THEME["text"]),
+    )
+    return fig
+
+
+def _deepdive_box(
+    df_in: pd.DataFrame, *, group_col: str, value_col: str,
+    height: int = 320, top_n: int = 12,
+) -> go.Figure:
+    """Box plot of a numeric value (e.g., EnrollmentCount) sliced by a
+    categorical column. Top-N groups by sample size to keep the chart
+    legible; outliers shown as dots."""
+    if df_in.empty or group_col not in df_in.columns or value_col not in df_in.columns:
+        return go.Figure()
+    df = df_in.copy()
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+    df = df.dropna(subset=[value_col, group_col])
+    if df.empty:
+        return go.Figure()
+    top_groups = (
+        df.groupby(group_col).size().sort_values(ascending=False)
+        .head(top_n).index.tolist()
+    )
+    df = df[df[group_col].isin(top_groups)]
+    fig = px.box(
+        df, x=group_col, y=value_col, points="outliers",
+        category_orders={group_col: top_groups},
+        template="plotly_white", height=height,
+    )
+    fig.update_traces(
+        marker_color="#0c4a6e", marker_size=4,
+        line_color="#0c4a6e", fillcolor="rgba(12, 74, 110, 0.14)",
+    )
+    fig.update_layout(
+        margin=dict(l=12, r=12, t=8, b=70),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis_title=None,
+        yaxis_title=value_col,
+        showlegend=False,
+        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+    )
+    fig.update_xaxes(tickangle=-30)
+    return fig
+
+
 def split_pipe_values(series: pd.Series) -> list[str]:
     values = []
     for item in series.dropna():
@@ -2630,20 +2866,69 @@ if "SponsorType" not in df.columns and "LeadSponsor" in df.columns:
     except Exception:
         pass
 
-# ── High-contrast palette swap ─────────────────────────────────────────
-# Mutates ENTITY_COLORS and _FAMILY_COLORS in place when the toggle is
-# active so every chart that reads from these dicts (sunburst L2, Fig 1
-# stacked area, Fig 5 bars, Overview Panel 1, family-rollup charts)
-# picks up the new shades on the next rerun. No-op when the toggle is
-# off — the dicts retain their default values.
-if st.session_state.get("high_contrast", False):
+# ── Display options (sidebar) — global chart toggles ──────────────────
+# Per user feedback "the high contrast button looks very obnoxious, can
+# we hide it in the side-bar please?, also the toggle mode to download
+# svg instead of png?". One sidebar expander hosts BOTH:
+#   (a) Export format: drives PUB_EXPORT.toImageButtonOptions.format so
+#       the modebar download icon emits PNG (slide-ready 5×) or SVG
+#       (vector for journal submission / Illustrator).
+#   (b) High-contrast palette: mutates ENTITY_COLORS / _FAMILY_COLORS in
+#       place before any chart renders so every entity-coloured chart
+#       picks up the Tableau-20 high-contrast variant on the next rerun.
+with st.sidebar.expander("Display options", expanded=False):
+    _export_choice = st.radio(
+        "Chart export format",
+        options=[
+            "PNG (slides, 5× resolution)",
+            "SVG (vector — journal / Illustrator)",
+        ],
+        index=0,
+        key="chart_export_fmt",
+        help=(
+            "PNG — best for presentations / slide decks. Renders at 5× "
+            "the chart's natural size for crisp 4K-projection / "
+            "300-DPI print quality.\n\nSVG — best for journal "
+            "submission requiring vector graphics, or post-editing in "
+            "Illustrator / Inkscape / Figma. Infinite resolution; "
+            "every wedge / bar / label is an editable element."
+        ),
+    )
+    _hc_toggle = st.toggle(
+        "High-contrast palette",
+        value=False,
+        key="high_contrast",
+        help=(
+            "Switch every entity-coloured chart to a high-contrast "
+            "Tableau-20-based palette where every disease gets a "
+            "maximally distinct colour. Trades the default's family-"
+            "cluster cohesion (rheum = blue, neuro = violet, other = "
+            "stone) for differentiation between similarly-prevalent "
+            "diseases. Useful when reading dense charts (sunburst L2 "
+            "ring, Fig 1 stacked area)."
+        ),
+    )
+
+# Mutate the module-level PUB_EXPORT to reflect the export choice.
+if _export_choice.startswith("SVG"):
+    PUB_EXPORT["toImageButtonOptions"]["format"] = "svg"
+    # SVG is vector — scale=1 keeps output dimensions = figure's
+    # natural size; further scaling has no effect on vector quality.
+    PUB_EXPORT["toImageButtonOptions"]["scale"] = 1
+else:
+    PUB_EXPORT["toImageButtonOptions"]["format"] = "png"
+    PUB_EXPORT["toImageButtonOptions"]["scale"] = 5
+
+# Mutate ENTITY_COLORS / _FAMILY_COLORS in place to the active palette.
+# Every chart that reads from these dicts picks up the new shades on
+# the next rerun (Streamlit re-executes the script top-to-bottom, so
+# this runs before any chart renders).
+if _hc_toggle:
     ENTITY_COLORS.clear()
     ENTITY_COLORS.update(_ENTITY_COLORS_HIGH_CONTRAST)
     _FAMILY_COLORS.clear()
     _FAMILY_COLORS.update(_FAMILY_COLORS_HIGH_CONTRAST)
 else:
-    # Defensive — restore defaults in case a previous run mutated them
-    # and an exception prevented the cleanup.
     ENTITY_COLORS.clear()
     ENTITY_COLORS.update(_ENTITY_COLORS_DEFAULT)
     _FAMILY_COLORS.clear()
@@ -4517,9 +4802,15 @@ with tab_deepdive:
     )
 
     (deep_sub_disease, deep_sub_target, deep_sub_product,
-     deep_sub_sponsor) = st.tabs(
-        ["By disease", "By target", "By product", "By sponsor type"]
-    )
+     deep_sub_sponsor, deep_sub_sponsor_one, deep_sub_geo,
+     deep_sub_time, deep_sub_compare) = st.tabs([
+        "By disease", "By target", "By product",
+        "By sponsor type", "By sponsor",
+        "By geography", "By time", "Compare",
+    ])
+    # `deep_sub_sponsor` is the existing sponsor-TYPE tab (Industry /
+    # Academic / Government / Other); `deep_sub_sponsor_one` is the new
+    # Phase-3 drill-into-a-specific-sponsor tab.
 
     def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
         """Explode trials with pipe-joined DiseaseEntities into one row per
@@ -4603,6 +4894,165 @@ with tab_deepdive:
                     column_config=_landscape_table_cols("Disease", "Disease"),
                 )
 
+                # ── Phase 1 additions: landscape-level overview figures ──
+                st.markdown("##### Disease landscape — patterns at a glance")
+                _ld_a, _ld_b = st.columns(2)
+                with _ld_a:
+                    st.markdown("**Disease × Antigen heat-map**")
+                    _hm_df = dd_df.loc[
+                        ~dd_df["TargetCategory"].isin(_PLATFORM_LABELS | {"Unknown", "Other_or_unknown"})
+                    ].drop_duplicates(subset=["NCTId", "_Disease"])
+                    _chart(
+                        _deepdive_heatmap(
+                            _hm_df, x_col="TargetCategory", y_col="_Disease",
+                            x_label="Antigen target", y_label="Disease entity",
+                            max_x=12, max_y=15, height=440,
+                        ),
+                        key="dd_disease_x_target_heatmap",
+                    )
+                with _ld_b:
+                    st.markdown("**Annual trial starts by disease**")
+                    _chart(
+                        _deepdive_timeline(
+                            dd_df.drop_duplicates(subset=["NCTId", "_Disease"]),
+                            group_col="_Disease", height=320, top_n=6,
+                        ),
+                        key="dd_disease_timeline",
+                    )
+                    st.markdown("**Phase composition (top 12 diseases)**")
+                    _phase_in = dd_df.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
+                    _chart(
+                        _deepdive_phase_stack(
+                            _phase_in, group_col="_Disease",
+                            height=320, normalize=True,
+                        ),
+                        key="dd_disease_phase_stack",
+                    )
+
+                # ── Phase 3 additions: trial age + competitive intensity + age-group ──
+                st.markdown("##### Pipeline maturity & competitive intensity")
+                _pl_a, _pl_b = st.columns(2)
+                with _pl_a:
+                    st.markdown("**Trial age by status (years since start)**")
+                    st.caption(
+                        "Boxes show the distribution of years since each "
+                        "trial's start year, stratified by current status. "
+                        "Long Recruiting whiskers (≥3 y) flag stalled "
+                        "enrolment; long Active whiskers flag delayed "
+                        "completion."
+                    )
+                    _today_year = pd.Timestamp.utcnow().year
+                    _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
+                    _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
+                    _age_in = _age_in.dropna(subset=["StartYear"])
+                    _age_in["TrialAge"] = _today_year - _age_in["StartYear"].astype(int)
+                    if not _age_in.empty:
+                        _chart(
+                            _deepdive_box(
+                                _age_in, group_col="OverallStatus",
+                                value_col="TrialAge",
+                                height=300, top_n=6,
+                            ),
+                            key="dd_disease_trial_age",
+                        )
+                with _pl_b:
+                    st.markdown("**Competitive intensity (top-3 sponsor share)**")
+                    st.caption(
+                        "Per disease, percentage of trials run by the top 3 "
+                        "lead sponsors. High share (>60%) = concentrated "
+                        "field; low share (<30%) = diffuse competition."
+                    )
+                    _ci_df = (
+                        dd_df.drop_duplicates(subset=["NCTId", "_Disease"])
+                        .dropna(subset=["LeadSponsor"])
+                    )
+                    _ci_rows = []
+                    for _disease, _grp in _ci_df.groupby("_Disease"):
+                        _total = _grp["NCTId"].nunique()
+                        if _total < 3:
+                            continue
+                        _top3 = (
+                            _grp.groupby("LeadSponsor")["NCTId"].nunique()
+                            .sort_values(ascending=False).head(3).sum()
+                        )
+                        _ci_rows.append({
+                            "Disease": _disease,
+                            "TotalTrials": _total,
+                            "Top3Share": round(100.0 * _top3 / _total, 1),
+                            "Sponsors": _grp["LeadSponsor"].nunique(),
+                        })
+                    _ci = pd.DataFrame(_ci_rows).sort_values("TotalTrials", ascending=False).head(15)
+                    if not _ci.empty:
+                        st.dataframe(
+                            _ci, width="stretch", hide_index=True,
+                            column_config={
+                                "Disease":     st.column_config.TextColumn("Disease", width="medium"),
+                                "TotalTrials": st.column_config.NumberColumn("Trials", format="%d", width="small"),
+                                "Top3Share":   st.column_config.ProgressColumn(
+                                    "Top-3 share (%)",
+                                    format="%.1f", min_value=0, max_value=100, width="medium",
+                                ),
+                                "Sponsors":    st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
+                            },
+                        )
+
+                # ── Age-group coverage (paediatric vs adult vs combined) ──
+                if "AgeGroup" in dd_df.columns:
+                    st.markdown("**Age-group coverage by disease**")
+                    st.caption(
+                        "Stacked share of paediatric / adult / combined / "
+                        "older-adult coverage per disease. Surfaces the "
+                        "paediatric-rheum gap — diseases with 0% paediatric "
+                        "trials are clinical blind spots."
+                    )
+                    _ag_in = dd_df.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
+                    _ag_in["AgeGroup"] = _ag_in["AgeGroup"].fillna("Unknown")
+                    _ag_palette = {
+                        "Paediatric":     "#86efac",  # green-300
+                        "Adult":          "#0c4a6e",  # sky-900
+                        "Older adult":    "#0369a1",  # sky-700
+                        "Adult/older adult": "#0284c7",  # sky-600
+                        "Paed/adult":     "#a78bfa",  # violet-400
+                        "Paed/adult/older": "#7c3aed",  # violet-600
+                        "Unknown":        "#cbd5e1",  # slate-300
+                    }
+                    _ag_counts = (
+                        _ag_in.groupby(["_Disease", "AgeGroup"]).size().reset_index(name="Trials")
+                    )
+                    _ag_top = (
+                        _ag_counts.groupby("_Disease")["Trials"].sum()
+                        .sort_values(ascending=False).head(15).index.tolist()
+                    )
+                    _ag_counts = _ag_counts[_ag_counts["_Disease"].isin(_ag_top)]
+                    _ag_counts["Pct"] = 100.0 * _ag_counts["Trials"] / _ag_counts.groupby("_Disease")["Trials"].transform("sum")
+                    if not _ag_counts.empty:
+                        _ag_fig = px.bar(
+                            _ag_counts,
+                            x="_Disease", y="Pct", color="AgeGroup",
+                            category_orders={"_Disease": _ag_top},
+                            color_discrete_map=_ag_palette,
+                            template="plotly_white", height=340,
+                        )
+                        _ag_fig.update_traces(
+                            marker_line_width=0,
+                            hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y:.1f}%<extra></extra>",
+                        )
+                        _ag_fig.update_layout(
+                            margin=dict(l=12, r=12, t=8, b=80),
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            xaxis_title=None,
+                            yaxis_title="Age-group mix (%)",
+                            font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                            legend=dict(
+                                orientation="h", yanchor="bottom", y=-0.40, x=0,
+                                font=dict(family=FONT_FAMILY, size=10),
+                                title=dict(text=""),
+                            ),
+                            bargap=0.35,
+                        )
+                        _ag_fig.update_xaxes(tickangle=-30)
+                        _chart(_ag_fig, key="dd_disease_age_groups")
+
                 disease_choices = agg["Disease"].tolist()
                 pick = st.selectbox(
                     "Drill into disease",
@@ -4635,6 +5085,65 @@ with tab_deepdive:
                         st.markdown("**Product types**")
                         st.dataframe(_prod, width='stretch', hide_index=True,
                                      column_config=_mini_count_cols("Product"))
+
+                    # ── Phase 1 additions: per-disease drill-in figures ──
+                    _dz1, _dz2, _dz3 = st.columns(3)
+                    with _dz1:
+                        st.markdown("**Sponsor-type split**")
+                        if "SponsorType" in sub.columns:
+                            _sp_donut_df = (
+                                sub["SponsorType"].fillna("Other").value_counts()
+                                .rename_axis("Sponsor type").reset_index(name="Trials")
+                            )
+                            _chart(
+                                _deepdive_donut(
+                                    _sp_donut_df, label_col="Sponsor type",
+                                    height=240,
+                                    color_map={
+                                        "Industry":   "#0c4a6e",
+                                        "Academic":   "#0369a1",
+                                        "Government": "#0284c7",
+                                        "Other":      "#94a3b8",
+                                    },
+                                ),
+                                key=f"dd_disease_sponsor_donut_{pick}",
+                            )
+                    with _dz2:
+                        st.markdown("**Top countries**")
+                        _country_long = []
+                        for cs in sub["Countries"].dropna():
+                            for c in str(cs).split("|"):
+                                c = c.strip()
+                                if c:
+                                    _country_long.append(c)
+                        _country_top = (
+                            pd.Series(_country_long).value_counts().head(8)
+                            .rename_axis("Country").reset_index(name="Trials")
+                        )
+                        if not _country_top.empty:
+                            _chart(
+                                make_bar(_country_top, "Country", "Trials", height=240),
+                                key=f"dd_disease_countries_{pick}",
+                            )
+                        else:
+                            st.caption("No country data.")
+                    with _dz3:
+                        st.markdown("**Phase mix**")
+                        _phase_counts = (
+                            sub.assign(PhaseLabel=sub.get("PhaseLabel", sub["Phase"]))
+                            .groupby("PhaseLabel").size().reset_index(name="Trials")
+                        )
+                        _phase_counts["PhaseLabel"] = pd.Categorical(
+                            _phase_counts["PhaseLabel"],
+                            categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_phase_counts["PhaseLabel"])],
+                            ordered=True,
+                        )
+                        _phase_counts = _phase_counts.sort_values("PhaseLabel")
+                        if not _phase_counts.empty:
+                            _chart(
+                                make_bar(_phase_counts, "PhaseLabel", "Trials", height=240),
+                                key=f"dd_disease_phase_{pick}",
+                            )
 
                     _dd_cols = [c for c in (
                         "NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
@@ -4753,6 +5262,75 @@ with tab_deepdive:
                 f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
                 "Pick a specific antigen above to see its full focus view."
             )
+
+            # ── Phase 1 additions: target landscape figures ──
+            st.markdown("##### Antigen landscape — patterns at a glance")
+            _tld_a, _tld_b = st.columns(2)
+            with _tld_a:
+                st.markdown("**Target × Disease heat-map**")
+                # Explode multi-disease baskets so a SLE+SSc trial counts in
+                # both rows. Filter platform labels out of the antigen axis.
+                _hm_in = _expand_disease_rows(df_filt)
+                _hm_in = _hm_in.loc[~_hm_in["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
+                _chart(
+                    _deepdive_heatmap(
+                        _hm_in.drop_duplicates(subset=["NCTId", "_Disease"]),
+                        x_col="TargetCategory", y_col="_Disease",
+                        x_label="Antigen target", y_label="Disease entity",
+                        max_x=12, max_y=15, height=440,
+                        colorscale="Purples",
+                    ),
+                    key="dd_target_landscape_heatmap",
+                )
+            with _tld_b:
+                st.markdown("**Antigen emergence timeline (year of first trial)**")
+                _emerge = (
+                    df_filt.dropna(subset=["StartYear"])
+                    .loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
+                    .copy()
+                )
+                _emerge["StartYear"] = pd.to_numeric(_emerge["StartYear"], errors="coerce")
+                _emerge_first = (
+                    _emerge.groupby("TargetCategory")["StartYear"].min()
+                    .dropna().astype(int).sort_values()
+                    .reset_index().rename(columns={"StartYear": "FirstTrialYear"})
+                )
+                if not _emerge_first.empty:
+                    _emerge_fig = px.scatter(
+                        _emerge_first.assign(_y=range(len(_emerge_first), 0, -1)),
+                        x="FirstTrialYear", y="_y",
+                        text="TargetCategory",
+                        template="plotly_white",
+                        height=440,
+                    )
+                    _emerge_fig.update_traces(
+                        textposition="middle right",
+                        marker=dict(size=10, color=[
+                            ENTITY_COLORS.get(t, "#0c4a6e")
+                            for t in _emerge_first["TargetCategory"]
+                        ]),
+                    )
+                    _emerge_fig.update_layout(
+                        margin=dict(l=12, r=140, t=12, b=40),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis_title="Year of first trial",
+                        yaxis=dict(visible=False, range=[0, len(_emerge_first) + 1]),
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                        showlegend=False,
+                    )
+                    _chart(_emerge_fig, key="dd_target_emergence_timeline")
+
+                st.markdown("**Phase composition by target (top 12)**")
+                _tphase_in = df_filt.loc[
+                    ~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})
+                ].copy()
+                _chart(
+                    _deepdive_phase_stack(
+                        _tphase_in, group_col="TargetCategory",
+                        height=320, normalize=True,
+                    ),
+                    key="dd_target_phase_stack",
+                )
         else:
             focus = df_filt[df_filt["TargetCategory"] == target_pick].copy()
 
@@ -4839,6 +5417,30 @@ with tab_deepdive:
                             _fam, width="stretch", hide_index=True,
                             column_config=_mini_count_cols("Family"),
                         )
+
+                # ── Phase 1 additions: per-target drill-in figures ──
+                _td1, _td2 = st.columns(2)
+                with _td1:
+                    st.markdown(f"**Annual trial starts targeting {target_pick}**")
+                    _focus_with_disease = _expand_disease_rows(focus)
+                    _chart(
+                        _deepdive_timeline(
+                            _focus_with_disease.drop_duplicates(subset=["NCTId", "_Disease"]),
+                            group_col="_Disease", height=280, top_n=5,
+                        ),
+                        key=f"dd_target_timeline_{target_pick}",
+                    )
+                with _td2:
+                    st.markdown(f"**Enrollment-size distribution by disease**")
+                    _enr_box_in = _focus_with_disease.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
+                    _chart(
+                        _deepdive_box(
+                            _enr_box_in, group_col="_Disease",
+                            value_col="EnrollmentCount",
+                            height=280, top_n=8,
+                        ),
+                        key=f"dd_target_enrollment_box_{target_pick}",
+                    )
 
                 # Top sponsors developing this antigen
                 st.markdown(
@@ -4998,6 +5600,36 @@ with tab_deepdive:
                 mime="text/csv",
             )
 
+            # ── Phase 1 additions: per-product landscape figures ──
+            st.markdown("##### Product landscape — patterns at a glance")
+            _pld_a, _pld_b = st.columns(2)
+            with _pld_a:
+                st.markdown("**Phase composition by product (top 12)**")
+                _chart(
+                    _deepdive_phase_stack(
+                        prod_df, group_col="ProductName",
+                        height=320, normalize=True,
+                    ),
+                    key="dd_product_phase_stack",
+                )
+            with _pld_b:
+                st.markdown("**Enrollment-size distribution by product**")
+                _chart(
+                    _deepdive_box(
+                        prod_df, group_col="ProductName",
+                        value_col="EnrollmentCount",
+                        height=320, top_n=10,
+                    ),
+                    key="dd_product_enrollment_box",
+                )
+            st.markdown("**Annual trial starts by product (top 6)**")
+            _chart(
+                _deepdive_timeline(
+                    prod_df, group_col="ProductName", height=300, top_n=6,
+                ),
+                key="dd_product_timeline",
+            )
+
             _prod_rows = (
                 _prod_event.selection.rows
                 if _prod_event and hasattr(_prod_event, "selection") else []
@@ -5093,6 +5725,38 @@ with tab_deepdive:
                 column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
             )
 
+            # ── Phase 1 additions: sponsor-type landscape figures ──
+            st.markdown("##### Sponsor-type landscape — patterns at a glance")
+            _spl_a, _spl_b = st.columns(2)
+            with _spl_a:
+                st.markdown("**Sponsor type × Disease heat-map**")
+                _hm_in = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"])
+                _chart(
+                    _deepdive_heatmap(
+                        _hm_in, x_col="SponsorType", y_col="_Disease",
+                        x_label="Sponsor type", y_label="Disease entity",
+                        max_x=6, max_y=15, height=440,
+                        colorscale="Greens",
+                    ),
+                    key="dd_sponsor_x_disease_heatmap",
+                )
+            with _spl_b:
+                st.markdown("**Phase composition by sponsor type (% of total)**")
+                _chart(
+                    _deepdive_phase_stack(
+                        df_filt, group_col="SponsorType",
+                        height=300, normalize=True,
+                    ),
+                    key="dd_sponsor_phase_stack",
+                )
+                st.markdown("**Annual trial starts by sponsor type**")
+                _chart(
+                    _deepdive_timeline(
+                        df_filt, group_col="SponsorType", height=260, top_n=4,
+                    ),
+                    key="dd_sponsor_timeline",
+                )
+
             sp_choices = agg["SponsorType"].tolist()
             pick = st.selectbox(
                 "Drill into sponsor type", options=["—"] + sp_choices, key="dd_sponsor_pick",
@@ -5172,6 +5836,639 @@ with tab_deepdive:
                         _sp_trials.iloc[_sp_rows[0]],
                         key_suffix=f"deep_sponsor_{pick}",
                     )
+
+    # ===== By geography (NEW Phase 2) =====
+    with deep_sub_geo:
+        st.subheader("Geographic landscape")
+        st.caption(
+            "Country-level slicing: leaderboard, country × disease and "
+            "country × phase heat-maps, multi-country trial flag, and a "
+            "drill-into-one country view. Countries are exploded from "
+            "the pipe-joined Countries field — a single trial enrolling "
+            "in 4 countries appears in 4 rows below."
+        )
+        if df_filt.empty:
+            st.info("No trials in the current filter.")
+        else:
+            # Long-format: one row per (NCTId, Country)
+            _geo_rows = []
+            for _, _r in df_filt.iterrows():
+                cs = str(_r.get("Countries") or "").split("|")
+                _r_dict = _r.to_dict()
+                added = False
+                for c in cs:
+                    c = c.strip()
+                    if c:
+                        rd = dict(_r_dict)
+                        rd["_Country"] = c
+                        _geo_rows.append(rd)
+                        added = True
+                if not added:
+                    rd = dict(_r_dict); rd["_Country"] = "Unknown"
+                    _geo_rows.append(rd)
+            _geo_df = pd.DataFrame(_geo_rows)
+
+            # Multi-country trial flag — useful for geographic-collaboration analysis
+            _multi = (
+                df_filt["Countries"].fillna("").astype(str)
+                .apply(lambda s: len([c for c in s.split("|") if c.strip()]) >= 2)
+            )
+            _n_multi = int(_multi.sum())
+
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric(
+                    "Distinct countries",
+                    f"{_geo_df.loc[_geo_df['_Country'] != 'Unknown', '_Country'].nunique():,}",
+                )
+            with m2:
+                st.metric(
+                    "Multi-country trials",
+                    f"{_n_multi:,}",
+                    help="Trials enrolling in ≥2 countries",
+                )
+            with m3:
+                st.metric(
+                    "Single-country trials",
+                    f"{int((~_multi).sum()):,}",
+                )
+
+            # Country leaderboard
+            st.markdown("**Country leaderboard (trials by country)**")
+            _country_agg = (
+                _geo_df.loc[_geo_df["_Country"] != "Unknown"]
+                .groupby("_Country")
+                .agg(
+                    Trials=("NCTId", "nunique"),
+                    Sponsors=("LeadSponsor", "nunique"),
+                    TopDisease=(
+                        "DiseaseEntity",
+                        lambda s: s.value_counts().index[0] if not s.empty else "—",
+                    ),
+                )
+                .reset_index().rename(columns={"_Country": "Country"})
+                .sort_values("Trials", ascending=False)
+            )
+            st.dataframe(
+                _country_agg.head(20), width="stretch", hide_index=True,
+                column_config={
+                    "Country":     st.column_config.TextColumn("Country", width="medium"),
+                    "Trials":      st.column_config.NumberColumn("Trials", format="%d", width="small"),
+                    "Sponsors":    st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
+                    "TopDisease":  st.column_config.TextColumn("Top disease", width="small"),
+                },
+            )
+
+            # Geo landscape: country × disease heat-map + country × phase phase-mix
+            _geo_a, _geo_b = st.columns(2)
+            with _geo_a:
+                st.markdown("**Country × Disease heat-map (top 15)**")
+                _geo_with_disease = _expand_disease_rows(_geo_df.drop_duplicates(subset=["NCTId", "_Country"]))
+                _hm_in = _geo_with_disease.loc[_geo_with_disease["_Country"] != "Unknown"]
+                _chart(
+                    _deepdive_heatmap(
+                        _hm_in.drop_duplicates(subset=["NCTId", "_Country", "_Disease"]),
+                        x_col="_Country", y_col="_Disease",
+                        x_label="Country", y_label="Disease entity",
+                        max_x=10, max_y=12, height=420,
+                        colorscale="Blues",
+                    ),
+                    key="dd_geo_country_x_disease",
+                )
+            with _geo_b:
+                st.markdown("**Phase composition by country (top 10)**")
+                _phase_in = _geo_df.loc[_geo_df["_Country"] != "Unknown"].drop_duplicates(subset=["NCTId", "_Country"])
+                _chart(
+                    _deepdive_phase_stack(
+                        _phase_in.rename(columns={"_Country": "Country"}),
+                        group_col="Country", height=420, normalize=True,
+                    ),
+                    key="dd_geo_phase_stack",
+                )
+
+            # Drill into a country
+            country_choices = _country_agg["Country"].tolist()
+            country_pick = st.selectbox(
+                "Drill into country",
+                options=["—"] + country_choices,
+                key="dd_geo_country_pick",
+            )
+            if country_pick and country_pick != "—":
+                _csub = _geo_df[_geo_df["_Country"] == country_pick].drop_duplicates(subset=["NCTId"])
+                cm1, cm2, cm3, cm4 = st.columns(4)
+                cm1.metric("Trials", len(_csub))
+                cm2.metric(
+                    "Open / recruiting",
+                    int(_csub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                )
+                cm3.metric(
+                    "Distinct sponsors",
+                    f"{_csub['LeadSponsor'].nunique():,}",
+                )
+                _enr_c = pd.to_numeric(_csub["EnrollmentCount"], errors="coerce")
+                cm4.metric(
+                    "Median enrollment",
+                    int(_enr_c.median()) if _enr_c.notna().any() else 0,
+                )
+
+                # Top diseases / top antigens for this country
+                _cda, _cdb = st.columns(2)
+                with _cda:
+                    st.markdown(f"**Top diseases in {country_pick}**")
+                    _cd = (
+                        _expand_disease_rows(_csub)
+                        .drop_duplicates(subset=["NCTId", "_Disease"])
+                        .groupby("_Disease").size().sort_values(ascending=False)
+                        .head(10).reset_index()
+                        .rename(columns={"_Disease": "Disease", 0: "Trials"})
+                    )
+                    if "Trials" not in _cd.columns:
+                        _cd.columns = ["Disease", "Trials"]
+                    if not _cd.empty:
+                        _chart(
+                            make_bar(_cd, "Disease", "Trials", height=260),
+                            key=f"dd_geo_diseases_{country_pick}",
+                        )
+                with _cdb:
+                    st.markdown(f"**Top antigens in {country_pick}**")
+                    _ct = (
+                        _csub.loc[~_csub["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
+                        .groupby("TargetCategory").size().sort_values(ascending=False)
+                        .head(10).reset_index(name="Trials")
+                    )
+                    if not _ct.empty:
+                        _chart(
+                            make_bar(_ct, "TargetCategory", "Trials", height=260),
+                            key=f"dd_geo_targets_{country_pick}",
+                        )
+
+    # ===== By time (NEW Phase 2) =====
+    with deep_sub_time:
+        st.subheader("Temporal landscape")
+        st.caption(
+            "Annual trial-start dynamics with selectable colour axis "
+            "(disease, target, sponsor type, family). Cumulative active "
+            "trials shows the running total of started trials at each "
+            "year. Cohort comparison surfaces start-year × current-phase "
+            "patterns — late-cohort trials concentrating in early phases "
+            "is expected; mature cohorts spreading across Phase II / III "
+            "signals real pipeline progression."
+        )
+        if df_filt.empty:
+            st.info("No trials in the current filter.")
+        else:
+            _color_axis_choice = st.radio(
+                "Colour axis",
+                options=["Disease entity", "Antigen target",
+                         "Disease family", "Sponsor type"],
+                horizontal=True,
+                key="dd_time_color_axis",
+            )
+            _axis_map = {
+                "Disease entity":  "DiseaseEntity",
+                "Antigen target":  "TargetCategory",
+                "Disease family":  "DiseaseFamily",
+                "Sponsor type":    "SponsorType",
+            }
+            _axis_col = _axis_map[_color_axis_choice]
+
+            # ── Annual trial starts (selectable axis) ──
+            _ts_a, _ts_b = st.columns(2)
+            with _ts_a:
+                st.markdown(f"**Annual trial starts — by {_color_axis_choice.lower()}**")
+                _chart(
+                    _deepdive_timeline(
+                        df_filt, group_col=_axis_col, height=320, top_n=6,
+                    ),
+                    key=f"dd_time_starts_{_axis_col}",
+                )
+            with _ts_b:
+                st.markdown("**Cumulative active trials by year**")
+                # "Active" here = ever-started by year Y, regardless of
+                # current status. A more rigorous "currently active" would
+                # require completion dates; with the snapshot's
+                # OverallStatus we use ever-started as a proxy.
+                _df_t = df_filt.copy()
+                _df_t["StartYear"] = pd.to_numeric(_df_t["StartYear"], errors="coerce")
+                _df_t = _df_t.dropna(subset=["StartYear"])
+                if not _df_t.empty:
+                    _df_t["StartYear"] = _df_t["StartYear"].astype(int)
+                    _yearly = (
+                        _df_t.groupby("StartYear").size()
+                        .sort_index().cumsum().reset_index(name="CumulativeTrials")
+                    )
+                    _cum_fig = px.line(
+                        _yearly, x="StartYear", y="CumulativeTrials",
+                        markers=True, line_shape="spline",
+                        template="plotly_white", height=320,
+                    )
+                    _cum_fig.update_traces(
+                        line=dict(width=2.5, color=_RHEUM_NAVY),
+                        marker=dict(size=7, color=_RHEUM_NAVY),
+                        fill="tozeroy", fillcolor="rgba(12, 74, 110, 0.10)",
+                    )
+                    _cum_fig.update_layout(
+                        margin=dict(l=12, r=12, t=8, b=40),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis_title="Trial start year",
+                        yaxis_title="Cumulative trials started",
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    )
+                    _chart(_cum_fig, key="dd_time_cumulative")
+
+            # ── Cohort comparison: start year × current phase ──
+            st.markdown("**Cohort comparison — start year × current phase**")
+            _cohort_in = df_filt.copy()
+            _cohort_in["StartYear"] = pd.to_numeric(_cohort_in["StartYear"], errors="coerce")
+            _cohort_in = _cohort_in.dropna(subset=["StartYear"])
+            if not _cohort_in.empty:
+                _cohort_in["StartYear"] = _cohort_in["StartYear"].astype(int).astype(str)
+                _chart(
+                    _deepdive_phase_stack(
+                        _cohort_in, group_col="StartYear",
+                        height=360, normalize=True,
+                    ),
+                    key="dd_time_cohort_phase",
+                )
+
+            # ── Sponsor activity over time (top 10 sponsors) ──
+            st.markdown("**Top sponsors — annual trial starts**")
+            _sp_top = (
+                df_filt["LeadSponsor"].dropna().value_counts().head(10).index.tolist()
+            )
+            _sp_in = df_filt[df_filt["LeadSponsor"].isin(_sp_top)].copy()
+            if not _sp_in.empty:
+                _chart(
+                    _deepdive_timeline(
+                        _sp_in, group_col="LeadSponsor", height=340, top_n=10,
+                    ),
+                    key="dd_time_sponsor_activity",
+                )
+
+            # ── Phase-progression Sankey (start-year → current phase) ──
+            st.markdown("**Phase-progression flow (start year cohort → current phase)**")
+            st.caption(
+                "Each band's width = trial count. Reads left-to-right: trials "
+                "started in year-cohort N flow into their CURRENT phase column. "
+                "Late cohorts concentrating in early phases is normal; mature "
+                "cohorts spreading across Phase II / III signals real pipeline "
+                "progression. Built from snapshot OverallStatus + PhaseLabel."
+            )
+            _sk = df_filt.copy()
+            _sk["StartYear"] = pd.to_numeric(_sk["StartYear"], errors="coerce")
+            _sk = _sk.dropna(subset=["StartYear"])
+            if not _sk.empty:
+                _sk["StartYear"] = _sk["StartYear"].astype(int)
+                _sk["PhaseLabel"] = _sk["PhaseLabel"].fillna("Unknown")
+                # Bin start years to keep the diagram legible
+                _y_min = int(_sk["StartYear"].min())
+                _y_max = int(_sk["StartYear"].max())
+                _sk["YearCohort"] = _sk["StartYear"].apply(
+                    lambda y: f"≤{_y_min + 1}" if y <= _y_min + 1 else
+                              f"{_y_max}" if y == _y_max else
+                              f"{y}"
+                )
+                _phase_label_set = [PHASE_LABELS[p] for p in PHASE_ORDER]
+                _sk_counts = (
+                    _sk.groupby(["YearCohort", "PhaseLabel"]).size()
+                    .reset_index(name="Trials")
+                )
+                # Build node + link arrays
+                _year_nodes = sorted(_sk_counts["YearCohort"].unique(),
+                                     key=lambda s: (s.startswith("≤"), s))
+                _phase_nodes = [
+                    p for p in _phase_label_set
+                    if p in set(_sk_counts["PhaseLabel"])
+                ]
+                _all_nodes = _year_nodes + _phase_nodes
+                _node_idx = {n: i for i, n in enumerate(_all_nodes)}
+                _phase_palette = {
+                    "Early Phase I": "#bae6fd", "Phase I": "#7dd3fc",
+                    "Phase I/II":    "#0ea5e9", "Phase II": "#0369a1",
+                    "Phase II/III":  "#075985", "Phase III": "#0c4a6e",
+                    "Phase IV":      "#082f49", "Unknown": "#cbd5e1",
+                }
+                _node_colors = (
+                    ["#94a3b8"] * len(_year_nodes)
+                    + [_phase_palette.get(p, "#0c4a6e") for p in _phase_nodes]
+                )
+                _link_colors = []
+                for _, _row in _sk_counts.iterrows():
+                    _hex = _phase_palette.get(_row["PhaseLabel"], "#0c4a6e")
+                    # rgba with 0.35 alpha for translucent flow bands
+                    _r = int(_hex[1:3], 16); _g = int(_hex[3:5], 16); _b = int(_hex[5:7], 16)
+                    _link_colors.append(f"rgba({_r},{_g},{_b},0.45)")
+                _sankey = go.Figure(go.Sankey(
+                    arrangement="snap",
+                    node=dict(
+                        pad=14, thickness=14,
+                        line=dict(color="#ffffff", width=0.6),
+                        label=_all_nodes,
+                        color=_node_colors,
+                    ),
+                    link=dict(
+                        source=[_node_idx[y] for y in _sk_counts["YearCohort"]],
+                        target=[_node_idx[p] for p in _sk_counts["PhaseLabel"]],
+                        value=_sk_counts["Trials"].tolist(),
+                        color=_link_colors,
+                        hovertemplate=(
+                            "<b>%{source.label}</b> → <b>%{target.label}</b>"
+                            "<br>%{value} trials<extra></extra>"
+                        ),
+                    ),
+                ))
+                _sankey.update_layout(
+                    height=420, margin=dict(l=8, r=8, t=8, b=8),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                )
+                _chart(_sankey, key="dd_time_phase_sankey")
+
+    # ===== By sponsor (specific sponsor drilldown — Phase 3) =====
+    with deep_sub_sponsor_one:
+        st.subheader("Specific-sponsor portfolio")
+        st.caption(
+            "Drill into one sponsor's full pipeline: every trial they "
+            "lead, broken down by phase, disease, target, modality, "
+            "geography, and time. Complements the 'By sponsor type' "
+            "tab which aggregates Industry / Academic / Government."
+        )
+        if df_filt.empty:
+            st.info("No trials in the current filter.")
+        elif "LeadSponsor" not in df_filt.columns:
+            st.info("Sponsor data not available in the current snapshot.")
+        else:
+            _sp_counts = (
+                df_filt["LeadSponsor"].dropna().value_counts()
+                .rename_axis("Sponsor").reset_index(name="Trials")
+            )
+            _sp_options = ["—"] + [
+                f"{r['Sponsor']}  ({r['Trials']} trials)"
+                for _, r in _sp_counts.iterrows()
+            ]
+            sponsor_pick_label = st.selectbox(
+                "Pick a sponsor", _sp_options, key="dd_sponsor_one_pick",
+            )
+            sponsor_pick = (
+                sponsor_pick_label.rsplit("  (", 1)[0]
+                if sponsor_pick_label and sponsor_pick_label != "—"
+                else None
+            )
+            if sponsor_pick:
+                spt = df_filt[df_filt["LeadSponsor"] == sponsor_pick].copy()
+                _sm1, _sm2, _sm3, _sm4 = st.columns(4)
+                _sm1.metric("Trials led", f"{len(spt):,}")
+                _sm2.metric(
+                    "Distinct diseases",
+                    f"{spt['DiseaseEntity'].dropna().nunique():,}",
+                )
+                _sm3.metric(
+                    "Distinct targets",
+                    f"{spt.loc[~spt['TargetCategory'].isin(_PLATFORM_LABELS | {'Other_or_unknown'}), 'TargetCategory'].nunique():,}",
+                )
+                _sm4.metric(
+                    "Open / recruiting",
+                    int(spt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                )
+
+                # Sponsor type + first/most-recent year
+                _spy = pd.to_numeric(spt["StartYear"], errors="coerce")
+                if _spy.notna().any():
+                    _sm_first = int(_spy.min())
+                    _sm_last = int(_spy.max())
+                    st.caption(
+                        f"**{sponsor_pick}** · "
+                        f"sponsor type: *{spt['SponsorType'].mode().iloc[0] if not spt['SponsorType'].mode().empty else '—'}* · "
+                        f"first trial: **{_sm_first}** · most recent: **{_sm_last}**"
+                    )
+
+                # 4-panel breakdown
+                _spA, _spB = st.columns(2)
+                with _spA:
+                    st.markdown("**Phase distribution**")
+                    _pcts = (
+                        spt.assign(PhaseLabel=spt.get("PhaseLabel", spt["Phase"]))
+                        .groupby("PhaseLabel").size().reset_index(name="Trials")
+                    )
+                    _pcts["PhaseLabel"] = pd.Categorical(
+                        _pcts["PhaseLabel"],
+                        categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_pcts["PhaseLabel"])],
+                        ordered=True,
+                    )
+                    _pcts = _pcts.sort_values("PhaseLabel")
+                    if not _pcts.empty:
+                        _chart(
+                            make_bar(_pcts, "PhaseLabel", "Trials", height=260),
+                            key=f"dd_sponsor_one_phase_{sponsor_pick}",
+                        )
+                    st.markdown("**Antigen targets**")
+                    _stgt = (
+                        spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"}), "TargetCategory"]
+                        .value_counts().head(10)
+                        .rename_axis("Target").reset_index(name="Trials")
+                    )
+                    if not _stgt.empty:
+                        _chart(
+                            make_bar(_stgt, "Target", "Trials", height=260),
+                            key=f"dd_sponsor_one_targets_{sponsor_pick}",
+                        )
+                with _spB:
+                    st.markdown("**Disease coverage**")
+                    _sdis = (
+                        _expand_disease_rows(spt)
+                        .drop_duplicates(subset=["NCTId", "_Disease"])
+                        .groupby("_Disease").size().sort_values(ascending=False)
+                        .head(10).reset_index().rename(columns={"_Disease": "Disease", 0: "Trials"})
+                    )
+                    if "Trials" not in _sdis.columns:
+                        _sdis.columns = ["Disease", "Trials"]
+                    if not _sdis.empty:
+                        _chart(
+                            make_bar(_sdis, "Disease", "Trials", height=260),
+                            key=f"dd_sponsor_one_diseases_{sponsor_pick}",
+                        )
+                    st.markdown("**Annual trial starts**")
+                    _chart(
+                        _deepdive_timeline(
+                            _expand_disease_rows(spt).drop_duplicates(subset=["NCTId", "_Disease"]),
+                            group_col="_Disease", height=260, top_n=5,
+                        ),
+                        key=f"dd_sponsor_one_timeline_{sponsor_pick}",
+                    )
+
+                # Sponsor's full trial list
+                st.markdown(
+                    f"### Trials led by **{sponsor_pick}** "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({len(spt)} trials · click any row for full details)</span>",
+                    unsafe_allow_html=True,
+                )
+                _spt_show = spt.copy()
+                if "NCTLink" not in _spt_show.columns:
+                    _spt_show["NCTLink"] = _spt_show["NCTId"].apply(
+                        lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
+                    )
+                if "PhaseLabel" in _spt_show.columns:
+                    _spt_show["Phase"] = _spt_show["PhaseLabel"].fillna(_spt_show["Phase"])
+                _spt_show["OverallStatus"] = _spt_show["OverallStatus"].map(
+                    STATUS_DISPLAY).fillna(_spt_show["OverallStatus"])
+                _spt_show = _spt_show.sort_values(
+                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
+                ).reset_index(drop=True)
+                _spt_cols = [c for c in (
+                    "NCTId", "NCTLink", "BriefTitle",
+                    "DiseaseEntity", "TrialDesign",
+                    "TargetCategory", "ProductType", "Phase",
+                    "OverallStatus", "StartYear", "Countries",
+                ) if c in _spt_show.columns]
+                _spt_show, _spt_cols = _attach_flag_column(_spt_show, _spt_cols)
+                _spt_event = st.dataframe(
+                    _spt_show[_spt_cols],
+                    width='stretch', height=380, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"deep_sponsor_one_table_{sponsor_pick}",
+                    column_config=_trial_detail_cols(),
+                )
+                _spt_rows = (
+                    _spt_event.selection.rows
+                    if _spt_event and hasattr(_spt_event, "selection") else []
+                )
+                if _spt_rows:
+                    _render_trial_drilldown(
+                        _spt_show.iloc[_spt_rows[0]],
+                        key_suffix=f"deep_sponsor_one_{sponsor_pick}",
+                    )
+
+    # ===== Compare (side-by-side disease/target — Phase 3) =====
+    with deep_sub_compare:
+        st.subheader("Side-by-side comparator")
+        st.caption(
+            "Pick two diseases or two antigens; the dashboard renders "
+            "matched mini-panels (trial counts, phase distribution, "
+            "sponsor-type split, target/disease mix, annual trend). "
+            "Useful for benchmark questions like 'is autoimmune-CAR-T "
+            "moving toward CD19 or BCMA?' or 'how does SLE compare to "
+            "SSc in pipeline maturity?'."
+        )
+        if df_filt.empty:
+            st.info("No trials in the current filter.")
+        else:
+            _cmp_axis = st.radio(
+                "Comparison axis",
+                options=["Disease entity", "Antigen target"],
+                horizontal=True, key="dd_compare_axis",
+            )
+            _axis_col_cmp = (
+                "DiseaseEntity" if _cmp_axis == "Disease entity"
+                else "TargetCategory"
+            )
+            _hidden_cmp = (
+                {"Other_or_unknown", "CAR-T_unspecified"}
+                if _axis_col_cmp == "TargetCategory"
+                else {"Unclassified"}
+            )
+            _opts = sorted(
+                v for v in df_filt[_axis_col_cmp].dropna().unique()
+                if v not in _hidden_cmp
+            )
+            if len(_opts) < 2:
+                st.info("Need at least 2 categories on this axis to compare.")
+            else:
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    _pick_a = st.selectbox(
+                        "Compare A", _opts, index=0,
+                        key="dd_compare_a",
+                    )
+                with _c2:
+                    _pick_b = st.selectbox(
+                        "Compare B",
+                        _opts, index=min(1, len(_opts) - 1),
+                        key="dd_compare_b",
+                    )
+
+                if _pick_a == _pick_b:
+                    st.warning("Pick two different categories.")
+                else:
+                    def _mini_panel(df_slice: pd.DataFrame, label: str, key_suffix: str) -> None:
+                        st.markdown(f"#### {label}")
+                        if df_slice.empty:
+                            st.info("No trials match.")
+                            return
+                        _ma, _mb, _mc = st.columns(3)
+                        _ma.metric("Trials", f"{len(df_slice):,}")
+                        _mb.metric(
+                            "Open",
+                            int(df_slice["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                        )
+                        _mc.metric(
+                            "Sponsors",
+                            f"{df_slice['LeadSponsor'].dropna().nunique():,}",
+                        )
+
+                        # Phase mix
+                        _ph = (
+                            df_slice.assign(PhaseLabel=df_slice.get("PhaseLabel", df_slice["Phase"]))
+                            .groupby("PhaseLabel").size().reset_index(name="Trials")
+                        )
+                        _ph["PhaseLabel"] = pd.Categorical(
+                            _ph["PhaseLabel"],
+                            categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_ph["PhaseLabel"])],
+                            ordered=True,
+                        )
+                        _ph = _ph.sort_values("PhaseLabel")
+                        if not _ph.empty:
+                            _chart(
+                                make_bar(_ph, "PhaseLabel", "Trials", height=220),
+                                key=f"dd_compare_phase_{key_suffix}",
+                            )
+
+                        # Sponsor type
+                        if "SponsorType" in df_slice.columns:
+                            _spt_d = (
+                                df_slice["SponsorType"].fillna("Other").value_counts()
+                                .rename_axis("Sponsor type").reset_index(name="Trials")
+                            )
+                            _chart(
+                                _deepdive_donut(
+                                    _spt_d, label_col="Sponsor type", height=200,
+                                    color_map={
+                                        "Industry":   "#0c4a6e",
+                                        "Academic":   "#0369a1",
+                                        "Government": "#0284c7",
+                                        "Other":      "#94a3b8",
+                                    },
+                                ),
+                                key=f"dd_compare_sptype_{key_suffix}",
+                            )
+
+                        # Other-axis mix (if comparing diseases, show targets; vice versa)
+                        if _axis_col_cmp == "DiseaseEntity":
+                            st.markdown("**Antigen mix**")
+                            _xb = (
+                                df_slice.loc[~df_slice["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"}), "TargetCategory"]
+                                .value_counts().head(8)
+                                .rename_axis("Target").reset_index(name="Trials")
+                            )
+                        else:
+                            st.markdown("**Disease mix**")
+                            _xb = (
+                                df_slice["DiseaseEntity"].value_counts().head(8)
+                                .rename_axis("Disease").reset_index(name="Trials")
+                            )
+                        if not _xb.empty:
+                            _chart(
+                                make_bar(_xb, _xb.columns[0], "Trials", height=220),
+                                key=f"dd_compare_xmix_{key_suffix}",
+                            )
+
+                    _ca, _cb = st.columns(2)
+                    with _ca:
+                        _slice_a = df_filt[df_filt[_axis_col_cmp] == _pick_a].copy()
+                        _mini_panel(_slice_a, _pick_a, f"a_{_pick_a}")
+                    with _cb:
+                        _slice_b = df_filt[df_filt[_axis_col_cmp] == _pick_b].copy()
+                        _mini_panel(_slice_b, _pick_b, f"b_{_pick_b}")
 
 
 with tab_pub:
