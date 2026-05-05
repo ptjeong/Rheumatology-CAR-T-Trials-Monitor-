@@ -1,29 +1,25 @@
-"""Multi-axis classification audit worklist generator.
+"""Multi-axis classification audit — CLI generator for curation_loop.csv.
 
-Companion to `scripts/audit_named_products.py` (which is target-only).
-This script generates the broader worklist used by
-`docs/internal/CLASSIFICATION_AUDIT_PROMPT.md`: every trial with a
-sentinel/generic label on ANY classification axis or low/medium overall
-classification confidence.
+Programmatic equivalent of the dashboard's Methods → "Download
+curation CSV" button. Emits the same CURATION_LOOP_V1 format so the
+output is interchangeable with the UI export — useful for CI
+pipelines or when iterating on the classifier without spinning up
+Streamlit.
 
 Run from repo root:
     python3 scripts/audit_classification.py [snapshot_date]
 
-Emits a single CSV `audit_output/classification_audit_<date>.csv`
-with the columns the audit walkthrough needs:
+Output:
+    audit_output/curation_loop_<snapshot>.csv
 
-  NCTId, BriefTitle, OfficialTitle, Interventions, Conditions,
-  LeadSponsor, DiseaseEntities, TrialDesign, TargetCategory,
-  ProductType, ProductName, ClassificationConfidence,
-  + AxisFlags (which axes triggered inclusion in the audit)
-
-`AxisFlags` is a pipe-joined list of {entity, target, product, conf}
-tags so the auditor can sort the worklist by which axis needs
-attention.
+The companion prompt `docs/internal/CLASSIFICATION_AUDIT_PROMPT.md`
+walks Q1-Q7 against this CSV and patches config.py / pipeline.py /
+llm_overrides.json with a strict no-downgrade acceptance gate.
 """
 
 from __future__ import annotations
 
+import io
 import sys
 from pathlib import Path
 
@@ -33,10 +29,31 @@ sys.path.insert(0, str(REPO_ROOT))
 import pandas as pd
 
 
-_SENTINEL_TARGETS = {"CAR-T_unspecified", "Other_or_unknown"}
-_SENTINEL_ENTITIES = {"Other immune-mediated", "Unclassified"}
-_SENTINEL_PRODUCT_TYPES = {"Unclear"}
-_NON_HIGH_CONFIDENCE = {"low", "medium"}
+_SENTINEL_DISEASE = {"Unclassified", "Autoimmune_other", "Other_or_unknown"}
+_SENTINEL_TARGET  = {"CAR-T_unspecified", "Other_or_unknown",
+                     "Unclassified", "Unknown"}
+_SENTINEL_PRODUCT = {"Unclear"}
+
+# CURATION_LOOP_V1 header — kept identical to the dashboard's
+# `app.py:export_curation_loop` block so a CSV from this script is a
+# drop-in replacement for the Methods-tab download.
+_HEADER_LINES = [
+    "# CURATION_LOOP_V1",
+    "# INSTRUCTION: You are Claude Code assisting with a CAR-T rheumatology trial pipeline.",
+    "# For each row below, read BriefTitle / Conditions / Interventions / BriefSummary.",
+    "# Propose the correct DiseaseEntity, TargetCategory, and ProductType.",
+    "# Then automatically patch config.py and/or pipeline.py to capture these cases.",
+    "# Allowed DiseaseEntity values: SLE, SSc, Sjogren, CTD_other, IIM, AAV, RA, IgG4-RD,",
+    "#   Behcet, cGVHD, Basket/Multidisease, Other immune-mediated, Autoimmune_other,",
+    "#   Unclassified, Exclude",
+    "# Allowed TargetCategory values: CD19, BCMA, CD20, CD70, CD6, CD7, BAFF, BAFF-R,",
+    "#   CD19/BCMA dual, CD19/CD20 dual, CD19/BAFF dual, BCMA/CD70 dual,",
+    "#   CAR-NK, CAAR-T, CAR-Treg, CAR-T_unspecified, Other_or_unknown",
+    "# Allowed ProductType values: Autologous, Allogeneic/Off-the-shelf, In vivo, Unclear",
+    "# UnclearFields column shows which field(s) triggered inclusion (Disease|Target|Product).",
+    "# Walkthrough: docs/internal/CLASSIFICATION_AUDIT_PROMPT.md (Q1-Q7 decision tree).",
+    "#",
+]
 
 
 def _resolve_snapshot(arg: str | None) -> str:
@@ -54,18 +71,15 @@ def _resolve_snapshot(arg: str | None) -> str:
     return candidates[-1]
 
 
-def _flags_for_row(row: pd.Series) -> list[str]:
+def _unclear_fields(row: pd.Series) -> str:
     flags: list[str] = []
-    entities = str(row.get("DiseaseEntities") or "").split("|")
-    if any(e.strip() in _SENTINEL_ENTITIES for e in entities):
-        flags.append("entity")
-    if str(row.get("TargetCategory") or "") in _SENTINEL_TARGETS:
-        flags.append("target")
-    if str(row.get("ProductType") or "") in _SENTINEL_PRODUCT_TYPES:
-        flags.append("product")
-    if str(row.get("ClassificationConfidence") or "") in _NON_HIGH_CONFIDENCE:
-        flags.append("conf")
-    return flags
+    if str(row.get("DiseaseEntity") or "") in _SENTINEL_DISEASE:
+        flags.append("Disease")
+    if str(row.get("TargetCategory") or "") in _SENTINEL_TARGET:
+        flags.append("Target")
+    if str(row.get("ProductType") or "") in _SENTINEL_PRODUCT:
+        flags.append("Product")
+    return "|".join(flags)
 
 
 def main() -> None:
@@ -77,40 +91,38 @@ def main() -> None:
     df = pd.read_csv(trials_path)
     print(f"Loaded {len(df)} trials from snapshots/{snapshot}/trials.csv")
 
-    rows = []
-    for _, r in df.iterrows():
-        flags = _flags_for_row(r)
-        if not flags:
-            continue
-        rows.append({
-            "NCTId":            r.get("NCTId", ""),
-            "AxisFlags":        "|".join(flags),
-            "BriefTitle":       (r.get("BriefTitle") or "")[:200],
-            "OfficialTitle":    (r.get("OfficialTitle") or "")[:300],
-            "Interventions":    (r.get("Interventions") or "")[:300],
-            "Conditions":       (r.get("Conditions") or "")[:300],
-            "LeadSponsor":      r.get("LeadSponsor") or "",
-            "DiseaseEntities":  r.get("DiseaseEntities") or "",
-            "TrialDesign":      r.get("TrialDesign") or "",
-            "TargetCategory":   r.get("TargetCategory") or "",
-            "ProductType":      r.get("ProductType") or "",
-            "ProductName":      r.get("ProductName") or "",
-            "ClassificationConfidence": r.get("ClassificationConfidence") or "",
-        })
+    df["UnclearFields"] = df.apply(_unclear_fields, axis=1)
+    audit = df[df["UnclearFields"] != ""].copy()
 
-    audit = pd.DataFrame(rows)
-    audit_path = out_dir / f"classification_audit_{snapshot}.csv"
-    audit.to_csv(audit_path, index=False)
+    export_cols = [
+        "NCTId", "BriefTitle", "Conditions", "Interventions",
+        "DiseaseEntity", "TargetCategory", "ProductType",
+        "UnclearFields", "BriefSummary",
+    ]
+    audit_export = audit[[c for c in export_cols if c in audit.columns]].copy()
+    if "BriefSummary" in audit_export.columns:
+        audit_export["BriefSummary"] = (
+            audit_export["BriefSummary"].astype(str).str[:300]
+        )
 
-    print(f"  → {audit_path}  ({len(audit)} rows)")
+    # Write CURATION_LOOP_V1 — header + CSV body
+    buf = io.StringIO()
+    for line in _HEADER_LINES:
+        buf.write(line + "\n")
+    audit_export.to_csv(buf, index=False)
+
+    out_path = out_dir / f"curation_loop_{snapshot}.csv"
+    out_path.write_text(buf.getvalue())
+
+    print(f"  → {out_path}  ({len(audit_export)} rows)")
     print()
     print("Per-axis flag counts:")
-    for axis in ("entity", "target", "product", "conf"):
-        n = audit["AxisFlags"].str.contains(axis, na=False).sum()
+    for axis in ("Disease", "Target", "Product"):
+        n = audit_export["UnclearFields"].str.contains(axis, na=False).sum()
         print(f"  {axis:8s} {n:4d}")
     print()
     print("Next: open docs/internal/CLASSIFICATION_AUDIT_PROMPT.md")
-    print("and walk Q1-Q7 for each row.")
+    print("and walk Q1-Q7 for each row. Strict no-downgrade gate at Step 3.")
 
 
 if __name__ == "__main__":
