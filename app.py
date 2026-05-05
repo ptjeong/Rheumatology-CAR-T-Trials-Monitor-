@@ -3610,6 +3610,125 @@ tab_overview, tab_geo, tab_data, tab_deepdive, tab_pub, tab_methods, tab_about =
 tab_moderation = _tabs[7] if _MODERATOR_MODE else None
 
 with tab_overview:
+    # ── Phase 4: Newsroom strip — KPIs + Top movers + Recently added ──
+    # Lands at the very top of the Overview tab so the answer to
+    # "what's the headline?" is visible before any chart renders.
+    if not df_filt.empty:
+        # ── KPI tiles ──────────────────────────────────────────────────
+        _kpi_n = len(df_filt)
+        _kpi_open = int(df_filt["OverallStatus"].isin(
+            ["RECRUITING", "NOT_YET_RECRUITING"]
+        ).sum())
+        _kpi_enr = int(pd.to_numeric(
+            df_filt["EnrollmentCount"], errors="coerce"
+        ).fillna(0).sum())
+        _kpi_top_target = (
+            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown", "CAR-T_unspecified"}), "TargetCategory"]
+            .value_counts().index[0]
+            if (~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown", "CAR-T_unspecified"})).any()
+            else "—"
+        )
+        _kpi_year_max = int(pd.to_numeric(df_filt["StartYear"], errors="coerce").max()) \
+            if pd.to_numeric(df_filt["StartYear"], errors="coerce").notna().any() else None
+        _kpi_year_curr_count = int(
+            (pd.to_numeric(df_filt["StartYear"], errors="coerce") == _kpi_year_max).sum()
+        ) if _kpi_year_max else 0
+
+        _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+        _k1.metric("Trials", f"{_kpi_n:,}")
+        _k2.metric("Open / recruiting", f"{_kpi_open:,}")
+        _k3.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
+        _k4.metric("Top antigen", _kpi_top_target)
+        _k5.metric(
+            f"Trials started in {_kpi_year_max}" if _kpi_year_max else "Latest year",
+            f"{_kpi_year_curr_count:,}" if _kpi_year_max else "—",
+        )
+
+        # ── Top movers (year-over-year change) + Recently added ────────
+        _mv_a, _mv_b = st.columns([0.55, 0.45])
+        with _mv_a:
+            st.markdown("**Top movers — biggest YoY change in trial starts**")
+            _mv_df = df_filt.copy()
+            _mv_df["StartYear"] = pd.to_numeric(_mv_df["StartYear"], errors="coerce")
+            _mv_df = _mv_df.dropna(subset=["StartYear"])
+            if not _mv_df.empty:
+                _mv_df["StartYear"] = _mv_df["StartYear"].astype(int)
+                _y_now = int(_mv_df["StartYear"].max())
+                _y_prev = _y_now - 1
+                # Movers across two axes: Disease entity + Antigen target
+                _mover_rows = []
+                for axis_col, axis_label in (
+                    ("DiseaseEntity", "Disease"),
+                    ("TargetCategory", "Antigen"),
+                    ("LeadSponsor", "Sponsor"),
+                ):
+                    _now = _mv_df.loc[_mv_df["StartYear"] == _y_now, axis_col].value_counts()
+                    _prev = _mv_df.loc[_mv_df["StartYear"] == _y_prev, axis_col].value_counts()
+                    for cat in set(_now.index) | set(_prev.index):
+                        if cat in {"Other_or_unknown", "CAR-T_unspecified", "Unclassified"} | _PLATFORM_LABELS:
+                            continue
+                        n_now = int(_now.get(cat, 0))
+                        n_prev = int(_prev.get(cat, 0))
+                        delta = n_now - n_prev
+                        if abs(delta) < 2:
+                            continue
+                        _mover_rows.append({
+                            "Axis": axis_label, "Category": cat,
+                            f"{_y_prev}": n_prev, f"{_y_now}": n_now,
+                            "Δ": delta,
+                        })
+                if _mover_rows:
+                    _movers = pd.DataFrame(_mover_rows).sort_values("Δ", ascending=False)
+                    _movers_top = pd.concat([_movers.head(5), _movers.tail(5)]).drop_duplicates()
+                    st.dataframe(
+                        _movers_top, width="stretch", hide_index=True,
+                        column_config={
+                            "Axis":     st.column_config.TextColumn("Axis", width="small"),
+                            "Category": st.column_config.TextColumn("Category", width="medium"),
+                            f"{_y_prev}": st.column_config.NumberColumn(f"{_y_prev}", format="%d", width="small"),
+                            f"{_y_now}":  st.column_config.NumberColumn(f"{_y_now}", format="%d", width="small"),
+                            "Δ":        st.column_config.NumberColumn(
+                                f"Change {_y_prev} → {_y_now}",
+                                format="%d", width="small",
+                            ),
+                        },
+                    )
+                    st.caption(
+                        f"Top 5 risers and 5 fallers across disease / antigen / "
+                        f"sponsor axes, comparing {_y_now} starts to {_y_prev}. "
+                        "Categories with <2-trial swing omitted. Sentinel labels "
+                        "(Other_or_unknown / Unclassified / platform aliases) excluded."
+                    )
+                else:
+                    st.caption("No notable YoY movers in the current filter.")
+        with _mv_b:
+            st.markdown("**Recently added trials**")
+            if "LastUpdatePostDate" in df_filt.columns:
+                _ra = df_filt.copy()
+                _ra["LastUpdatePostDate"] = pd.to_datetime(_ra["LastUpdatePostDate"], errors="coerce")
+                _ra = _ra.dropna(subset=["LastUpdatePostDate"]).sort_values(
+                    "LastUpdatePostDate", ascending=False,
+                ).head(8)
+                _ra_view = _ra[["NCTId", "BriefTitle", "DiseaseEntity",
+                                "TargetCategory", "Phase", "LastUpdatePostDate"]].copy()
+                _ra_view["LastUpdatePostDate"] = _ra_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
+                _ra_view["BriefTitle"] = _ra_view["BriefTitle"].astype(str).str[:70]
+                st.dataframe(
+                    _ra_view, width="stretch", hide_index=True, height=280,
+                    column_config={
+                        "NCTId":              st.column_config.TextColumn("NCT", width="small"),
+                        "BriefTitle":         st.column_config.TextColumn("Title", width="medium"),
+                        "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
+                        "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
+                        "Phase":              st.column_config.TextColumn("Phase", width="small"),
+                        "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
+                    },
+                )
+                st.caption("Most-recently-updated trials (CT.gov LastUpdatePostDate, top 8).")
+            else:
+                st.caption("LastUpdatePostDate not present in the snapshot.")
+        st.markdown("---")
+
     # -----------------------------------------------------------------
     # Hero — disease hierarchy sunburst (the signature visual).
     # Inner ring: disease family (the rheum analogue of Heme-onc / Solid-onc).
@@ -4092,6 +4211,73 @@ with tab_overview:
 with tab_geo:
     st.subheader("Global studies by country")
 
+    # ── Phase 5: Regional aggregates strip ──────────────────────────
+    # Maps each ISO country into one of five world regions so a reader
+    # sees Asia / Europe / North America / Latin America / RoW totals
+    # without parsing the country leaderboard. Region mapping is
+    # conservative (ISO-3166 region codes minus a few common aliases).
+    _REGIONS = {
+        "China": "Asia", "Japan": "Asia", "South Korea": "Asia",
+        "Korea, Republic of": "Asia", "Taiwan": "Asia",
+        "Hong Kong": "Asia", "Singapore": "Asia", "India": "Asia",
+        "Thailand": "Asia", "Malaysia": "Asia", "Vietnam": "Asia",
+        "Philippines": "Asia", "Indonesia": "Asia", "Israel": "Asia",
+        "Turkey": "Asia",
+        "United States": "North America", "Canada": "North America",
+        "Mexico": "Latin America", "Brazil": "Latin America",
+        "Argentina": "Latin America", "Chile": "Latin America",
+        "Colombia": "Latin America", "Peru": "Latin America",
+        "Australia": "Oceania", "New Zealand": "Oceania",
+    }
+    _EU_COUNTRIES = {
+        "Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus",
+        "Czechia", "Czech Republic", "Denmark", "Estonia", "Finland",
+        "France", "Germany", "Greece", "Hungary", "Ireland", "Italy",
+        "Latvia", "Lithuania", "Luxembourg", "Malta", "Netherlands",
+        "Poland", "Portugal", "Romania", "Slovakia", "Slovenia",
+        "Spain", "Sweden",
+        "United Kingdom", "Switzerland", "Norway", "Iceland",
+    }
+
+    def _country_to_region(c: str) -> str:
+        if c in _REGIONS:
+            return _REGIONS[c]
+        if c in _EU_COUNTRIES:
+            return "Europe"
+        return "Other"
+
+    if not df_filt.empty:
+        _region_counter: dict[str, set[str]] = {
+            "Asia": set(), "Europe": set(), "North America": set(),
+            "Latin America": set(), "Oceania": set(), "Other": set(),
+        }
+        for _, _r in df_filt.iterrows():
+            cs = str(_r.get("Countries") or "").split("|")
+            _seen_regions = set()
+            for c in cs:
+                c = c.strip()
+                if not c:
+                    continue
+                _seen_regions.add(_country_to_region(c))
+            for reg in _seen_regions:
+                _region_counter[reg].add(_r.get("NCTId"))
+        _reg_cols = st.columns(6)
+        _reg_palette = {
+            "Asia":           "#0c4a6e",
+            "Europe":         "#0369a1",
+            "North America":  "#0284c7",
+            "Latin America":  "#7c3aed",
+            "Oceania":        "#0d9488",
+            "Other":          "#94a3b8",
+        }
+        for _col, _reg in zip(_reg_cols, [
+            "Asia", "Europe", "North America", "Latin America", "Oceania", "Other"
+        ]):
+            _col.metric(
+                _reg, f"{len(_region_counter[_reg]):,}",
+                help=f"Distinct trials with at least one site in {_reg}",
+            )
+
     countries_long = split_pipe_values(df_filt["Countries"])
     if countries_long:
         country_df = pd.DataFrame({"Country": countries_long})
@@ -4432,6 +4618,100 @@ with tab_geo:
                         )
             else:
                 st.caption("Select a city row in the table to open the related trial list below.")
+
+    # ── Phase 5: Country-emergence scatter + multi-country trials ──
+    if not df_filt.empty:
+        st.markdown("---")
+        st.subheader("Country emergence & international collaboration")
+        _ce_a, _ce_b = st.columns([0.55, 0.45])
+        with _ce_a:
+            st.markdown("**When did each country enter the field?**")
+            st.caption(
+                "Each dot is a country, x-axis = year of its first CAR-T "
+                "autoimmune trial in the snapshot. Useful for spotting "
+                "early-entrant vs late-entrant geographies."
+            )
+            _ce_rows = []
+            for _, _r in df_filt.iterrows():
+                _y = pd.to_numeric(_r.get("StartYear"), errors="coerce")
+                if pd.isna(_y):
+                    continue
+                cs = str(_r.get("Countries") or "").split("|")
+                for c in cs:
+                    c = c.strip()
+                    if c:
+                        _ce_rows.append((c, int(_y)))
+            if _ce_rows:
+                _ce_df = pd.DataFrame(_ce_rows, columns=["Country", "Year"])
+                _ce_first = (
+                    _ce_df.groupby("Country")["Year"].min()
+                    .sort_values().reset_index()
+                    .rename(columns={"Year": "FirstTrialYear"})
+                )
+                _ce_total = _ce_df["Country"].value_counts().to_dict()
+                _ce_first["Trials"] = _ce_first["Country"].map(_ce_total)
+                _ce_first["Region"] = _ce_first["Country"].apply(_country_to_region)
+                _ce_fig = px.scatter(
+                    _ce_first.sort_values("FirstTrialYear"),
+                    x="FirstTrialYear", y="Country",
+                    size="Trials", color="Region",
+                    color_discrete_map=_reg_palette,
+                    template="plotly_white",
+                    height=max(300, 22 * len(_ce_first) + 80),
+                )
+                _ce_fig.update_traces(
+                    hovertemplate=(
+                        "<b>%{y}</b><br>First trial: %{x}<br>"
+                        "Total trials: %{marker.size}<extra></extra>"
+                    ),
+                )
+                _ce_fig.update_layout(
+                    margin=dict(l=12, r=12, t=8, b=40),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis_title="Year of first trial",
+                    yaxis_title=None,
+                    yaxis=dict(autorange="reversed"),
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=-0.12, x=0,
+                        font=dict(family=FONT_FAMILY, size=10),
+                        title=dict(text=""),
+                    ),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                )
+                _chart(_ce_fig, key="geo_country_emergence")
+
+        with _ce_b:
+            st.markdown("**Multi-country trials**")
+            st.caption(
+                "Trials enrolling in ≥2 countries — an indicator of "
+                "international collaboration. Listed by country count."
+            )
+            _mc_df = df_filt.copy()
+            _mc_df["_n_countries"] = _mc_df["Countries"].fillna("").astype(str).apply(
+                lambda s: len([c for c in s.split("|") if c.strip()])
+            )
+            _mc = _mc_df[_mc_df["_n_countries"] >= 2].sort_values(
+                "_n_countries", ascending=False,
+            ).head(15)
+            if _mc.empty:
+                st.caption("No multi-country trials in the current filter.")
+            else:
+                _mc_view = _mc[["NCTId", "BriefTitle", "_n_countries", "Countries"]].copy()
+                _mc_view["BriefTitle"] = _mc_view["BriefTitle"].astype(str).str[:70]
+                _mc_view["Countries"] = _mc_view["Countries"].astype(str).str.replace("|", " · ", regex=False)
+                st.dataframe(
+                    _mc_view, width="stretch", hide_index=True, height=380,
+                    column_config={
+                        "NCTId":         st.column_config.TextColumn("NCT", width="small"),
+                        "BriefTitle":    st.column_config.TextColumn("Title", width="medium"),
+                        "_n_countries": st.column_config.NumberColumn("# countries", format="%d", width="small"),
+                        "Countries":     st.column_config.TextColumn("Countries", width="large"),
+                    },
+                )
+                st.caption(
+                    f"{len(_mc)} multi-country trials of {len(_mc_df)} total "
+                    f"({100.0 * len(_mc) / len(_mc_df):.1f}%) — top 15 by country count."
+                )
 
 with tab_data:
     st.subheader("Trial table")
@@ -7932,6 +8212,201 @@ with tab_pub:
                     _co_csv, "Fig 9 — Basket-disease co-occurrence",
                 ),
                 "fig9_basket_co_occurrence.csv",
+                "text/csv",
+            )
+
+    # ------------------------------------------------------------------
+    # Fig 10 — Paediatric coverage gap by disease (Phase 6)
+    # ------------------------------------------------------------------
+    # Surfaces a clinically important asymmetry: which rheumatology /
+    # immune-mediated diseases have ZERO paediatric CAR-T trials despite
+    # adult activity. Built from AgeGroup × DiseaseEntity × trial count.
+    # The figure pairs naturally with Fig 5 (disease distribution) — Fig 5
+    # shows where activity exists; Fig 10 shows whether children are
+    # included.
+    st.markdown(
+        '<strong style="color: #0b1220;">10 — Paediatric coverage gap '
+        'by disease entity</strong>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<p class="small-note" style="color:{THEME["muted"]}">'
+        "Stacked share of paediatric / paediatric+adult / adult-only / "
+        "older-adult coverage per disease. Diseases with 0% paediatric "
+        "or paed+adult share are clinical blind spots — the field is "
+        "developing CAR-T for adult patients while children with the "
+        "same diagnosis have no trial option. Sorted by total trials "
+        "descending; top 15 diseases shown.</p>",
+        unsafe_allow_html=True,
+    )
+    if "AgeGroup" not in df_filt.columns or df_filt.empty:
+        st.info("AgeGroup data not present in this snapshot.")
+    else:
+        _ag10 = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"]).copy()
+        _ag10["AgeGroup"] = _ag10["AgeGroup"].fillna("Unknown")
+        _ag10_top = (
+            _ag10.groupby("_Disease")["NCTId"].nunique()
+            .sort_values(ascending=False).head(15).index.tolist()
+        )
+        _ag10 = _ag10[_ag10["_Disease"].isin(_ag10_top)]
+        _ag10_counts = _ag10.groupby(["_Disease", "AgeGroup"]).size().reset_index(name="Trials")
+        _ag10_counts["Pct"] = 100.0 * _ag10_counts["Trials"] / _ag10_counts.groupby("_Disease")["Trials"].transform("sum")
+        _ag_palette10 = {
+            "Paediatric":          "#86efac",  # green-300 — paed-only highlight
+            "Paed/adult":          "#a78bfa",  # violet-400
+            "Paed/adult/older":    "#7c3aed",  # violet-600
+            "Adult":               "#0c4a6e",  # sky-900
+            "Adult/older adult":   "#0284c7",  # sky-600
+            "Older adult":         "#0369a1",  # sky-700
+            "Unknown":             "#cbd5e1",  # slate-300
+        }
+        if not _ag10_counts.empty:
+            _fig10 = px.bar(
+                _ag10_counts,
+                x="_Disease", y="Pct", color="AgeGroup",
+                category_orders={"_Disease": _ag10_top},
+                color_discrete_map=_ag_palette10,
+                template="plotly_white",
+                height=440,
+            )
+            _fig10.update_traces(
+                marker_line_width=0,
+                hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y:.1f}%<extra></extra>",
+            )
+            _fig10.update_layout(
+                margin=dict(l=12, r=12, t=8, b=110),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                xaxis_title=None,
+                yaxis_title="Age-group share (%)",
+                font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=-0.35, x=0,
+                    font=dict(family=FONT_FAMILY, size=10),
+                    title=dict(text=""),
+                ),
+                bargap=0.35,
+            )
+            _fig10.update_xaxes(tickangle=-30)
+            _chart(_fig10, key="fig10")
+
+            # Highlight the gap: diseases with 0% paed coverage
+            _paed_share = _ag10_counts[
+                _ag10_counts["AgeGroup"].isin(["Paediatric", "Paed/adult", "Paed/adult/older"])
+            ].groupby("_Disease")["Pct"].sum().reindex(_ag10_top, fill_value=0)
+            _no_paed = _paed_share[_paed_share == 0].index.tolist()
+            if _no_paed:
+                st.caption(
+                    f"**Clinical blind spots — 0% paediatric coverage:** "
+                    f"{', '.join(_no_paed)}. "
+                    f"{len(_no_paed)} of {len(_ag10_top)} top-prevalence "
+                    f"diseases have no trial enrolling children."
+                )
+
+            _fig10_csv = _ag10_counts.copy()
+            _fig10_csv["Pct"] = _fig10_csv["Pct"].round(2)
+            st.download_button(
+                "Fig 10 data (CSV)",
+                _csv_with_provenance(
+                    _fig10_csv, "Fig 10 — Paediatric coverage by disease",
+                ),
+                "fig10_paediatric_coverage.csv",
+                "text/csv",
+            )
+
+    # ------------------------------------------------------------------
+    # Fig 11 — Sponsor concentration (top-3 share) by disease (Phase 6)
+    # ------------------------------------------------------------------
+    # Competitive-intensity figure. Per disease, what fraction of trials
+    # are run by the top 3 lead sponsors? High share (>60%) = concentrated
+    # field controlled by a small number of sponsors; low share (<30%) =
+    # diffuse competition with many entrants.
+    st.markdown(
+        '<strong style="color: #0b1220;">11 — Sponsor concentration '
+        '(top-3 lead-sponsor share) by disease</strong>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<p class="small-note" style="color:{THEME["muted"]}">'
+        "For each disease entity, the percentage of trials run by the "
+        "top 3 lead sponsors. Concentrated fields (top-3 share >60%) "
+        "are controlled by a small number of major sponsors; diffuse "
+        "fields (top-3 share <30%) have many entrants. Bar height "
+        "encodes share; bar width is unused (categorical x-axis). "
+        "Filtered to diseases with ≥3 trials.</p>",
+        unsafe_allow_html=True,
+    )
+    if df_filt.empty:
+        st.info("No data in the current filter.")
+    else:
+        _ci_in = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"])
+        _ci_in = _ci_in.dropna(subset=["LeadSponsor"])
+        _ci_rows = []
+        for _disease, _grp in _ci_in.groupby("_Disease"):
+            _total = _grp["NCTId"].nunique()
+            if _total < 3:
+                continue
+            _top3 = (
+                _grp.groupby("LeadSponsor")["NCTId"].nunique()
+                .sort_values(ascending=False).head(3).sum()
+            )
+            _ci_rows.append({
+                "Disease": _disease,
+                "TotalTrials": _total,
+                "Top3Share": round(100.0 * _top3 / _total, 1),
+                "Sponsors": _grp["LeadSponsor"].nunique(),
+            })
+        _ci11 = pd.DataFrame(_ci_rows).sort_values("Top3Share", ascending=False)
+        if not _ci11.empty:
+            # Color-code by concentration level: red = highly concentrated,
+            # blue = diffuse, amber = moderate.
+            def _conc_color(p):
+                if p >= 70:
+                    return "#dc2626"   # red-600 — highly concentrated
+                if p >= 50:
+                    return "#f59e0b"   # amber-500 — moderate
+                return "#0c4a6e"        # navy — diffuse / open competition
+            _ci11["Color"] = _ci11["Top3Share"].apply(_conc_color)
+            _fig11 = go.Figure(go.Bar(
+                x=_ci11["Disease"], y=_ci11["Top3Share"],
+                marker_color=_ci11["Color"],
+                text=[f"{v:.0f}%" for v in _ci11["Top3Share"]],
+                textposition="outside",
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "Top-3 share: %{y:.1f}%<br>"
+                    "Total trials: %{customdata[0]}<br>"
+                    "Distinct sponsors: %{customdata[1]}<extra></extra>"
+                ),
+                customdata=_ci11[["TotalTrials", "Sponsors"]].values,
+            ))
+            _fig11.update_layout(
+                template="plotly_white",
+                height=440,
+                margin=dict(l=12, r=12, t=8, b=110),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                xaxis_title=None,
+                yaxis_title="Top-3 sponsor share (%)",
+                yaxis=dict(range=[0, 110], gridcolor=_GRID_CLR),
+                font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                showlegend=False,
+            )
+            _fig11.update_xaxes(tickangle=-30)
+            # Reference lines at 30 / 60% to anchor the interpretation
+            _fig11.add_hline(y=30, line_dash="dot", line_color="#94a3b8",
+                             annotation_text="diffuse <30%",
+                             annotation_position="top right")
+            _fig11.add_hline(y=60, line_dash="dot", line_color="#94a3b8",
+                             annotation_text="concentrated >60%",
+                             annotation_position="top right")
+            _chart(_fig11, key="fig11")
+
+            st.download_button(
+                "Fig 11 data (CSV)",
+                _csv_with_provenance(
+                    _ci11.drop(columns=["Color"]),
+                    "Fig 11 — Sponsor concentration (top-3 share)",
+                ),
+                "fig11_sponsor_concentration.csv",
                 "text/csv",
             )
 
