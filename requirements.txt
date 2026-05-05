@@ -8,3 +8,8 @@ requests==2.33.1
 anthropic>=0.40.0,<1.0.0
 pyarrow==24.0.0
 pyyaml>=6.0
+# Server-side SVG export for the per-chart "↓ Save as SVG" button.
+# Without kaleido, fig.to_image(format='svg') raises and the helper
+# silently drops the SVG button (PNG modebar download still works).
+# The high-contrast palette toggle is independent of kaleido.
+kaleido>=0.2.1
