@@ -290,60 +290,81 @@ _SUNBURST_L1_ORDER = [
 
 # CANONICAL entity-level palette — every disease label that appears as
 # an L2 sunburst wedge, a stacked-area lane (Fig 1), a bar segment
-# (Fig 5), or a per-entity legend entry resolves to ITS OWN distinct
-# colour here. Designed so within-family hues cluster (same family =
-# same colour neighbourhood) AND each disease is individually
-# distinguishable per user feedback "improve colour coding to better
-# differentiate the diseases — universally applied to all figures".
-# Strategy:
-#   - Connective tissue → cool blues (navy → sky)
-#   - Inflammatory arthritis → teal-600
-#   - Vasculitis → emerald greens
-#   - Neurologic → violet / purple / fuchsia / indigo / pink gamut
-#   - Other autoimmune → warm earth tones (stone / amber / red / orange)
-#     so the family reads as visually distinct from the cool rheum cluster
-#   - Baskets / Unclassified → neutral slate / gray
-ENTITY_COLORS = {
-    # ── Connective tissue ──
-    "SLE":              "#0b3d91",   # navy-900 — most-prevalent rheum entity
-    "SSc":              "#1d4ed8",   # blue-700
-    "Sjogren":          "#3b82f6",   # blue-500
-    "IIM":              "#06b6d4",   # cyan-500
-    "CTD_other":        "#7dd3fc",   # sky-300
-    "IgG4-RD":          "#bae6fd",   # sky-200
+# (Fig 5), or a per-entity legend entry resolves to ITS OWN colour
+# here. Used universally across every entity-grouped chart in the
+# dashboard so a reader can match a disease across charts at a glance.
+#
+# DESIGN LOGIC (reworked 2026-04-27 per user "think hard about a logical
+# way to apply colour coding"):
+#
+#   1. Each family gets a SEQUENTIAL palette (one hue zone, multiple
+#      shades). Reader sees the family at a glance via hue; sees the
+#      specific entity via shade. Borrowed from ColorBrewer's perceptually
+#      uniform scales, which are colour-blind-safe by construction.
+#
+#   2. Within each family, shades are ORDERED dark → light by clinical
+#      prevalence + canonical seniority (SLE before SSc before Sjogren,
+#      MS before NMOSD before Myasthenia, etc.). Reader gets a free
+#      "this is the most-prevalent disease in its family" cue from
+#      darker = more-canonical.
+#
+#   3. Family hue zones are chosen for MAXIMAL across-family contrast:
+#         Connective tissue → Blues       (deep cool)
+#         Inflammatory arthritis → Teal-600 (single, between blue & green)
+#         Vasculitis → Cyans             (cool but not blue, distinct from CTD)
+#         Neurologic → Purples           (warm-cool intermediate)
+#         Other autoimmune → Oranges/Reds (warm — distinct from rheum's cool tones)
+#         Baskets → Deep blue / slate    (Combined-rheum basket = deepest
+#                                         blue to anchor the rheum cluster;
+#                                         mixed basket = neutral slate)
+#         Sentinels → Gray
+#
+#   4. Colour-blind safety: blue/orange has the best CB contrast; purple
+#      sits between, distinguishable from both for deuteranopia +
+#      protanopia. Within-family lightness differences carry the signal
+#      when hue collapses for a CB reader.
 
-    # ── Inflammatory arthritis ──
+ENTITY_COLORS = {
+    # ── Connective tissue (Blues 6-class, prevalence-ordered) ──
+    "SLE":              "#08519c",   # blues-7 — anchor (most prevalent)
+    "SSc":              "#2171b5",
+    "Sjogren":          "#4292c6",
+    "IIM":              "#6baed6",
+    "IgG4-RD":          "#9ecae1",
+    "CTD_other":        "#c6dbef",   # lightest — catch-all
+
+    # ── Inflammatory arthritis (single — teal accent between blue & green) ──
     "RA":               "#0d9488",   # teal-600
 
-    # ── Vasculitis ──
-    "AAV":              "#10b981",   # emerald-500
-    "Behcet":           "#86efac",   # emerald-300
+    # ── Vasculitis (Cyans 2-shade — cool but distinct from CTD blue) ──
+    "AAV":              "#0891b2",   # cyan-700 — anchor
+    "Behcet":           "#67e8f9",   # cyan-300
 
-    # ── Neurologic autoimmune ──
-    "MS":               "#7c3aed",   # violet-600
-    "Myasthenia":       "#c026d3",   # fuchsia-600
-    "NMOSD":            "#a855f7",   # purple-500
-    "CIDP":             "#6366f1",   # indigo-500
-    "MOGAD":            "#c084fc",   # purple-400
-    "AIE":              "#4338ca",   # indigo-700
-    "Stiff_person":     "#db2777",   # pink-600
-    "Stiff-person":     "#db2777",   # alias for the L2 label
-    "Neurology_other":  "#a78bfa",   # violet-400 (catch-all)
-    "Neuro multi-disease": "#581c87",  # purple-900 — neuro-basket L2
+    # ── Neurologic autoimmune (Purples 8-class, prevalence-ordered) ──
+    "MS":               "#3f007d",   # purples-8 — anchor (most prevalent neuro)
+    "NMOSD":            "#54278f",
+    "Myasthenia":       "#6a51a3",
+    "CIDP":             "#807dba",
+    "AIE":              "#9e9ac8",
+    "MOGAD":            "#bcbddc",
+    "Stiff_person":     "#dadaeb",
+    "Stiff-person":     "#dadaeb",   # alias for the L2 label
+    "Neurology_other":  "#efedf5",   # lightest — catch-all
+    "Neuro multi-disease": "#2d004b",  # extra-deep — signals "multi-disease basket"
 
-    # ── Other autoimmune (warm earth tones — visually distinct from rheum) ──
-    "Other immune-mediated":   "#78716c",   # stone-500
-    "cGVHD":                   "#a16207",   # yellow-700
-    "Autoimmune cytopenias":   "#dc2626",   # red-600
-    "Glomerular / renal":      "#b45309",   # amber-700
-    "Endocrine autoimmune":    "#92400e",   # amber-800
-    "Dermatologic autoimmune": "#9a3412",   # orange-800
-    "GVHD":                    "#ca8a04",   # yellow-600 (sub-family inside Other autoimmune)
-    "Other autoimmune":        "#78716c",   # stone-500 (fallback)
+    # ── Other autoimmune (Oranges/Reds — warm earth tones, distinct from cool rheum) ──
+    "Other immune-mediated":   "#d94801",   # oranges-6 — anchor
+    "cGVHD":                   "#a63603",   # oranges-7
+    "Autoimmune cytopenias":   "#7f2704",   # oranges-8 (deepest — cell-destruction)
+    "Glomerular / renal":      "#f16913",   # oranges-5
+    "Endocrine autoimmune":    "#fd8d3c",   # oranges-4
+    "Dermatologic autoimmune": "#fdae6b",   # oranges-3
+    "GVHD":                    "#fdd0a2",   # oranges-2 (lightest sub-family)
+    "Other autoimmune":        "#d94801",   # fallback (matches Other immune-mediated)
 
     # ── Baskets ──
-    "Combined CTD / IA / Vasculitis": "#1e3a8a",   # blue-900 — clearly rheum
-    "Basket/Multidisease":            "#94a3b8",   # slate-400
+    "Combined CTD / IA / Vasculitis": "#08306b",   # blues-9 (deepest) — anchors the rheum cluster
+    "Basket/Multidisease":            "#94a3b8",   # slate-400 — neutral mixed-class
 
     # ── Sentinels ──
     "Unclassified": "#d1d5db",   # gray-300
@@ -351,11 +372,17 @@ ENTITY_COLORS = {
 }
 
 # Plotly modebar PNG-export config — tuned for presentation use.
-# 1920×1080 matches the native PowerPoint / Keynote 16:9 slide canvas;
-# scale=3 multiplies both axes so the rendered raster is 5760×3240 px,
-# which prints sharply at 4K-projector resolution and embeds at ~300 DPI
-# in a 12-inch-wide slide. Was 1600×900 / scale=2 (effective 3200×1800)
-# — adequate for screens but visibly soft when projected at 4K.
+# Strategy: NO fixed width/height in toImageButtonOptions, just `scale=4`.
+# That tells Plotly "render at 4x the figure's natural dimensions",
+# preserving each chart's correct aspect ratio (the sunburst stays
+# square, horizontal bar charts stay wide-and-short, etc.). A square
+# 560×560 sunburst becomes 2240×2240 px; a 1400×420 bar chart becomes
+# 5600×1680. Both well above 4K projection / 300-DPI print needs and
+# slot cleanly into PowerPoint / Keynote slides without stretching.
+# A previous version pinned 1920×1080 in toImageButtonOptions —
+# Plotly then squeezed every figure into that aspect ratio, leaving
+# square charts (sunburst) downscaled and tall charts (Fig 5 disease
+# bars) horizontally stretched. Dropping the fixed dims fixes both.
 # Defined at module top (rather than near the per-figure layout
 # constants further down) so every `st.plotly_chart(..., config=
 # PUB_EXPORT)` call works regardless of where in the script flow the
@@ -367,9 +394,7 @@ ENTITY_COLORS = {
 PUB_EXPORT = {
     "toImageButtonOptions": {
         "format": "png",
-        "width": 1920,
-        "height": 1080,
-        "scale": 3,
+        "scale": 4,
     },
     "displaylogo": False,
     "modeBarButtonsToRemove": [
