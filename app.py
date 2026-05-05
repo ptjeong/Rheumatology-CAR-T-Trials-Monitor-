@@ -331,59 +331,71 @@ _SUNBURST_L1_ORDER = [
 #      when hue collapses for a CB reader.
 
 ENTITY_COLORS = {
-    # Each family uses a NARROWED shade range (6 mid-band shades) to
-    # avoid stark "outlier" wedges at the extreme lightest/darkest ends
-    # of the Tailwind scale. Previously violet-100 (Neurology_other) and
-    # stone-100 (GVHD) read as near-white outliers next to mid-shade
-    # neighbours; sky-950 (Combined-rheum basket) read as deeper than
-    # its own family L1. The mid-band approach keeps within-family
-    # contrast subtle and editorial.
+    # SINGLE-HUE-PER-FAMILY palette in a tight 4-shade mid-dark band.
+    # Two pieces of user feedback drove this:
+    #   - "Too diverse" — RA (teal), AAV (cyan), Behcet (cyan) introduced
+    #     hues outside the rheum-blue identity, breaking the cluster.
+    #   - "Too light shaded" — sky-400/500, violet-300/200, stone-200/300
+    #     read washed-out at the rim. Nothing lighter than the family's
+    #     mid-tone now.
     #
-    # Anchor convention: each family's deepest entity matches the
-    # family's L1 wedge colour, and that family's basket-label entry
-    # also matches the anchor (so the basket wedge reads as "the
-    # multi-disease version of the anchor entity" rather than as a
-    # separate colour).
+    # Within each family, 4 shades only (X-900 → X-600). Entities share
+    # shades when prevalence is similar; reader distinguishes them by
+    # wedge size + label (which Plotly always renders). The trade-off is
+    # within-family colour distinctiveness for cluster cohesion — which
+    # was the explicit ask. Hue-per-family stays:
+    #   Rheumatology  → sky    (CTD + IA + Vasc all unified, no teal/cyan)
+    #   Neurologic    → violet
+    #   Other autoimmune → stone (warm grey)
 
-    # ── Rheumatology cluster: sky-900 → sky-400 (6 shades) ──
+    # ── Rheumatology cluster: sky-900 → sky-600 (4 shades) ──
+    # Prevalence-ordered: SLE deepest (anchor), CTD_other lightest still
+    # mid-tone (sky-600). RA + AAV + Behcet rejoin the sky family rather
+    # than carrying their own teal/cyan accents.
     "SLE":              "#0c4a6e",   # sky-900 — anchor (matches family L1)
     "SSc":              "#075985",   # sky-800
     "Sjogren":          "#0369a1",   # sky-700
-    "IIM":              "#0284c7",   # sky-600
-    "IgG4-RD":          "#0ea5e9",   # sky-500
-    "CTD_other":        "#38bdf8",   # sky-400 — catch-all
+    "IIM":              "#0369a1",   # sky-700
+    "IgG4-RD":          "#0284c7",   # sky-600
+    "CTD_other":        "#0284c7",   # sky-600
 
-    # IA + Vasc — distinct cool hues (still rheum cluster)
-    "RA":               "#0f766e",   # teal-700
-    "AAV":              "#0e7490",   # cyan-700 — anchor
-    "Behcet":           "#06b6d4",   # cyan-500
+    # IA + Vasc reunified into the rheum-sky family (no separate hue)
+    "RA":               "#075985",   # sky-800 (was teal-700)
+    "AAV":              "#075985",   # sky-800 (was cyan-700)
+    "Behcet":           "#0369a1",   # sky-700 (was cyan-500)
 
-    # ── Neurologic autoimmune: violet-800 → violet-200 (7 shades) ──
+    # ── Neurologic autoimmune: violet-800 → violet-500 (4 shades) ──
     "MS":               "#5b21b6",   # violet-800 — anchor (matches family L1)
     "NMOSD":            "#6d28d9",   # violet-700
-    "Myasthenia":       "#7c3aed",   # violet-600
-    "CIDP":             "#8b5cf6",   # violet-500
-    "AIE":              "#a78bfa",   # violet-400
-    "MOGAD":            "#c4b5fd",   # violet-300
-    "Stiff_person":     "#c4b5fd",   # violet-300 — shares MOGAD shade (both rare)
-    "Stiff-person":     "#c4b5fd",   # alias for the L2 label
-    "Neurology_other":  "#ddd6fe",   # violet-200 — catch-all (was violet-100; too pale)
-    "Neuro multi-disease": "#5b21b6",  # violet-800 — matches MS anchor (was violet-900; too dark)
+    "Myasthenia":       "#6d28d9",   # violet-700
+    "CIDP":             "#7c3aed",   # violet-600
+    "AIE":              "#7c3aed",   # violet-600
+    "MOGAD":            "#7c3aed",   # violet-600
+    "Stiff_person":     "#8b5cf6",   # violet-500
+    "Stiff-person":     "#8b5cf6",   # alias for the L2 label
+    "Neurology_other":  "#8b5cf6",   # violet-500 — catch-all
+    "Neuro multi-disease": "#5b21b6",  # violet-800 — matches MS anchor
 
-    # ── Other autoimmune: stone-700 → stone-200 (6 shades) ──
-    # Pure stone gradient, no amber/yellow accents — sub-families read
-    # by lightness alone within one warm-gray cluster.
+    # ── Other autoimmune: stone-700 → stone-400 (4 shades) ──
     "Other immune-mediated":   "#44403c",   # stone-700 — anchor (matches family L1)
     "cGVHD":                   "#57534e",   # stone-600
-    "Autoimmune cytopenias":   "#78716c",   # stone-500
-    "Glomerular / renal":      "#a8a29e",   # stone-400
-    "Endocrine autoimmune":    "#d6d3d1",   # stone-300
-    "Dermatologic autoimmune": "#e7e5e4",   # stone-200
-    "GVHD":                    "#e7e5e4",   # stone-200 — shares dermatologic shade (was stone-100; too pale)
+    "Autoimmune cytopenias":   "#57534e",   # stone-600
+    "Glomerular / renal":      "#78716c",   # stone-500
+    "Endocrine autoimmune":    "#78716c",   # stone-500
+    "Dermatologic autoimmune": "#a8a29e",   # stone-400
+    "GVHD":                    "#a8a29e",   # stone-400
     "Other autoimmune":        "#44403c",   # fallback (matches family L1)
 
-    # ── Baskets ──
-    "Combined CTD / IA / Vasculitis": "#0c4a6e",   # sky-900 — matches SLE anchor (was sky-950)
+    # ── Baskets (three sub-categories, mirroring the sunburst L1 split) ──
+    # Each basket label resolves to its parent family's anchor colour so
+    # the bar chart "Trials by disease" reads as: rheum-blue for
+    # Rheumatology basket, violet for Neurology basket, slate for
+    # true mixed-family Multidisease basket.
+    "Rheumatology basket":            "#0c4a6e",   # sky-900 — matches SLE / rheum anchor
+    "Neurology basket":               "#5b21b6",   # violet-800 — matches MS / neuro anchor
+    "Multidisease basket":            "#94a3b8",   # slate-400 — true mixed-class
+    # Legacy aliases (still emitted by some sunburst L2 labels):
+    "Combined CTD / IA / Vasculitis": "#0c4a6e",   # sky-900 — matches SLE anchor
     "Basket/Multidisease":            "#94a3b8",   # slate-400
 
     # ── Sentinels ──
@@ -3449,10 +3461,22 @@ with tab_overview:
                 ),
                 axis=1,
             )
+            # Split basket trials into three rows so the bar chart
+            # mirrors the sunburst L1 split (Rheumatology basket /
+            # Neurology basket / Multidisease basket) instead of
+            # collapsing every basket into one slate bar. Single-disease
+            # neuro trials roll up to "Neurologic autoimmune"; cGVHD
+            # rolls up to "Other immune-mediated"; everything else is
+            # the raw entity.
             _dd_ov["_DisplayDisease"] = _dd_ov.apply(
                 lambda r: (
-                    "Basket/Multidisease"
-                    if r.get("TrialDesign") == "Basket/Multidisease"
+                    "Rheumatology basket"
+                    if r["_Family"] == "Rheumatology basket"
+                    else "Neurology basket"
+                    if (r["_Family"] == "Neurologic autoimmune"
+                        and r.get("TrialDesign") == "Basket/Multidisease")
+                    else "Multidisease basket"
+                    if r["_Family"] == "Multidisease basket"
                     else "Neurologic autoimmune"
                     if r["_Family"] == "Neurologic autoimmune"
                     else "Other immune-mediated"
