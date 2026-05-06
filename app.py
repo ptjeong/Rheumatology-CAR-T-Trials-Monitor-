@@ -4948,15 +4948,20 @@ def _cagr(first_count: int, last_count: int, n_years: int) -> float | None:
 
 with tab_deepdive:
     st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">Four focused views '
-        "that complement the aggregate dashboards: (1) drill into a single disease "
-        "entity to see all trials, sponsors, phases and targets in one place; "
-        "(2) drill into a single antigen target to see how its pipeline spreads "
-        "across diseases, phases, modalities and sponsors; (3) aggregate trials "
-        "by named CAR-T product to track each product's portfolio across indications "
-        "and phases; (4) break the landscape down by sponsor type (Industry / "
-        "Academic / Government / Other) to compare who is running what. Every "
-        "trial-list table supports row-click drilldown to a full trial record.</p>",
+        f'<p class="small-note" style="color:{THEME["muted"]}">Five focused '
+        "axis-pages that complement the aggregate dashboards: "
+        "<b>By disease</b> — landscape figures + per-disease drilldown + a "
+        "side-by-side disease/target comparator. "
+        "<b>By target</b> — antigen landscape + per-target drilldown + a "
+        "per-named-product pipeline view. "
+        "<b>By sponsor</b> — sponsor-type aggregate + a specific-sponsor "
+        "drilldown (pick one sponsor to see their full portfolio). "
+        "<b>By geography</b> — country leaderboard, country × disease "
+        "heatmap, multi-country trials, and per-country drilldown. "
+        "<b>By time</b> — annual trial starts (selectable colour axis), "
+        "cumulative active trials, cohort × phase mix, and a phase-progression "
+        "Sankey. Every trial-list table supports row-click drilldown to a "
+        "full trial record.</p>",
         unsafe_allow_html=True,
     )
 
@@ -6355,8 +6360,9 @@ with tab_deepdive:
         st.caption(
             "Drill into one sponsor's full pipeline: every trial they "
             "lead, broken down by phase, disease, target, modality, "
-            "geography, and time. Complements the 'By sponsor type' "
-            "tab which aggregates Industry / Academic / Government."
+            "geography, and time. Complements the sponsor-type aggregate "
+            "above (Industry / Academic / Government / Other) — pick a "
+            "specific sponsor here to see their individual portfolio."
         )
         if df_filt.empty:
             st.info("No trials in the current filter.")
@@ -6640,9 +6646,13 @@ with tab_deepdive:
 
 with tab_pub:
     st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">Publication-ready figures with white backgrounds. '
-        "Use the camera icon (▷ toolbar) on each chart to download a high-resolution PNG. "
-        "Each section also provides the underlying data as CSV.</p>",
+        f'<p class="small-note" style="color:{THEME["muted"]}">'
+        "Publication-ready figures with white backgrounds. Click the camera "
+        "icon on each chart's modebar (top-right) to download — the format "
+        "follows the sidebar <em>Display options → Chart export format</em> "
+        "toggle (PNG at 5× resolution for slides, or SVG for vector / "
+        "Illustrator post-editing). Each section also provides the underlying "
+        "data as CSV.</p>",
         unsafe_allow_html=True,
     )
 
