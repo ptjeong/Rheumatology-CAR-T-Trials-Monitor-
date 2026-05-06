@@ -2542,12 +2542,15 @@ def _deepdive_phase_stack(
     )
     fig.update_traces(marker_line_width=0, hovertemplate=hover)
     fig.update_layout(
-        margin=dict(l=12, r=12, t=24, b=80),
+        # b=140 (was 80) gives the bottom legend its own row clear of
+        # the x-axis tick labels — the previous margin overlapped
+        # legend items with category labels like "Academic" / "Industry".
+        margin=dict(l=12, r=12, t=24, b=140),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis_title=None,
         yaxis_title=y_axis_title,
         legend=dict(
-            orientation="h", yanchor="bottom", y=-0.35, x=0,
+            orientation="h", yanchor="top", y=-0.55, x=0,
             font=dict(family=FONT_FAMILY, size=10),
             title=dict(text=""),
         ),
@@ -2581,17 +2584,34 @@ def _deepdive_timeline(
     counts = (
         df.groupby(["StartYear", "_Group"]).size().reset_index(name="Trials")
     )
-    # Per-group palette: ENTITY_COLORS for known disease entities, fall
-    # back to Plotly default for non-entity group columns (sponsor type
-    # etc.). The "Other" rollup gets a muted slate.
-    color_map = {g: ENTITY_COLORS.get(g, None) for g in counts["_Group"].unique()}
-    color_map["Other"] = "#94a3b8"
-    color_map = {k: v for k, v in color_map.items() if v is not None}
+    # Distinct-hue rotational palette. The previous version used
+    # ENTITY_COLORS (which clusters all rheum entities into the same
+    # sky-blue family for sunburst cohesion); for line charts that
+    # makes overlapping lines indistinguishable. Tableau-10-style
+    # rotation gives every line a clearly distinct hue regardless of
+    # which entities are picked.
+    _LINE_PALETTE = [
+        "#0c4a6e",   # navy
+        "#dc2626",   # red
+        "#0d9488",   # teal
+        "#a855f7",   # purple
+        "#f59e0b",   # amber
+        "#0ea5e9",   # sky
+        "#ec4899",   # pink
+        "#84cc16",   # lime
+        "#7c3aed",   # violet
+        "#ef4444",   # red-light
+    ]
+    color_map = {
+        g: _LINE_PALETTE[i % len(_LINE_PALETTE)]
+        for i, g in enumerate(top_groups)
+    }
+    color_map["Other"] = "#94a3b8"   # slate-400 for the rollup
     fig = px.line(
         counts, x="StartYear", y="Trials", color="_Group",
         markers=True, line_shape="spline",
         category_orders={"_Group": top_groups + ["Other"]},
-        color_discrete_map=color_map or None,
+        color_discrete_map=color_map,
         template="plotly_white",
         height=height or 320,
     )
@@ -6385,84 +6405,79 @@ with tab_deepdive:
                     key="dd_time_sponsor_activity",
                 )
 
-            # ── Phase-progression Sankey (start-year → current phase) ──
-            st.markdown("**Phase-progression flow (start year cohort → current phase)**")
+            # ── Phase-progression heatmap (start-year × current phase) ──
+            # Was a Sankey, but the crossing flow bands made it too busy
+            # to read. A heatmap of the same data (year cohort rows ×
+            # phase columns, cell counts) gives the same insight without
+            # band crossings — late cohorts cluster in early-phase
+            # columns, mature cohorts spread across Phase II/III.
+            st.markdown("**Phase-progression heat-map (start year × current phase)**")
             st.caption(
-                "Each band's width = trial count. Reads left-to-right: trials "
-                "started in year-cohort N flow into their CURRENT phase column. "
-                "Late cohorts concentrating in early phases is normal; mature "
-                "cohorts spreading across Phase II / III signals real pipeline "
-                "progression. Built from snapshot OverallStatus + PhaseLabel."
+                "Each cell = trial count for that start-year cohort × "
+                "current phase. Late cohorts (recent years) concentrating "
+                "in early-phase columns is expected; mature cohorts "
+                "spreading across Phase II / III columns signals real "
+                "pipeline progression. Built from snapshot StartYear + "
+                "PhaseLabel."
             )
-            _sk = df_filt.copy()
-            _sk["StartYear"] = pd.to_numeric(_sk["StartYear"], errors="coerce")
-            _sk = _sk.dropna(subset=["StartYear"])
-            if not _sk.empty:
-                _sk["StartYear"] = _sk["StartYear"].astype(int)
-                _sk["PhaseLabel"] = _sk["PhaseLabel"].fillna("Unknown")
-                # Bin start years to keep the diagram legible
-                _y_min = int(_sk["StartYear"].min())
-                _y_max = int(_sk["StartYear"].max())
-                _sk["YearCohort"] = _sk["StartYear"].apply(
-                    lambda y: f"≤{_y_min + 1}" if y <= _y_min + 1 else
-                              f"{_y_max}" if y == _y_max else
-                              f"{y}"
-                )
-                _phase_label_set = [PHASE_LABELS[p] for p in PHASE_ORDER]
-                _sk_counts = (
-                    _sk.groupby(["YearCohort", "PhaseLabel"]).size()
-                    .reset_index(name="Trials")
-                )
-                # Build node + link arrays
-                _year_nodes = sorted(_sk_counts["YearCohort"].unique(),
-                                     key=lambda s: (s.startswith("≤"), s))
-                _phase_nodes = [
-                    p for p in _phase_label_set
-                    if p in set(_sk_counts["PhaseLabel"])
+            _hm_in = df_filt.copy()
+            _hm_in["StartYear"] = pd.to_numeric(_hm_in["StartYear"], errors="coerce")
+            _hm_in = _hm_in.dropna(subset=["StartYear"])
+            if not _hm_in.empty:
+                _hm_in["StartYear"] = _hm_in["StartYear"].astype(int).astype(str)
+                _hm_in["PhaseLabel"] = _hm_in["PhaseLabel"].fillna("Unknown")
+                _phase_label_order = [
+                    PHASE_LABELS[p] for p in PHASE_ORDER
+                    if PHASE_LABELS[p] in set(_hm_in["PhaseLabel"])
                 ]
-                _all_nodes = _year_nodes + _phase_nodes
-                _node_idx = {n: i for i, n in enumerate(_all_nodes)}
-                _phase_palette = {
-                    "Early Phase I": "#bae6fd", "Phase I": "#7dd3fc",
-                    "Phase I/II":    "#0ea5e9", "Phase II": "#0369a1",
-                    "Phase II/III":  "#075985", "Phase III": "#0c4a6e",
-                    "Phase IV":      "#082f49", "Unknown": "#cbd5e1",
-                }
-                _node_colors = (
-                    ["#94a3b8"] * len(_year_nodes)
-                    + [_phase_palette.get(p, "#0c4a6e") for p in _phase_nodes]
+                _hm_pivot = (
+                    _hm_in.groupby(["StartYear", "PhaseLabel"]).size()
+                    .unstack(fill_value=0)
+                    .reindex(columns=_phase_label_order, fill_value=0)
+                    .sort_index()
                 )
-                _link_colors = []
-                for _, _row in _sk_counts.iterrows():
-                    _hex = _phase_palette.get(_row["PhaseLabel"], "#0c4a6e")
-                    # rgba with 0.35 alpha for translucent flow bands
-                    _r = int(_hex[1:3], 16); _g = int(_hex[3:5], 16); _b = int(_hex[5:7], 16)
-                    _link_colors.append(f"rgba({_r},{_g},{_b},0.45)")
-                _sankey = go.Figure(go.Sankey(
-                    arrangement="snap",
-                    node=dict(
-                        pad=14, thickness=14,
-                        line=dict(color="#ffffff", width=0.6),
-                        label=_all_nodes,
-                        color=_node_colors,
+                # Annotations — only for non-zero cells
+                _hm_max = float(_hm_pivot.values.max()) if _hm_pivot.size else 0.0
+                _annotations = []
+                for _i, _yr in enumerate(_hm_pivot.index):
+                    for _j, _ph in enumerate(_hm_pivot.columns):
+                        _v = int(_hm_pivot.iloc[_i, _j])
+                        if _v == 0:
+                            continue
+                        _txt_color = "#ffffff" if _v >= _hm_max * 0.55 else THEME["text"]
+                        _annotations.append(dict(
+                            x=_ph, y=_yr, text=str(_v), showarrow=False,
+                            font=dict(family=FONT_FAMILY, size=10, color=_txt_color),
+                        ))
+                _hm_fig = go.Figure(data=go.Heatmap(
+                    z=_hm_pivot.values,
+                    x=list(_hm_pivot.columns), y=list(_hm_pivot.index),
+                    colorscale="Blues", showscale=True,
+                    colorbar=dict(thickness=10, len=0.7, x=1.02, title="Trials"),
+                    hovertemplate=(
+                        "<b>Started %{y}</b> → <b>%{x}</b><br>"
+                        "%{z} trials<extra></extra>"
                     ),
-                    link=dict(
-                        source=[_node_idx[y] for y in _sk_counts["YearCohort"]],
-                        target=[_node_idx[p] for p in _sk_counts["PhaseLabel"]],
-                        value=_sk_counts["Trials"].tolist(),
-                        color=_link_colors,
-                        hovertemplate=(
-                            "<b>%{source.label}</b> → <b>%{target.label}</b>"
-                            "<br>%{value} trials<extra></extra>"
-                        ),
-                    ),
+                    zmin=0,
                 ))
-                _sankey.update_layout(
-                    height=420, margin=dict(l=8, r=8, t=8, b=8),
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                _hm_fig.update_layout(
+                    height=max(280, 28 * len(_hm_pivot.index) + 90),
+                    margin=dict(l=80, r=80, t=12, b=80),
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(
+                        title="Current phase",
+                        tickangle=-30,
+                        tickfont=dict(family=FONT_FAMILY, size=10),
+                    ),
+                    yaxis=dict(
+                        title="Trial start year",
+                        autorange="reversed",
+                        tickfont=dict(family=FONT_FAMILY, size=10),
+                    ),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    annotations=_annotations,
                 )
-                _chart(_sankey, key="dd_time_phase_sankey")
+                _chart(_hm_fig, key="dd_time_phase_heatmap")
 
     # ===== By sponsor (specific sponsor drilldown — Phase 3) =====
     with deep_sub_sponsor_one:
