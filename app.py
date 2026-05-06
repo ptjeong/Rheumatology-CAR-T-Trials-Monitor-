@@ -2616,13 +2616,19 @@ def _deepdive_timeline(
         height=height or 320,
     )
     fig.update_traces(line=dict(width=2.0), marker=dict(size=6))
+    # Bottom margin sized for a 2-row horizontal legend with long
+    # category labels (sponsor names can wrap). xaxis_title removed —
+    # the year tick labels make it self-evident, and a redundant
+    # "Trial start year" line was visually colliding with the wrapped
+    # legend in dense charts.
     fig.update_layout(
-        margin=dict(l=12, r=12, t=8, b=70),
+        margin=dict(l=12, r=12, t=8, b=120),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis_title="Trial start year",
+        xaxis_title=None,
         yaxis_title="Trials",
         legend=dict(
-            orientation="h", yanchor="bottom", y=-0.32, x=0,
+            orientation="h", yanchor="top", y=-0.12,
+            xanchor="left", x=0,
             font=dict(family=FONT_FAMILY, size=10),
             title=dict(text=""),
         ),
