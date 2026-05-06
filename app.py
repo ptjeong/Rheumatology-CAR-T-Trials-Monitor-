@@ -4062,206 +4062,11 @@ with tab_overview:
                 except Exception as e:
                     st.caption(f"Snapshot diff unavailable: {type(e).__name__}: {e}")
 
-    # -----------------------------------------------------------------
-    # Landscape at a glance — four panels, all coloured by disease family
-    # so a reader can cross-reference the sunburst above at a glance.
-    # -----------------------------------------------------------------
-    if not df_filt.empty:
-        st.subheader("Landscape at a glance")
-        st.markdown(
-            f'<p class="small-note" style="color:{THEME["muted"]}">All four panels share the disease-family colour key shown below.</p>',
-            unsafe_allow_html=True,
-        )
-
-        _swatch_html = (
-            '<div style="display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;'
-            'padding:6px 0 14px 0;font-family:Inter,-apple-system,sans-serif;'
-            'font-size:12px;color:#0b1220;">'
-        )
-        for _fam in _FAMILY_ORDER:
-            _c = _FAMILY_COLORS.get(_fam, "#64748b")
-            _swatch_html += (
-                f'<span style="display:inline-flex;align-items:center;gap:6px;">'
-                f'<span style="display:inline-block;width:12px;height:12px;'
-                f'background:{_c};border-radius:2px;"></span>{_fam}</span>'
-            )
-        _swatch_html += "</div>"
-        st.markdown(_swatch_html, unsafe_allow_html=True)
-
-        _PANEL_HEIGHT = PANEL_HEIGHT  # alias local var for block clarity
-
-        _ov_a, _ov_b = st.columns(2)
-
-        # Panel 1: Trials by disease (stacked by family) — basket trials collapsed to one row
-        _ov_exp_rows = []
-        for _, _r in df_filt.iterrows():
-            _ents = [e.strip() for e in str(_r.get("DiseaseEntities", "")).split("|") if e.strip()]
-            if not _ents:
-                _ents = [str(_r.get("DiseaseEntity", "Unclassified"))]
-            for _e in _ents:
-                _rr = _r.to_dict(); _rr["_Disease"] = _e
-                _ov_exp_rows.append(_rr)
-        _dd_ov = pd.DataFrame(_ov_exp_rows) if _ov_exp_rows else pd.DataFrame()
-        if not _dd_ov.empty:
-            _dd_ov["_Family"] = _dd_ov.apply(
-                lambda r: _disease_family(
-                    r["_Disease"], r.get("TrialDesign"),
-                    r.get("Conditions"), r.get("BriefTitle"),
-                    r.get("DiseaseEntities"),
-                ),
-                axis=1,
-            )
-            # Split basket trials into three rows so the bar chart
-            # mirrors the sunburst L1 split (Rheumatology basket /
-            # Neurology basket / Multidisease basket) instead of
-            # collapsing every basket into one slate bar. Single-disease
-            # neuro trials roll up to "Neurologic autoimmune"; cGVHD
-            # rolls up to "Other immune-mediated"; everything else is
-            # the raw entity.
-            _dd_ov["_DisplayDisease"] = _dd_ov.apply(
-                lambda r: (
-                    "Rheumatology basket"
-                    if r["_Family"] == "Rheumatology basket"
-                    else "Neurology basket"
-                    if (r["_Family"] == "Neurologic autoimmune"
-                        and r.get("TrialDesign") == "Basket/Multidisease")
-                    else "Multidisease basket"
-                    if r["_Family"] == "Multidisease basket"
-                    else "Neurologic autoimmune"
-                    if r["_Family"] == "Neurologic autoimmune"
-                    else "Other immune-mediated"
-                    if r["_Disease"] == "cGVHD"
-                    else r["_Disease"]
-                ),
-                axis=1,
-            )
-            _dd_dedup = _dd_ov.drop_duplicates(subset=["NCTId"])
-            _ent_counts = (
-                _dd_dedup.groupby(["_DisplayDisease", "_Family"]).size()
-                .reset_index(name="Trials").sort_values("Trials", ascending=True)
-            )
-            with _ov_a:
-                st.markdown("**Trials by disease**")
-                # Per-bar entity colour from the canonical ENTITY_COLORS
-                # palette so this chart matches the sunburst L2 ring,
-                # Fig 1 stacked area, and Fig 5 bars exactly. Falls back
-                # to the family colour when a roll-up label (e.g.
-                # "Neurologic autoimmune") isn't in ENTITY_COLORS.
-                _ent_counts["_BarColor"] = _ent_counts.apply(
-                    lambda r: ENTITY_COLORS.get(
-                        r["_DisplayDisease"],
-                        _FAMILY_COLORS.get(r["_Family"], "#94a3b8"),
-                    ),
-                    axis=1,
-                )
-                _fig_ov1 = px.bar(
-                    _ent_counts, x="Trials", y="_DisplayDisease",
-                    orientation="h",
-                    template="plotly_white",
-                    height=_PANEL_HEIGHT,
-                )
-                _fig_ov1.update_traces(
-                    marker_color=_ent_counts["_BarColor"].tolist(),
-                    marker_line_width=0, opacity=1,
-                )
-                _fig_ov1.update_layout(
-                    margin=dict(l=140, r=24, t=12, b=56),
-                    showlegend=False,
-                    yaxis_title=None, xaxis_title="Number of trials",
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                )
-                _chart(_fig_ov1, key='fig_ov1', width='stretch', config=PUB_EXPORT)
-
-        # Panel 2: Antigen target, colored stack by family
-        _tg_ov = df_filt.copy()
-        _tg_ov["_Target"] = _fold_unclear_target(_tg_ov["TargetCategory"])
-        _tg_ov = _tg_ov[~_tg_ov["TargetCategory"].isin(_PLATFORM_LABELS)]
-        _tg_counts = (
-            _tg_ov.groupby(["_Target", "DiseaseFamily"]).size().reset_index(name="Trials")
-        )
-        _tg_order_ov = (
-            _tg_counts.groupby("_Target")["Trials"].sum().sort_values(ascending=True).index.tolist()
-        )
-        with _ov_b:
-            st.markdown("**Trials by antigen target**")
-            if _tg_counts.empty:
-                st.info("No antigen-target data.")
-            else:
-                _fig_ov2 = px.bar(
-                    _tg_counts, x="Trials", y="_Target", color="DiseaseFamily",
-                    orientation="h",
-                    color_discrete_map=_FAMILY_COLORS,
-                    category_orders={"_Target": _tg_order_ov, "DiseaseFamily": _FAMILY_ORDER},
-                    labels={"_Target": "Target", "DiseaseFamily": "Family"},
-                    template="plotly_white",
-                    height=_PANEL_HEIGHT,
-                )
-                _fig_ov2.update_traces(marker_line_width=0, opacity=1)
-                _fig_ov2.update_layout(
-                    barmode="stack",
-                    margin=dict(l=140, r=24, t=12, b=56),
-                    showlegend=False,
-                    yaxis_title=None, xaxis_title="Number of trials",
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                )
-                _chart(_fig_ov2, key='fig_ov2', width='stretch', config=PUB_EXPORT)
-
-        _ov_c, _ov_d = st.columns(2)
-
-        # Panel 3: Phase, stacked by family
-        _ph_ov = (
-            df_filt.assign(PhaseLbl=df_filt["PhaseLabel"].fillna("Unknown"))
-            .groupby(["PhaseLbl", "DiseaseFamily"]).size().reset_index(name="Trials")
-        )
-        _phase_display_order = [PHASE_LABELS[p] for p in PHASE_ORDER]
-        with _ov_c:
-            st.markdown("**Trials by phase**")
-            _fig_ov3 = px.bar(
-                _ph_ov, x="PhaseLbl", y="Trials", color="DiseaseFamily",
-                color_discrete_map=_FAMILY_COLORS,
-                category_orders={"PhaseLbl": _phase_display_order, "DiseaseFamily": _FAMILY_ORDER},
-                template="plotly_white",
-                labels={"PhaseLbl": "Phase", "DiseaseFamily": "Family"},
-                height=_PANEL_HEIGHT,
-            )
-            _fig_ov3.update_traces(marker_line_width=0, opacity=1)
-            _fig_ov3.update_layout(
-                barmode="stack",
-                margin=dict(l=64, r=24, t=12, b=56),
-                showlegend=False,
-                xaxis_title="Phase", yaxis_title="Number of trials",
-                font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-            )
-            _chart(_fig_ov3, key='fig_ov3', width='stretch', config=PUB_EXPORT)
-
-        # Panel 4: Trials by start year, stacked area by family
-        _yr_ov = df_filt.dropna(subset=["StartYear"]).copy()
-        with _ov_d:
-            st.markdown("**Trials by start year**")
-            if _yr_ov.empty:
-                st.info("No start-year data.")
-            else:
-                _yr_ov["StartYear"] = _yr_ov["StartYear"].astype(int)
-                _yr_counts = (
-                    _yr_ov.groupby(["StartYear", "DiseaseFamily"]).size().reset_index(name="Trials")
-                )
-                _fig_ov4 = px.area(
-                    _yr_counts, x="StartYear", y="Trials", color="DiseaseFamily",
-                    color_discrete_map=_FAMILY_COLORS,
-                    category_orders={"DiseaseFamily": _FAMILY_ORDER},
-                    template="plotly_white",
-                    labels={"StartYear": "Start year", "DiseaseFamily": "Family"},
-                    height=_PANEL_HEIGHT,
-                )
-                _fig_ov4.update_traces(line=dict(width=0.5), opacity=0.95)
-                _fig_ov4.update_layout(
-                    margin=dict(l=64, r=24, t=12, b=56),
-                    showlegend=False,
-                    xaxis=dict(tickmode="linear", dtick=1, tickformat="d"),
-                    xaxis_title="Start year", yaxis_title="Number of trials",
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                )
-                _chart(_fig_ov4, key='fig_ov4', width='stretch', config=PUB_EXPORT)
+    # Landscape at a glance — REMOVED in Phase 7 consolidation (2026-05-06):
+    # the 4-panel block (Trials by disease + Antigen target + Phase + Year)
+    # duplicated the sunburst above + Pub Figs 1/2/3/5 + Deep Dive figures.
+    # Reader gets the same information from the sunburst + the Deep Dive
+    # tabs without scrolling past three near-identical bar charts.
 
     # -----------------------------------------------------------------
     # PRISMA — collapsed expander at the bottom of the Overview. Full
@@ -5145,16 +4950,28 @@ with tab_deepdive:
         unsafe_allow_html=True,
     )
 
-    (deep_sub_disease, deep_sub_target, deep_sub_product,
-     deep_sub_sponsor, deep_sub_sponsor_one, deep_sub_geo,
-     deep_sub_time, deep_sub_compare) = st.tabs([
-        "By disease", "By target", "By product",
-        "By sponsor type", "By sponsor",
-        "By geography", "By time", "Compare",
+    # ── Phase 7 consolidation (2026-05-06): from 8 sub-tabs to 5 ──
+    # Removed standalone "By product" (now appended as a section inside
+    # By target), "By sponsor" specific drilldown (appended inside the
+    # existing By sponsor tab below the type-aggregate view), and
+    # "Compare" (appended inside By disease as a side-by-side comparator
+    # below the per-disease drilldown). Same functionality, fewer tab
+    # clicks; the consolidated tabs read like axis-pages with optional
+    # depth, not a tab-soup of overlapping views.
+    (deep_sub_disease, deep_sub_target,
+     deep_sub_sponsor, deep_sub_geo, deep_sub_time) = st.tabs([
+        "By disease", "By target",
+        "By sponsor", "By geography", "By time",
     ])
-    # `deep_sub_sponsor` is the existing sponsor-TYPE tab (Industry /
-    # Academic / Government / Other); `deep_sub_sponsor_one` is the new
-    # Phase-3 drill-into-a-specific-sponsor tab.
+    # Aliases — render the orphaned blocks under the new home tab so
+    # the existing `with deep_sub_<orphan>:` bodies don't need to be
+    # surgically re-indented. Streamlit will append the content to the
+    # target tab in source order (the alias just routes the context
+    # manager). Each orphaned block already opens with its own
+    # st.subheader / st.caption so the section header is preserved.
+    deep_sub_product     = deep_sub_target    # By product → bottom of By target
+    deep_sub_sponsor_one = deep_sub_sponsor   # By sponsor (specific) → bottom of By sponsor
+    deep_sub_compare     = deep_sub_disease   # Compare → bottom of By disease
 
     def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
         """Explode trials with pipe-joined DiseaseEntities into one row per
@@ -5859,7 +5676,9 @@ with tab_deepdive:
                 )
 
     # ===== By product (per-named-product; ported from onc commit f006d8e) =====
+    # Phase 7 consolidation: appended below the By target tab content.
     with deep_sub_product:
+        st.markdown("---")
         st.subheader("Per-product pipeline view")
         st.caption(
             "Each row is one named CAR-T product (KYV-101, CABA-201, ADI-001, "
@@ -6524,7 +6343,10 @@ with tab_deepdive:
                 _chart(_hm_fig, key="dd_time_phase_heatmap")
 
     # ===== By sponsor (specific sponsor drilldown — Phase 3) =====
+    # Phase 7 consolidation: appended below the By sponsor type-aggregate
+    # content; both share the same tab.
     with deep_sub_sponsor_one:
+        st.markdown("---")
         st.subheader("Specific-sponsor portfolio")
         st.caption(
             "Drill into one sponsor's full pipeline: every trial they "
@@ -6679,7 +6501,9 @@ with tab_deepdive:
                     )
 
     # ===== Compare (side-by-side disease/target — Phase 3) =====
+    # Phase 7 consolidation: appended below the By disease tab content.
     with deep_sub_compare:
+        st.markdown("---")
         st.subheader("Side-by-side comparator")
         st.caption(
             "Pick two diseases or two antigens; the dashboard renders "
