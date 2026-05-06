@@ -3630,125 +3630,6 @@ tab_overview, tab_geo, tab_data, tab_deepdive, tab_pub, tab_methods, tab_about =
 tab_moderation = _tabs[7] if _MODERATOR_MODE else None
 
 with tab_overview:
-    # ── Phase 4: Newsroom strip — KPIs + Top movers + Recently added ──
-    # Lands at the very top of the Overview tab so the answer to
-    # "what's the headline?" is visible before any chart renders.
-    if not df_filt.empty:
-        # ── KPI tiles ──────────────────────────────────────────────────
-        _kpi_n = len(df_filt)
-        _kpi_open = int(df_filt["OverallStatus"].isin(
-            ["RECRUITING", "NOT_YET_RECRUITING"]
-        ).sum())
-        _kpi_enr = int(pd.to_numeric(
-            df_filt["EnrollmentCount"], errors="coerce"
-        ).fillna(0).sum())
-        _kpi_top_target = (
-            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown", "CAR-T_unspecified"}), "TargetCategory"]
-            .value_counts().index[0]
-            if (~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown", "CAR-T_unspecified"})).any()
-            else "—"
-        )
-        _kpi_year_max = int(pd.to_numeric(df_filt["StartYear"], errors="coerce").max()) \
-            if pd.to_numeric(df_filt["StartYear"], errors="coerce").notna().any() else None
-        _kpi_year_curr_count = int(
-            (pd.to_numeric(df_filt["StartYear"], errors="coerce") == _kpi_year_max).sum()
-        ) if _kpi_year_max else 0
-
-        _k1, _k2, _k3, _k4, _k5 = st.columns(5)
-        _k1.metric("Trials", f"{_kpi_n:,}")
-        _k2.metric("Open / recruiting", f"{_kpi_open:,}")
-        _k3.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
-        _k4.metric("Top antigen", _kpi_top_target)
-        _k5.metric(
-            f"Trials started in {_kpi_year_max}" if _kpi_year_max else "Latest year",
-            f"{_kpi_year_curr_count:,}" if _kpi_year_max else "—",
-        )
-
-        # ── Top movers (year-over-year change) + Recently added ────────
-        _mv_a, _mv_b = st.columns([0.55, 0.45])
-        with _mv_a:
-            st.markdown("**Top movers — biggest YoY change in trial starts**")
-            _mv_df = df_filt.copy()
-            _mv_df["StartYear"] = pd.to_numeric(_mv_df["StartYear"], errors="coerce")
-            _mv_df = _mv_df.dropna(subset=["StartYear"])
-            if not _mv_df.empty:
-                _mv_df["StartYear"] = _mv_df["StartYear"].astype(int)
-                _y_now = int(_mv_df["StartYear"].max())
-                _y_prev = _y_now - 1
-                # Movers across two axes: Disease entity + Antigen target
-                _mover_rows = []
-                for axis_col, axis_label in (
-                    ("DiseaseEntity", "Disease"),
-                    ("TargetCategory", "Antigen"),
-                    ("LeadSponsor", "Sponsor"),
-                ):
-                    _now = _mv_df.loc[_mv_df["StartYear"] == _y_now, axis_col].value_counts()
-                    _prev = _mv_df.loc[_mv_df["StartYear"] == _y_prev, axis_col].value_counts()
-                    for cat in set(_now.index) | set(_prev.index):
-                        if cat in {"Other_or_unknown", "CAR-T_unspecified", "Unclassified"} | _PLATFORM_LABELS:
-                            continue
-                        n_now = int(_now.get(cat, 0))
-                        n_prev = int(_prev.get(cat, 0))
-                        delta = n_now - n_prev
-                        if abs(delta) < 2:
-                            continue
-                        _mover_rows.append({
-                            "Axis": axis_label, "Category": cat,
-                            f"{_y_prev}": n_prev, f"{_y_now}": n_now,
-                            "Δ": delta,
-                        })
-                if _mover_rows:
-                    _movers = pd.DataFrame(_mover_rows).sort_values("Δ", ascending=False)
-                    _movers_top = pd.concat([_movers.head(5), _movers.tail(5)]).drop_duplicates()
-                    st.dataframe(
-                        _movers_top, width="stretch", hide_index=True,
-                        column_config={
-                            "Axis":     st.column_config.TextColumn("Axis", width="small"),
-                            "Category": st.column_config.TextColumn("Category", width="medium"),
-                            f"{_y_prev}": st.column_config.NumberColumn(f"{_y_prev}", format="%d", width="small"),
-                            f"{_y_now}":  st.column_config.NumberColumn(f"{_y_now}", format="%d", width="small"),
-                            "Δ":        st.column_config.NumberColumn(
-                                f"Change {_y_prev} → {_y_now}",
-                                format="%d", width="small",
-                            ),
-                        },
-                    )
-                    st.caption(
-                        f"Top 5 risers and 5 fallers across disease / antigen / "
-                        f"sponsor axes, comparing {_y_now} starts to {_y_prev}. "
-                        "Categories with <2-trial swing omitted. Sentinel labels "
-                        "(Other_or_unknown / Unclassified / platform aliases) excluded."
-                    )
-                else:
-                    st.caption("No notable YoY movers in the current filter.")
-        with _mv_b:
-            st.markdown("**Recently added trials**")
-            if "LastUpdatePostDate" in df_filt.columns:
-                _ra = df_filt.copy()
-                _ra["LastUpdatePostDate"] = pd.to_datetime(_ra["LastUpdatePostDate"], errors="coerce")
-                _ra = _ra.dropna(subset=["LastUpdatePostDate"]).sort_values(
-                    "LastUpdatePostDate", ascending=False,
-                ).head(8)
-                _ra_view = _ra[["NCTId", "BriefTitle", "DiseaseEntity",
-                                "TargetCategory", "Phase", "LastUpdatePostDate"]].copy()
-                _ra_view["LastUpdatePostDate"] = _ra_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
-                _ra_view["BriefTitle"] = _ra_view["BriefTitle"].astype(str).str[:70]
-                st.dataframe(
-                    _ra_view, width="stretch", hide_index=True, height=280,
-                    column_config={
-                        "NCTId":              st.column_config.TextColumn("NCT", width="small"),
-                        "BriefTitle":         st.column_config.TextColumn("Title", width="medium"),
-                        "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
-                        "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
-                        "Phase":              st.column_config.TextColumn("Phase", width="small"),
-                        "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
-                    },
-                )
-                st.caption("Most-recently-updated trials (CT.gov LastUpdatePostDate, top 8).")
-            else:
-                st.caption("LastUpdatePostDate not present in the snapshot.")
-        st.markdown("---")
-
     # -----------------------------------------------------------------
     # Hero — disease hierarchy sunburst (the signature visual).
     # Inner ring: disease family (the rheum analogue of Heme-onc / Solid-onc).
@@ -3969,6 +3850,169 @@ with tab_overview:
             for _col, (_, _r) in zip(_fc_cols, _fam_counts.iterrows()):
                 _pct = 100 * _r["Trials"] / _fc_total if _fc_total else 0
                 _col.metric(_r["Family"], f"{int(_r['Trials'])} ({_pct:.0f}%)")
+
+        st.markdown("---")
+
+        # ── Newsroom strip (below the sunburst) ──────────────────────
+        # Three quick reads: at-a-glance KPIs, last-complete-year YoY
+        # movers (skipping the current incomplete year), and a
+        # filterable "what's new since last visit" panel.
+        _kpi_n = len(df_filt)
+        _kpi_open = int(df_filt["OverallStatus"].isin(
+            ["RECRUITING", "NOT_YET_RECRUITING"]
+        ).sum())
+        _kpi_enr = int(pd.to_numeric(
+            df_filt["EnrollmentCount"], errors="coerce"
+        ).fillna(0).sum())
+        _kpi_top_target = (
+            df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown", "CAR-T_unspecified"}), "TargetCategory"]
+            .value_counts().index[0]
+            if (~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown", "CAR-T_unspecified"})).any()
+            else "—"
+        )
+        _kpi_sponsors = int(df_filt["LeadSponsor"].dropna().nunique())
+
+        _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+        _k1.metric("Trials", f"{_kpi_n:,}")
+        _k2.metric("Open / recruiting", f"{_kpi_open:,}")
+        _k3.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
+        _k4.metric("Top antigen", _kpi_top_target)
+        _k5.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
+
+        st.markdown("---")
+
+        # ── Top movers + Recently added (side-by-side) ───────────────
+        _mv_a, _mv_b = st.columns([0.50, 0.50])
+        with _mv_a:
+            # Compare LAST COMPLETE year vs the year before — skipping
+            # the current calendar year (which is incomplete and would
+            # produce misleading negative-delta movers). Snapshot date
+            # is the reference: any year strictly less than the
+            # snapshot's year is treated as complete.
+            try:
+                _snap_date = df["SnapshotDate"].iloc[0] if "SnapshotDate" in df.columns else None
+                _snap_year = int(str(_snap_date)[:4]) if _snap_date else None
+            except Exception:
+                _snap_year = None
+            _mv_df = df_filt.copy()
+            _mv_df["StartYear"] = pd.to_numeric(_mv_df["StartYear"], errors="coerce")
+            _mv_df = _mv_df.dropna(subset=["StartYear"])
+            _mv_df["StartYear"] = _mv_df["StartYear"].astype(int)
+            if _snap_year:
+                _last_complete = _snap_year - 1
+            else:
+                _last_complete = int(_mv_df["StartYear"].max()) - 1 if not _mv_df.empty else None
+            _prev_complete = (_last_complete - 1) if _last_complete else None
+
+            st.markdown(
+                f"**Year-over-year movers** "
+                f"<span style='color:#64748b; font-weight:400;'>"
+                f"({_prev_complete} → {_last_complete}, last two complete years)"
+                f"</span>" if _last_complete else "**Year-over-year movers**",
+                unsafe_allow_html=True,
+            )
+            if _last_complete and _prev_complete and not _mv_df.empty:
+                _mover_rows = []
+                for axis_col, axis_label in (
+                    ("DiseaseEntity", "Disease"),
+                    ("TargetCategory", "Antigen"),
+                    ("LeadSponsor", "Sponsor"),
+                ):
+                    _now = _mv_df.loc[_mv_df["StartYear"] == _last_complete, axis_col].value_counts()
+                    _prev = _mv_df.loc[_mv_df["StartYear"] == _prev_complete, axis_col].value_counts()
+                    for cat in set(_now.index) | set(_prev.index):
+                        if cat in {"Other_or_unknown", "CAR-T_unspecified", "Unclassified"} | _PLATFORM_LABELS:
+                            continue
+                        n_now = int(_now.get(cat, 0))
+                        n_prev = int(_prev.get(cat, 0))
+                        delta = n_now - n_prev
+                        if abs(delta) < 2:
+                            continue
+                        _mover_rows.append({
+                            "Axis": axis_label, "Category": cat,
+                            f"{_prev_complete}": n_prev,
+                            f"{_last_complete}": n_now,
+                            "Δ": delta,
+                        })
+                if _mover_rows:
+                    _movers = pd.DataFrame(_mover_rows).sort_values("Δ", ascending=False)
+                    _movers_top = pd.concat([_movers.head(5), _movers.tail(5)]).drop_duplicates()
+                    st.dataframe(
+                        _movers_top, width="stretch", hide_index=True, height=320,
+                        column_config={
+                            "Axis":     st.column_config.TextColumn("Axis", width="small"),
+                            "Category": st.column_config.TextColumn("Category", width="medium"),
+                            f"{_prev_complete}": st.column_config.NumberColumn(f"{_prev_complete}", format="%d", width="small"),
+                            f"{_last_complete}": st.column_config.NumberColumn(f"{_last_complete}", format="%d", width="small"),
+                            "Δ":        st.column_config.NumberColumn(
+                                f"Δ {_prev_complete}→{_last_complete}",
+                                format="%d", width="small",
+                            ),
+                        },
+                    )
+                    st.caption(
+                        f"Top 5 risers + 5 fallers across disease / antigen / sponsor axes. "
+                        f"Categories with <2-trial swing omitted. The current calendar year "
+                        f"({_snap_year}) is excluded — incomplete years would skew the deltas."
+                    )
+                else:
+                    st.caption(f"No notable movers between {_prev_complete} and {_last_complete}.")
+            else:
+                st.caption("Year-over-year comparison unavailable for this filter.")
+
+        with _mv_b:
+            st.markdown("**Recently updated trials**")
+            if "LastUpdatePostDate" in df_filt.columns:
+                # Filter affordances: by family + by status
+                _ra_f1, _ra_f2 = st.columns(2)
+                with _ra_f1:
+                    _fam_opts = ["All families"] + sorted(
+                        df_filt["DiseaseFamily"].dropna().unique().tolist()
+                    ) if "DiseaseFamily" in df_filt.columns else ["All families"]
+                    _ra_fam = st.selectbox(
+                        "Family", _fam_opts, key="overview_recently_fam",
+                        label_visibility="collapsed",
+                    )
+                with _ra_f2:
+                    _status_opts = ["All statuses", "Open / recruiting", "Active / not recruiting", "Completed"]
+                    _ra_status = st.selectbox(
+                        "Status", _status_opts, key="overview_recently_status",
+                        label_visibility="collapsed",
+                    )
+
+                _ra = df_filt.copy()
+                _ra["LastUpdatePostDate"] = pd.to_datetime(_ra["LastUpdatePostDate"], errors="coerce")
+                _ra = _ra.dropna(subset=["LastUpdatePostDate"])
+                if _ra_fam != "All families" and "DiseaseFamily" in _ra.columns:
+                    _ra = _ra[_ra["DiseaseFamily"] == _ra_fam]
+                if _ra_status == "Open / recruiting":
+                    _ra = _ra[_ra["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"])]
+                elif _ra_status == "Active / not recruiting":
+                    _ra = _ra[_ra["OverallStatus"] == "ACTIVE_NOT_RECRUITING"]
+                elif _ra_status == "Completed":
+                    _ra = _ra[_ra["OverallStatus"] == "COMPLETED"]
+
+                _ra = _ra.sort_values("LastUpdatePostDate", ascending=False).head(10)
+                if _ra.empty:
+                    st.caption("No matching trials.")
+                else:
+                    _ra_view = _ra[["NCTId", "BriefTitle", "DiseaseEntity",
+                                    "TargetCategory", "LastUpdatePostDate"]].copy()
+                    _ra_view["LastUpdatePostDate"] = _ra_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
+                    _ra_view["BriefTitle"] = _ra_view["BriefTitle"].astype(str).str[:60]
+                    st.dataframe(
+                        _ra_view, width="stretch", hide_index=True, height=240,
+                        column_config={
+                            "NCTId":              st.column_config.TextColumn("NCT", width="small"),
+                            "BriefTitle":         st.column_config.TextColumn("Title", width="medium"),
+                            "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
+                            "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
+                            "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
+                        },
+                    )
+                    st.caption(f"Top 10 most-recently-updated trials matching the filter.")
+            else:
+                st.caption("LastUpdatePostDate not in this snapshot.")
 
         st.markdown("---")
 
