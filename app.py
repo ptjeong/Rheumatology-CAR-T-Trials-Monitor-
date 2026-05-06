@@ -2616,18 +2616,22 @@ def _deepdive_timeline(
         height=height or 320,
     )
     fig.update_traces(line=dict(width=2.0), marker=dict(size=6))
-    # Bottom margin sized for a 2-row horizontal legend with long
-    # category labels (sponsor names can wrap). xaxis_title removed —
-    # the year tick labels make it self-evident, and a redundant
-    # "Trial start year" line was visually colliding with the wrapped
-    # legend in dense charts.
+    # Bottom margin sized for a 3-row horizontal legend with very long
+    # category labels (institutional sponsor names regularly wrap into
+    # 3 lines, e.g., "Union Hospital, Tongji Medical College, Huazhong
+    # University of Science and Technology"). xaxis_title removed — the
+    # year tick labels make it self-evident. y=-0.22 + b=160 gives
+    # ~30 px clearance between the year ticks and the legend top, plus
+    # 130 px below for 3-4 wrapped legend rows. Safe for the
+    # "Top sponsors — annual trial starts" chart which has the worst
+    # case of long names.
     fig.update_layout(
-        margin=dict(l=12, r=12, t=8, b=120),
+        margin=dict(l=12, r=12, t=8, b=160),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis_title=None,
         yaxis_title="Trials",
         legend=dict(
-            orientation="h", yanchor="top", y=-0.12,
+            orientation="h", yanchor="top", y=-0.22,
             xanchor="left", x=0,
             font=dict(family=FONT_FAMILY, size=10),
             title=dict(text=""),
@@ -5078,14 +5082,11 @@ with tab_deepdive:
                         key="dd_disease_x_target_heatmap",
                     )
                 with _ld_b:
-                    st.markdown("**Annual trial starts by disease**")
-                    _chart(
-                        _deepdive_timeline(
-                            dd_df.drop_duplicates(subset=["NCTId", "_Disease"]),
-                            group_col="_Disease", height=320, top_n=6,
-                        ),
-                        key="dd_disease_timeline",
-                    )
+                    # "Annual trial starts by disease" removed — the
+                    # By time tab's selectable-axis timeline (group_col=
+                    # DiseaseEntity) is the canonical home for this view.
+                    # Keeping it here too duplicated the same data on the
+                    # same scroll.
                     st.markdown("**Phase composition (top 12 diseases)**")
                     _phase_in = dd_df.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
                     _chart(
@@ -5918,13 +5919,10 @@ with tab_deepdive:
                     ),
                     key="dd_sponsor_phase_stack",
                 )
-                st.markdown("**Annual trial starts by sponsor type**")
-                _chart(
-                    _deepdive_timeline(
-                        df_filt, group_col="SponsorType", height=260, top_n=4,
-                    ),
-                    key="dd_sponsor_timeline",
-                )
+                # "Annual trial starts by sponsor type" removed — the
+                # By time tab's selectable-axis timeline (set axis to
+                # "Sponsor type") is the canonical home for this view.
+                # Removing the duplicate keeps each tab focused.
 
             sp_choices = agg["SponsorType"].tolist()
             pick = st.selectbox(
