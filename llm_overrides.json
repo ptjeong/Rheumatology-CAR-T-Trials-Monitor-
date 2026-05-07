@@ -1,0 +1,11 @@
+[
+  {
+    "nct_id": "NCT07115745",
+    "disease_entity": "Basket/Multidisease",
+    "disease_entities": ["SLE", "SSc", "IIM"],
+    "target_category": "CD19",
+    "product_type": "Allogeneic/Off-the-shelf",
+    "confidence": "high",
+    "notes": "BMS-986515 (Juno / BMS) — healthy-donor allogeneic CD19 CAR-T basket for severe, refractory autoimmune diseases. Trial title and conditions field name only the generic phrase 'autoimmune diseases', so the rule-based classifier lands it in the slate Basket/Multidisease bucket. The product's documented clinical-development plan covers classical-rheum CTD/IIM (SLE, SSc, dermatomyositis/polymyositis), so we manually enumerate those constituents — `is_classical_rheum_basket` then returns True and `_disease_family` routes the trial to the rheum-blue 'Rheumatology basket' wedge alongside the autologous CD19 rheum baskets."
+  }
+]

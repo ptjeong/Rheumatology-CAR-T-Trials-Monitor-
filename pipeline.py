@@ -459,6 +459,27 @@ def _classify_disease(row: dict) -> tuple[list[str], str, str]:
     if nct and nct in _LLM_OVERRIDES:
         ov = _LLM_OVERRIDES[nct]
         entity = ov.get("disease_entity", "Unclassified")
+        # Optional plural-list override: when a basket trial's individual
+        # constituents are known but its conditions/title text is too
+        # generic for the rule-based detector to enumerate them, the
+        # override can carry a `disease_entities` list. The list becomes
+        # the entities column directly, which lets `_disease_family()`'s
+        # `is_classical_rheum_basket` / `is_neuro_basket` detectors fire
+        # on the explicit constituents (they need ≥2 same-family entities).
+        # Live use: NCT07115745 (BMS-986515 healthy-donor allogeneic CD19
+        # basket — title says "severe refractory autoimmune diseases"
+        # generically, but the documented indication set is SLE / SSc /
+        # IIM, so we override-enumerate to land it in "Rheumatology
+        # basket" rather than the slate generic-basket bucket).
+        entities_list = ov.get("disease_entities")
+        if isinstance(entities_list, list) and entities_list:
+            design = (
+                "Basket/Multidisease"
+                if (entity == "Basket/Multidisease" or len(entities_list) >= 2)
+                else "Single disease"
+            )
+            primary = entity if entity else entities_list[0]
+            return _normalize_disease_result(list(entities_list), design, primary)
         design = "Basket/Multidisease" if entity == "Basket/Multidisease" else "Single disease"
         return _normalize_disease_result([entity], design, entity)
 
