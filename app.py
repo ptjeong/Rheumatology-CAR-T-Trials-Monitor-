@@ -471,18 +471,24 @@ _FAMILY_COLORS_HIGH_CONTRAST = {
     "Other / Unclassified":       "#bbbbbb",
 }
 
-# Plotly modebar PNG-export config — tuned for presentation use.
-# Strategy: NO fixed width/height in toImageButtonOptions, just `scale=4`.
-# That tells Plotly "render at 4x the figure's natural dimensions",
+# Plotly modebar PNG-export config — tuned for high-resolution use
+# (4K / 8K display, conference posters, 300-DPI journal print).
+# Strategy: NO fixed width/height in toImageButtonOptions, just `scale=8`.
+# That tells Plotly "render at 8× the figure's natural dimensions",
 # preserving each chart's correct aspect ratio (the sunburst stays
 # square, horizontal bar charts stay wide-and-short, etc.). A square
-# 560×560 sunburst becomes 2240×2240 px; a 1400×420 bar chart becomes
-# 5600×1680. Both well above 4K projection / 300-DPI print needs and
-# slot cleanly into PowerPoint / Keynote slides without stretching.
+# 560×560 sunburst becomes 4480×4480 px; a 1400×420 bar chart becomes
+# 11200×3360. Both well above 8K-display / 300-DPI A0-poster needs and
+# slot cleanly into PowerPoint / Keynote slides without stretching or
+# pixelation when zoomed.
 # A previous version pinned 1920×1080 in toImageButtonOptions —
 # Plotly then squeezed every figure into that aspect ratio, leaving
 # square charts (sunburst) downscaled and tall charts (Fig 5 disease
 # bars) horizontally stretched. Dropping the fixed dims fixes both.
+# scale=8 was bumped from scale=5 (2026-05-06) per user feedback that
+# slide-/4K-grade output wasn't crisp enough for poster / 8K display
+# use. File size grows ~2.5× vs scale=5 (still tens of MB at most for
+# the heaviest charts), which is acceptable for an export workflow.
 # Defined at module top (rather than near the per-figure layout
 # constants further down) so every `st.plotly_chart(..., config=
 # PUB_EXPORT)` call works regardless of where in the script flow the
@@ -494,7 +500,7 @@ _FAMILY_COLORS_HIGH_CONTRAST = {
 PUB_EXPORT = {
     "toImageButtonOptions": {
         "format": "png",
-        "scale": 5,
+        "scale": 8,
     },
     "displaylogo": False,
     "modeBarButtonsToRemove": [
@@ -538,10 +544,14 @@ def _chart(fig, *, key: str, width: str = "stretch", config: dict | None = None)
     lives on Plotly's modebar (camera icon, top-right of the chart);
     the SVG download is a small right-aligned button rendered
     immediately below the chart so the two formats sit visually
-    adjacent. `key` is required and must be unique per chart so the
-    download_button doesn't collide with sibling charts on the same page.
+    adjacent. `key` is required and must be unique per chart so
+    Streamlit's auto-ID for the chart doesn't collide with a sibling
+    chart whose figure happens to hash to the same structure (real
+    failure mode: filter to Germany + recruiting → multiple deep-dive
+    charts shrink to similar 1-row inputs → identical Plotly
+    fingerprints → StreamlitDuplicateElementId).
     """
-    st.plotly_chart(fig, width=width, config=config or PUB_EXPORT)
+    st.plotly_chart(fig, key=key, width=width, config=config or PUB_EXPORT)
     # Per-chart action buttons removed (commit 4dceaed → reverted): the
     # SVG download + high-contrast toggle now live in the sidebar's
     # "Display options" expander. The modebar's PNG/SVG download (driven
@@ -2856,10 +2866,36 @@ else:
         st.cache_data.clear()
         st.rerun()
 
+    # One-click pin of the most recent snapshot — saves the user from
+    # opening the expander, scrolling the date dropdown, and clicking
+    # twice. Sits directly under "Refresh now" so the common offline /
+    # reproducibility action is one tap. The expander below still hosts
+    # the per-date dropdown for picking older snapshots specifically.
+    if available_snapshots:
+        _latest_snap = available_snapshots[0]
+        if st.sidebar.button(
+            f"Use most recent snapshot ({_latest_snap})",
+            use_container_width=True,
+            help=(
+                "Pin the most-recently-built local snapshot for fully "
+                "reproducible results. Skips the live API call. Use this "
+                "for offline work, demos, or when you want a fixed cut of "
+                "the data across an entire analysis session."
+            ),
+        ):
+            st.session_state["pinned_snapshot"] = _latest_snap
+            st.cache_data.clear()
+            st.rerun()
+
     with st.sidebar.expander("Reproducibility — pin a frozen dataset", expanded=False):
         if available_snapshots:
+            st.caption(
+                "Pick a specific date for reproducibility — most recent "
+                "is preselected. (For one-click latest, use the button "
+                "above.)"
+            )
             _pin_sel = st.selectbox(
-                "Snapshot date",
+                "Snapshot date (most recent first)",
                 available_snapshots,
                 key="pin_snapshot_selector",
             )
@@ -2934,18 +2970,20 @@ with st.sidebar.expander("Display options", expanded=False):
     _export_choice = st.radio(
         "Chart export format",
         options=[
-            "PNG (slides, 5× resolution)",
+            "PNG (slides / poster, 8× resolution)",
             "SVG (vector — journal / Illustrator)",
         ],
         index=0,
         key="chart_export_fmt",
         help=(
-            "PNG — best for presentations / slide decks. Renders at 5× "
-            "the chart's natural size for crisp 4K-projection / "
-            "300-DPI print quality.\n\nSVG — best for journal "
-            "submission requiring vector graphics, or post-editing in "
-            "Illustrator / Inkscape / Figma. Infinite resolution; "
-            "every wedge / bar / label is an editable element."
+            "PNG — best for presentations, posters, and 4K/8K displays. "
+            "Renders at 8× the chart's natural size: a 1400×420 bar "
+            "chart exports at 11200×3360 px, comfortable for 300-DPI "
+            "A0 poster print or zoomed inspection on high-resolution "
+            "monitors.\n\nSVG — best for journal submission requiring "
+            "vector graphics, or post-editing in Illustrator / Inkscape "
+            "/ Figma. Infinite resolution; every wedge / bar / label "
+            "is an editable element."
         ),
     )
     _hc_toggle = st.toggle(
@@ -2971,7 +3009,7 @@ if _export_choice.startswith("SVG"):
     PUB_EXPORT["toImageButtonOptions"]["scale"] = 1
 else:
     PUB_EXPORT["toImageButtonOptions"]["format"] = "png"
-    PUB_EXPORT["toImageButtonOptions"]["scale"] = 5
+    PUB_EXPORT["toImageButtonOptions"]["scale"] = 8
 
 # Mutate ENTITY_COLORS / _FAMILY_COLORS in place to the active palette.
 # Every chart that reads from these dicts picks up the new shades on
@@ -3913,73 +3951,12 @@ with tab_overview:
         )
         _kpi_sponsors = int(df_filt["LeadSponsor"].dropna().nunique())
 
-        # Sparkline data — annual trial-start series for the last
-        # 6 complete years. Tufte: "small intense word-sized graphics"
-        # next to the headline number give the metric immediate
-        # historical context. Render as a thin Plotly line below
-        # each tile's number.
-        _spark_df = df_filt.copy()
-        _spark_df["StartYear"] = pd.to_numeric(_spark_df["StartYear"], errors="coerce")
-        _spark_df = _spark_df.dropna(subset=["StartYear"])
-        _today_year = pd.Timestamp.utcnow().year
-        _spark_years = list(range(_today_year - 6, _today_year + 1))
-        _spark_trials = (
-            _spark_df.groupby(_spark_df["StartYear"].astype(int)).size()
-            .reindex(_spark_years, fill_value=0)
-        )
-        _spark_open = (
-            _spark_df[_spark_df["OverallStatus"].isin(
-                ["RECRUITING", "NOT_YET_RECRUITING"]
-            )].groupby(_spark_df["StartYear"].astype(int)).size()
-            .reindex(_spark_years, fill_value=0)
-        )
-        _spark_enroll = (
-            _spark_df.groupby(_spark_df["StartYear"].astype(int))
-            .apply(lambda g: pd.to_numeric(
-                g["EnrollmentCount"], errors="coerce",
-            ).fillna(0).sum(), include_groups=False)
-            .reindex(_spark_years, fill_value=0)
-        )
-
-        def _sparkline(values, color: str = "#0c4a6e") -> "go.Figure":
-            """Tiny inline trend chart — no axes, no legend, no padding.
-            Renders the last 6-7 annual values as a single line + shaded
-            area below for visual weight. Keeps the data-ink ratio high
-            (no ticks, no grid, no labels)."""
-            fig = go.Figure(go.Scatter(
-                x=list(values.index), y=list(values.values),
-                mode="lines", line=dict(width=1.6, color=color),
-                fill="tozeroy", fillcolor="rgba(12, 74, 110, 0.10)",
-                hovertemplate="%{x}: %{y:,}<extra></extra>",
-            ))
-            fig.update_layout(
-                height=42,
-                margin=dict(l=0, r=0, t=2, b=2),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False),
-            )
-            return fig
-
         _k1, _k2, _k3, _k4, _k5 = st.columns(5)
-        with _k1:
-            st.metric("Trials", f"{_kpi_n:,}")
-            st.plotly_chart(_sparkline(_spark_trials),
-                            width="stretch", config={"displayModeBar": False})
-        with _k2:
-            st.metric("Open / recruiting", f"{_kpi_open:,}")
-            st.plotly_chart(_sparkline(_spark_open),
-                            width="stretch", config={"displayModeBar": False})
-        with _k3:
-            st.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
-            st.plotly_chart(_sparkline(_spark_enroll),
-                            width="stretch", config={"displayModeBar": False})
-        with _k4:
-            st.metric("Top antigen", _kpi_top_target)
-        with _k5:
-            st.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
+        _k1.metric("Trials", f"{_kpi_n:,}")
+        _k2.metric("Open / recruiting", f"{_kpi_open:,}")
+        _k3.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
+        _k4.metric("Top antigen", _kpi_top_target)
+        _k5.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
 
         st.divider()
 
@@ -8049,12 +8026,9 @@ with tab_pub:
     )
     st.markdown(
         f'<p class="small-note" style="color:{THEME["muted"]}">'
-        "Stacked share of paediatric / paediatric+adult / adult-only / "
-        "older-adult coverage per disease. Diseases with 0% paediatric "
-        "or paed+adult share are clinical blind spots — the field is "
-        "developing CAR-T for adult patients while children with the "
-        "same diagnosis have no trial option. Sorted by total trials "
-        "descending; top 15 diseases shown.</p>",
+        "Age-group share per disease (top 15 by trials). Diseases at 0% "
+        "paediatric / paed+adult are clinical blind spots: adult activity "
+        "exists, but no trial enrols children.</p>",
         unsafe_allow_html=True,
     )
     if "AgeGroup" not in df_filt.columns or df_filt.empty:
@@ -8145,12 +8119,8 @@ with tab_pub:
     )
     st.markdown(
         f'<p class="small-note" style="color:{THEME["muted"]}">'
-        "For each disease entity, the percentage of trials run by the "
-        "top 3 lead sponsors. Concentrated fields (top-3 share >60%) "
-        "are controlled by a small number of major sponsors; diffuse "
-        "fields (top-3 share <30%) have many entrants. Bar height "
-        "encodes share; bar width is unused (categorical x-axis). "
-        "Filtered to diseases with ≥3 trials.</p>",
+        "Top-3 lead-sponsor share per disease (≥3 trials). >60% = "
+        "concentrated field; <30% = diffuse competition.</p>",
         unsafe_allow_html=True,
     )
     if df_filt.empty:
