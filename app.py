@@ -911,7 +911,7 @@ def _render_classification_rationale(record, *, key_suffix: str = "") -> None:
                 }
                 for axis, info in rationale.items()
             ]
-            st.markdown("---")
+            st.divider()
             st.markdown("**Per-axis breakdown:**")
             st.dataframe(
                 pd.DataFrame(rows),
@@ -3861,7 +3861,7 @@ with tab_overview:
                 _pct = 100 * _r["Trials"] / _fc_total if _fc_total else 0
                 _col.metric(_r["Family"], f"{int(_r['Trials'])} ({_pct:.0f}%)")
 
-        st.markdown("---")
+        st.divider()
 
         # ── Newsroom strip (below the sunburst) ──────────────────────
         # Three quick reads: at-a-glance KPIs, last-complete-year YoY
@@ -3889,7 +3889,7 @@ with tab_overview:
         _k4.metric("Top antigen", _kpi_top_target)
         _k5.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
 
-        st.markdown("---")
+        st.divider()
 
         # ── Top movers + Recently added (side-by-side) ───────────────
         _mv_a, _mv_b = st.columns([0.50, 0.50])
@@ -4024,7 +4024,7 @@ with tab_overview:
             else:
                 st.caption("LastUpdatePostDate not in this snapshot.")
 
-        st.markdown("---")
+        st.divider()
 
     # ── Snapshot diff vs previous snapshot ─────────────────────────────────
     try:
@@ -4271,7 +4271,7 @@ with tab_geo:
                 key="top_countries", width='stretch', config=PUB_EXPORT,
             )
     else:
-        st.info("No country information available for the current filter selection.")
+        st.info("No country data in the current filter selection.")
 
     st.subheader("Sites by city")
 
@@ -4500,7 +4500,7 @@ with tab_geo:
 
     # ── Phase 5: Country-emergence scatter + multi-country trials ──
     if not df_filt.empty:
-        st.markdown("---")
+        st.divider()
         st.subheader("Country emergence & international collaboration")
         _ce_a, _ce_b = st.columns([0.55, 0.45])
         with _ce_a:
@@ -5044,11 +5044,11 @@ with tab_deepdive:
     with deep_sub_disease:
         st.subheader("Disease-entity focus")
         if df_filt.empty:
-            st.info("No trials match the current filters.")
+            st.info("No trials in the current filter selection.")
         else:
             dd_df = _expand_disease_rows(df_filt)
             if dd_df.empty:
-                st.info("No disease data available.")
+                st.info("No disease data in the current filter selection.")
             else:
                 agg = (
                     dd_df.groupby("_Disease")
@@ -5396,7 +5396,7 @@ with tab_deepdive:
             )
 
         if df_filt.empty:
-            st.info("No trials match the current filters.")
+            st.info("No trials in the current filter selection.")
         elif target_pick == "(any — show landscape)":
             st.markdown(
                 "**Top antigens by trial count** "
@@ -5690,7 +5690,7 @@ with tab_deepdive:
     # ===== By product (per-named-product; ported from onc commit f006d8e) =====
     # Phase 7 consolidation: appended below the By target tab content.
     with deep_sub_product:
-        st.markdown("---")
+        st.divider()
         st.subheader("Per-product pipeline view")
         st.caption(
             "Each row is one named CAR-T product (KYV-101, CABA-201, ADI-001, "
@@ -5879,7 +5879,7 @@ with tab_deepdive:
         if "SponsorType" not in df_filt.columns:
             st.info("Sponsor type not available in the current snapshot.")
         elif df_filt.empty:
-            st.info("No trials in the current filter.")
+            st.info("No trials in the current filter selection.")
         else:
             agg = (
                 df_filt.groupby("SponsorType")
@@ -6020,7 +6020,7 @@ with tab_deepdive:
             "in 4 countries appears in 4 rows below."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter.")
+            st.info("No trials in the current filter selection.")
         else:
             # Long-format: one row per (NCTId, Country)
             _geo_rows = []
@@ -6187,7 +6187,7 @@ with tab_deepdive:
             "signals real pipeline progression."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter.")
+            st.info("No trials in the current filter selection.")
         else:
             _color_axis_choice = st.radio(
                 "Colour axis",
@@ -6355,7 +6355,7 @@ with tab_deepdive:
     # Phase 7 consolidation: appended below the By sponsor type-aggregate
     # content; both share the same tab.
     with deep_sub_sponsor_one:
-        st.markdown("---")
+        st.divider()
         st.subheader("Specific-sponsor portfolio")
         st.caption(
             "Drill into one sponsor's full pipeline: every trial they "
@@ -6365,7 +6365,7 @@ with tab_deepdive:
             "specific sponsor here to see their individual portfolio."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter.")
+            st.info("No trials in the current filter selection.")
         elif "LeadSponsor" not in df_filt.columns:
             st.info("Sponsor data not available in the current snapshot.")
         else:
@@ -6513,7 +6513,7 @@ with tab_deepdive:
     # ===== Compare (side-by-side disease/target — Phase 3) =====
     # Phase 7 consolidation: appended below the By disease tab content.
     with deep_sub_compare:
-        st.markdown("---")
+        st.divider()
         st.subheader("Side-by-side comparator")
         st.caption(
             "Pick two diseases or two antigens; the dashboard renders "
@@ -6524,7 +6524,7 @@ with tab_deepdive:
             "SSc in pipeline maturity?'."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter.")
+            st.info("No trials in the current filter selection.")
         else:
             _cmp_axis = st.radio(
                 "Comparison axis",
@@ -6564,9 +6564,11 @@ with tab_deepdive:
                     st.warning("Pick two different categories.")
                 else:
                     def _mini_panel(df_slice: pd.DataFrame, label: str, key_suffix: str) -> None:
-                        st.markdown(f"#### {label}")
+                        # H5 (not H4) to match every other inline panel
+                        # header in the app — H4 was a one-off outlier.
+                        st.markdown(f"##### {label}")
                         if df_slice.empty:
-                            st.info("No trials match.")
+                            st.info("No trials in this slice.")
                             return
                         _ma, _mb, _mc = st.columns(3)
                         _ma.metric("Trials", f"{len(df_slice):,}")
@@ -6818,7 +6820,7 @@ with tab_pub:
                            _csv_with_provenance(fig1_data, "Fig 1 — Temporal trends by disease entity"),
                            "fig1_temporal_trends.csv", "text/csv")
     else:
-        st.info("No start year data available.")
+        st.info("No start year data in the current filter selection.")
 
     # ------------------------------------------------------------------
     # Fig 2 — Phase distribution
@@ -6899,7 +6901,7 @@ with tab_pub:
                            _csv_with_provenance(fig2_csv, "Fig 2 — Phase distribution by sponsor sector"),
                            "fig2_phase_by_sponsor.csv", "text/csv")
     else:
-        st.info("No phase data available.")
+        st.info("No phase data in the current filter selection.")
 
     # ------------------------------------------------------------------
     # Fig 3 — Geographic distribution
@@ -7000,7 +7002,7 @@ with tab_pub:
                            _csv_with_provenance(fig3_csv, "Fig 3 — Geographic distribution"),
                            "fig3_geographic_distribution.csv", "text/csv")
     else:
-        st.info("No country data available.")
+        st.info("No country data in the current filter selection.")
 
     # ------------------------------------------------------------------
     # Fig 4 — Trial enrollment
@@ -7461,7 +7463,7 @@ with tab_pub:
                            _csv_with_provenance(fig5_csv, "Fig 5 — Disease distribution (trials + planned patients)"),
                            "fig5_disease_distribution.csv", "text/csv")
     else:
-        st.info("No disease data available.")
+        st.info("No disease data in the current filter selection.")
 
     # ------------------------------------------------------------------
     # Fig 6 — Antigen target distribution (CAR-T_unspecified + Other_or_unknown
@@ -7597,7 +7599,7 @@ with tab_pub:
                            _csv_with_provenance(fig6_csv, "Fig 6 — Antigen target distribution"),
                            "fig6_target_landscape.csv", "text/csv")
     else:
-        st.info("No target data available.")
+        st.info("No target data in the current filter selection.")
 
     # ------------------------------------------------------------------
     # Fig 7 — Cell-therapy modality: overall distribution and evolution
@@ -7752,7 +7754,7 @@ with tab_pub:
                            _csv_with_provenance(fig7_csv, "Fig 7 — Cell-therapy modality distribution and evolution"),
                            "fig7_modality.csv", "text/csv")
     else:
-        st.info("No start year data available for innovation analysis.")
+        st.info("No start year data in the current filter selection (innovation analysis disabled).")
 
     # ------------------------------------------------------------------
     # Fig 8 — Antigen × Modality maturity matrix
@@ -8233,7 +8235,7 @@ with tab_pub:
         unsafe_allow_html=True,
     )
     if df_filt.empty:
-        st.info("No data in the current filter.")
+        st.info("No trials in the current filter selection.")
     else:
         _ci_in = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"])
         _ci_in = _ci_in.dropna(subset=["LeadSponsor"])
@@ -8585,7 +8587,7 @@ with tab_methods:
     if prisma_counts:
         st.subheader("Figure — PRISMA selection flow")
         _render_prisma_ledger(prisma_counts)
-        st.markdown("---")
+        st.divider()
 
     st.subheader("Methods section (auto-generated)")
     st.markdown(
@@ -9043,7 +9045,7 @@ regulatory, or decision-support tool.
         """
     )
 
-    st.markdown("---")
+    st.divider()
     st.subheader("Contact")
     st.markdown(
         f"""
@@ -9103,7 +9105,7 @@ regulatory, or decision-support tool.
         unsafe_allow_html=True,
     )
 
-    st.markdown("---")
+    st.divider()
     st.subheader("Suggested citation")
     citation = (
         f"Jeong P. CAR-T Rheumatology Trials Monitor "
@@ -9121,7 +9123,7 @@ regulatory, or decision-support tool.
         "DOI: [10.5281/zenodo.19713049](https://doi.org/10.5281/zenodo.19713049)"
     )
 
-    st.markdown("---")
+    st.divider()
     st.subheader("Scientific disclaimer")
     st.markdown(
         """
@@ -9368,7 +9370,7 @@ if _MODERATOR_MODE and tab_moderation is not None:
         )
 
         if df_filt.empty:
-            st.info("No trials in the current filter — adjust filters to use this mode.")
+            st.info("No trials in the current filter selection — adjust filters to use this mode.")
         else:
             import random as _rand_mod
             if (
