@@ -30,11 +30,30 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest pytest-cov ruff
 
       - name: Compile check
         run: |
           python -m py_compile pipeline.py app.py config.py validate.py
 
-      - name: Run classifier unit tests
-        run: python -m pytest tests/ -v
+      - name: Lint (ruff)
+        run: |
+          # Hard gate: any error here fails CI. Catches:
+          # F821 undefined-names (real bugs — caught the focus_label
+          # NameError in commit ____),
+          # F401 unused imports, F841 unused locals,
+          # E701/E702 multiple-statements-per-line, E741 ambiguous names,
+          # F541 f-strings without placeholders.
+          ruff check app.py pipeline.py config.py validate.py
+
+      - name: Run classifier unit tests + coverage gate
+        run: |
+          # Coverage gate: pipeline.py must stay at >=75% to merge.
+          # Was 80% as of 2026-05-07 baseline; the floor leaves 5% of
+          # slack for pipeline refactors that might temporarily expose
+          # less-covered branches without blocking the PR. Tighten
+          # toward 85% over time.
+          python -m pytest tests/ -v \
+            --cov=pipeline \
+            --cov-report=term \
+            --cov-fail-under=75

@@ -1116,7 +1116,7 @@ def _build_flag_issue_url(record, *, axes: list[str], corrections: dict[str, str
     yaml_lines = [
         "<!-- BEGIN_FLAG_DATA",
         f"nct_id: {nct}",
-        f"flagged_axes:",
+        "flagged_axes:",
     ]
     for axis in axes:
         pipeline_label = record.get(axis, "")
@@ -2462,8 +2462,8 @@ def _deepdive_heatmap(
         colorscale=colorscale, showscale=True,
         colorbar=dict(thickness=10, len=0.7, x=1.02, title="Trials"),
         hovertemplate=(
-            f"<b>%{{y}}</b> ⨯ <b>%{{x}}</b><br>"
-            f"%{{z}} trials<extra></extra>"
+            "<b>%{y}</b> ⨯ <b>%{x}</b><br>"
+            "%{z} trials<extra></extra>"
         ),
         zmin=0,
     ))
@@ -2657,7 +2657,7 @@ def _deepdive_donut(
         textposition="outside",
         marker=dict(
             colors=[
-                (color_map or {}).get(l, None) for l in counts_df[label_col]
+                (color_map or {}).get(label, None) for label in counts_df[label_col]
             ] if color_map else None,
             line=dict(color="white", width=1.0),
         ),
@@ -2894,6 +2894,11 @@ if "SponsorType" not in df.columns and "LeadSponsor" in df.columns:
             axis=1,
         )
     except Exception:
+        # Defensive fallback — if `_classify_sponsor` can't be imported
+        # (stale deploy with an older pipeline.py) or apply raises,
+        # leave SponsorType absent. Downstream code already guards on
+        # `if "SponsorType" not in df_filt.columns:` so the dashboard
+        # degrades gracefully (sponsor-type tab shows an info banner).
         pass
 
 # ── Display options (sidebar) — global chart toggles ──────────────────
@@ -3269,9 +3274,10 @@ def _render_prisma_ledger(prisma: dict | None) -> None:
 
     n_after_hard = max(0, n_dedup - n_hard)
     n_after_llm = max(0, n_after_hard - n_llm)
-    # n_after_indic equals n_inc when all stages add up; computed for
-    # display robustness when the underlying counts disagree.
-    n_after_indic = max(0, n_after_llm - n_indic)
+    # (n_after_indic — derived as n_after_llm - n_indic — equals n_inc
+    # when the per-stage counts add up. Not assigned because the ledger
+    # uses n_inc directly for the final row; computing it would only
+    # matter as a sanity-check assertion, which can be added later.)
 
     st.markdown(_PRISMA_LEDGER_CSS, unsafe_allow_html=True)
     # The LLM-curation row only renders when n_llm > 0 — keeps the ledger
@@ -3779,7 +3785,9 @@ with tab_overview:
         for _fam in _present_families:
             _fd = _sb_counts[_sb_counts["_L1"] == _fam]
             _fam_color = _FAMILY_COLORS.get(_fam, "#64748b")
-            _ids.append(_fam); _labels.append(_fam); _parents.append("")
+            _ids.append(_fam)
+            _labels.append(_fam)
+            _parents.append("")
             _values.append(int(_fd["Trials"].sum()))
             _colors.append(_fam_color)
             # Within each family, order L2 wedges by trial count (busiest
@@ -3803,12 +3811,16 @@ with tab_overview:
                     or _fam_color
                 )
                 _dis_id = f"{_fam}/{_dis}"
-                _ids.append(_dis_id); _labels.append(_dis); _parents.append(_fam)
+                _ids.append(_dis_id)
+                _labels.append(_dis)
+                _parents.append(_fam)
                 _values.append(int(_dd["Trials"].sum()))
                 _colors.append(_l2_color)
                 for _, _row in _dd.iterrows():
                     _tg_id = f"{_fam}/{_dis}/{_row['_L3']}"
-                    _ids.append(_tg_id); _labels.append(_row["_L3"]); _parents.append(_dis_id)
+                    _ids.append(_tg_id)
+                    _labels.append(_row["_L3"])
+                    _parents.append(_dis_id)
                     _values.append(int(_row["Trials"]))
                     _colors.append(_l2_color)
 
@@ -4020,7 +4032,7 @@ with tab_overview:
                             "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
                         },
                     )
-                    st.caption(f"Top 10 most-recently-updated trials matching the filter.")
+                    st.caption("Top 10 most-recently-updated trials matching the filter.")
             else:
                 st.caption("LastUpdatePostDate not in this snapshot.")
 
@@ -5527,11 +5539,15 @@ with tab_deepdive:
                 _med_e = int(_enroll.median()) if not _enroll.empty else 0
 
                 m1, m2, m3, m4 = st.columns(4)
-                with m1: st.metric("Trials", f"{_n:,}", help=f"Targeting {target_pick}")
-                with m2: st.metric("Open / recruiting", f"{_rec:,}")
-                with m3: st.metric("Distinct sponsors", f"{_sponsors:,}")
-                with m4: st.metric("Median enrollment", f"{_med_e:,}",
-                                    help=f"across {len(_countries)} countries")
+                with m1:
+                    st.metric("Trials", f"{_n:,}", help=f"Targeting {target_pick}")
+                with m2:
+                    st.metric("Open / recruiting", f"{_rec:,}")
+                with m3:
+                    st.metric("Distinct sponsors", f"{_sponsors:,}")
+                with m4:
+                    st.metric("Median enrollment", f"{_med_e:,}",
+                              help=f"across {len(_countries)} countries")
 
                 # 2x2 panel grid: disease entity / phase / modality / family
                 # (rheum is single-branch — replaced onc's "Branch split" with
@@ -5548,7 +5564,8 @@ with tab_deepdive:
                     if not _ents.empty:
                         _chart(
                             make_bar(_ents, "Entity", "Trials", height=280),
-                            key=f"focus_entity_{focus_label}", width="stretch", config=PUB_EXPORT,
+                            key=f"focus_entity_{target_pick}",
+                            width="stretch", config=PUB_EXPORT,
                         )
 
                     st.markdown("**Modality breakdown**")
@@ -5576,7 +5593,8 @@ with tab_deepdive:
                     if not _phase_counts.empty:
                         _chart(
                             make_bar(_phase_counts, "Phase", "Count", height=280),
-                            key=f"focus_phase_{focus_label}", width="stretch", config=PUB_EXPORT,
+                            key=f"focus_phase_{target_pick}",
+                            width="stretch", config=PUB_EXPORT,
                         )
 
                     st.markdown("**Disease family split**")
@@ -5604,7 +5622,7 @@ with tab_deepdive:
                         key=f"dd_target_timeline_{target_pick}",
                     )
                 with _td2:
-                    st.markdown(f"**Enrollment-size distribution by disease**")
+                    st.markdown("**Enrollment-size distribution by disease**")
                     _enr_box_in = _focus_with_disease.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
                     _chart(
                         _deepdive_box(
@@ -5739,13 +5757,16 @@ with tab_deepdive:
             )
 
             m1, m2, m3 = st.columns(3)
-            with m1: st.metric("Named products", f"{len(pivot):,}", help="In the current filter")
-            with m2: st.metric("Total trials", f"{int(pivot['Trials'].sum()):,}")
-            with m3: st.metric(
-                "Top product",
-                pivot.iloc[0]["ProductName"] if not pivot.empty else "—",
-                help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
-            )
+            with m1:
+                st.metric("Named products", f"{len(pivot):,}", help="In the current filter")
+            with m2:
+                st.metric("Total trials", f"{int(pivot['Trials'].sum()):,}")
+            with m3:
+                st.metric(
+                    "Top product",
+                    pivot.iloc[0]["ProductName"] if not pivot.empty else "—",
+                    help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
+                )
 
             st.caption(
                 f"{len(pivot):,} named products · sorted by trial count · "
@@ -5874,6 +5895,9 @@ with tab_deepdive:
                     lambda r: _cs(r.get("LeadSponsor"), r.get("LeadSponsorClass")), axis=1
                 )
             except Exception:
+                # Defensive — same fallback as the post-load block at
+                # the top of the script. The missing-column guard below
+                # surfaces a clean info banner.
                 pass
 
         if "SponsorType" not in df_filt.columns:
@@ -6036,7 +6060,8 @@ with tab_deepdive:
                         _geo_rows.append(rd)
                         added = True
                 if not added:
-                    rd = dict(_r_dict); rd["_Country"] = "Unknown"
+                    rd = dict(_r_dict)
+                    rd["_Country"] = "Unknown"
                     _geo_rows.append(rd)
             _geo_df = pd.DataFrame(_geo_rows)
 
