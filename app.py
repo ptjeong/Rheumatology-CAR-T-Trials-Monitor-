@@ -4510,99 +4510,10 @@ with tab_geo:
             else:
                 st.caption("Select a city row in the table to open the related trial list below.")
 
-    # ── Phase 5: Country-emergence scatter + multi-country trials ──
-    if not df_filt.empty:
-        st.divider()
-        st.subheader("Country emergence & international collaboration")
-        _ce_a, _ce_b = st.columns([0.55, 0.45])
-        with _ce_a:
-            st.markdown("**When did each country enter the field?**")
-            st.caption(
-                "Each dot is a country, x-axis = year of its first CAR-T "
-                "autoimmune trial in the snapshot. Useful for spotting "
-                "early-entrant vs late-entrant geographies."
-            )
-            _ce_rows = []
-            for _, _r in df_filt.iterrows():
-                _y = pd.to_numeric(_r.get("StartYear"), errors="coerce")
-                if pd.isna(_y):
-                    continue
-                cs = str(_r.get("Countries") or "").split("|")
-                for c in cs:
-                    c = c.strip()
-                    if c:
-                        _ce_rows.append((c, int(_y)))
-            if _ce_rows:
-                _ce_df = pd.DataFrame(_ce_rows, columns=["Country", "Year"])
-                _ce_first = (
-                    _ce_df.groupby("Country")["Year"].min()
-                    .sort_values().reset_index()
-                    .rename(columns={"Year": "FirstTrialYear"})
-                )
-                _ce_total = _ce_df["Country"].value_counts().to_dict()
-                _ce_first["Trials"] = _ce_first["Country"].map(_ce_total)
-                _ce_first["Region"] = _ce_first["Country"].apply(_country_to_region)
-                _ce_fig = px.scatter(
-                    _ce_first.sort_values("FirstTrialYear"),
-                    x="FirstTrialYear", y="Country",
-                    size="Trials", color="Region",
-                    color_discrete_map=_reg_palette,
-                    template="plotly_white",
-                    height=max(300, 22 * len(_ce_first) + 80),
-                )
-                _ce_fig.update_traces(
-                    hovertemplate=(
-                        "<b>%{y}</b><br>First trial: %{x}<br>"
-                        "Total trials: %{marker.size}<extra></extra>"
-                    ),
-                )
-                _ce_fig.update_layout(
-                    margin=dict(l=12, r=12, t=8, b=40),
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    xaxis_title="Year of first trial",
-                    yaxis_title=None,
-                    yaxis=dict(autorange="reversed"),
-                    legend=dict(
-                        orientation="h", yanchor="bottom", y=-0.12, x=0,
-                        font=dict(family=FONT_FAMILY, size=10),
-                        title=dict(text=""),
-                    ),
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                )
-                _chart(_ce_fig, key="geo_country_emergence")
-
-        with _ce_b:
-            st.markdown("**Multi-country trials**")
-            st.caption(
-                "Trials enrolling in ≥2 countries — an indicator of "
-                "international collaboration. Listed by country count."
-            )
-            _mc_df = df_filt.copy()
-            _mc_df["_n_countries"] = _mc_df["Countries"].fillna("").astype(str).apply(
-                lambda s: len([c for c in s.split("|") if c.strip()])
-            )
-            _mc = _mc_df[_mc_df["_n_countries"] >= 2].sort_values(
-                "_n_countries", ascending=False,
-            ).head(15)
-            if _mc.empty:
-                st.caption("No multi-country trials in the current filter.")
-            else:
-                _mc_view = _mc[["NCTId", "BriefTitle", "_n_countries", "Countries"]].copy()
-                _mc_view["BriefTitle"] = _mc_view["BriefTitle"].astype(str).str[:70]
-                _mc_view["Countries"] = _mc_view["Countries"].astype(str).str.replace("|", " · ", regex=False)
-                st.dataframe(
-                    _mc_view, width="stretch", hide_index=True, height=380,
-                    column_config={
-                        "NCTId":         st.column_config.TextColumn("NCT", width="small"),
-                        "BriefTitle":    st.column_config.TextColumn("Title", width="medium"),
-                        "_n_countries": st.column_config.NumberColumn("# countries", format="%d", width="small"),
-                        "Countries":     st.column_config.TextColumn("Countries", width="large"),
-                    },
-                )
-                st.caption(
-                    f"{len(_mc)} multi-country trials of {len(_mc_df)} total "
-                    f"({100.0 * len(_mc) / len(_mc_df):.1f}%) — top 15 by country count."
-                )
+    # "Country emergence & international collaboration" section removed
+    # (2026-05-07) per user feedback. The country leaderboard above and
+    # the per-country drilldown in the Deep Dive "By geography" sub-tab
+    # cover the remaining geographic questions.
 
 with tab_data:
     st.subheader("Trial table")
@@ -4960,45 +4871,41 @@ def _cagr(first_count: int, last_count: int, n_years: int) -> float | None:
 
 with tab_deepdive:
     st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">Five focused '
+        f'<p class="small-note" style="color:{THEME["muted"]}">Six focused '
         "axis-pages that complement the aggregate dashboards: "
-        "<b>By disease</b> — landscape figures + per-disease drilldown + a "
-        "side-by-side disease/target comparator. "
+        "<b>By disease</b> — landscape figures + per-disease drilldown. "
         "<b>By target</b> — antigen landscape + per-target drilldown + a "
         "per-named-product pipeline view. "
         "<b>By sponsor</b> — sponsor-type aggregate + a specific-sponsor "
         "drilldown (pick one sponsor to see their full portfolio). "
         "<b>By geography</b> — country leaderboard, country × disease "
-        "heatmap, multi-country trials, and per-country drilldown. "
+        "heatmap, and per-country drilldown. "
         "<b>By time</b> — annual trial starts (selectable colour axis), "
         "cumulative active trials, cohort × phase mix, and a phase-progression "
-        "Sankey. Every trial-list table supports row-click drilldown to a "
-        "full trial record.</p>",
+        "Sankey. "
+        "<b>Compare</b> — side-by-side mini-dashboards for any two "
+        "diseases or two antigens. Every trial-list table supports "
+        "row-click drilldown to a full trial record.</p>",
         unsafe_allow_html=True,
     )
 
-    # ── Phase 7 consolidation (2026-05-06): from 8 sub-tabs to 5 ──
-    # Removed standalone "By product" (now appended as a section inside
-    # By target), "By sponsor" specific drilldown (appended inside the
-    # existing By sponsor tab below the type-aggregate view), and
-    # "Compare" (appended inside By disease as a side-by-side comparator
-    # below the per-disease drilldown). Same functionality, fewer tab
-    # clicks; the consolidated tabs read like axis-pages with optional
-    # depth, not a tab-soup of overlapping views.
-    (deep_sub_disease, deep_sub_target,
-     deep_sub_sponsor, deep_sub_geo, deep_sub_time) = st.tabs([
-        "By disease", "By target",
-        "By sponsor", "By geography", "By time",
+    # ── Sub-tab structure (post-consolidation, 2026-05-07) ──
+    # Compare is its own tab again per user feedback (it was briefly
+    # appended to By disease in the Phase 7 consolidation; restored
+    # 2026-05-07 — the comparator deserves dedicated real estate
+    # rather than scrolling past the disease drilldown to reach it).
+    # By product still appended below By target; specific-sponsor
+    # drilldown still appended below By sponsor type-aggregate.
+    (deep_sub_disease, deep_sub_target, deep_sub_sponsor,
+     deep_sub_geo, deep_sub_time, deep_sub_compare) = st.tabs([
+        "By disease", "By target", "By sponsor",
+        "By geography", "By time", "Compare",
     ])
-    # Aliases — render the orphaned blocks under the new home tab so
-    # the existing `with deep_sub_<orphan>:` bodies don't need to be
-    # surgically re-indented. Streamlit will append the content to the
-    # target tab in source order (the alias just routes the context
-    # manager). Each orphaned block already opens with its own
-    # st.subheader / st.caption so the section header is preserved.
+    # Aliases — render the appended blocks under the new home tab so
+    # the existing `with deep_sub_<alias>:` bodies don't need to be
+    # surgically re-indented. Streamlit appends content in source order.
     deep_sub_product     = deep_sub_target    # By product → bottom of By target
     deep_sub_sponsor_one = deep_sub_sponsor   # By sponsor (specific) → bottom of By sponsor
-    deep_sub_compare     = deep_sub_disease   # Compare → bottom of By disease
 
     def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
         """Explode trials with pipe-joined DiseaseEntities into one row per
@@ -5114,129 +5021,34 @@ with tab_deepdive:
                         key="dd_disease_phase_stack",
                     )
 
-                # ── Phase 3 additions: trial age + competitive intensity + age-group ──
-                st.markdown("##### Pipeline maturity & competitive intensity")
-                _pl_a, _pl_b = st.columns(2)
-                with _pl_a:
-                    st.markdown("**Trial age by status (years since start)**")
-                    st.caption(
-                        "Boxes show the distribution of years since each "
-                        "trial's start year, stratified by current status. "
-                        "Long Recruiting whiskers (≥3 y) flag stalled "
-                        "enrolment; long Active whiskers flag delayed "
-                        "completion."
+                # ── Trial age by status (kept) ──
+                # Sibling sections "Competitive intensity (top-3 sponsor
+                # share)" and "Age-group coverage by disease" were
+                # removed 2026-05-07 per user feedback. The trial-age
+                # box plot stays — it's the most actionable of the
+                # three for spotting stalled vs active recruiting.
+                st.markdown("**Trial age by status (years since start)**")
+                st.caption(
+                    "Boxes show the distribution of years since each "
+                    "trial's start year, stratified by current status. "
+                    "Long Recruiting whiskers (≥3 y) flag stalled "
+                    "enrolment; long Active whiskers flag delayed "
+                    "completion."
+                )
+                _today_year = pd.Timestamp.utcnow().year
+                _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
+                _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
+                _age_in = _age_in.dropna(subset=["StartYear"])
+                _age_in["TrialAge"] = _today_year - _age_in["StartYear"].astype(int)
+                if not _age_in.empty:
+                    _chart(
+                        _deepdive_box(
+                            _age_in, group_col="OverallStatus",
+                            value_col="TrialAge",
+                            height=300, top_n=6,
+                        ),
+                        key="dd_disease_trial_age",
                     )
-                    _today_year = pd.Timestamp.utcnow().year
-                    _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
-                    _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
-                    _age_in = _age_in.dropna(subset=["StartYear"])
-                    _age_in["TrialAge"] = _today_year - _age_in["StartYear"].astype(int)
-                    if not _age_in.empty:
-                        _chart(
-                            _deepdive_box(
-                                _age_in, group_col="OverallStatus",
-                                value_col="TrialAge",
-                                height=300, top_n=6,
-                            ),
-                            key="dd_disease_trial_age",
-                        )
-                with _pl_b:
-                    st.markdown("**Competitive intensity (top-3 sponsor share)**")
-                    st.caption(
-                        "Per disease, percentage of trials run by the top 3 "
-                        "lead sponsors. High share (>60%) = concentrated "
-                        "field; low share (<30%) = diffuse competition."
-                    )
-                    _ci_df = (
-                        dd_df.drop_duplicates(subset=["NCTId", "_Disease"])
-                        .dropna(subset=["LeadSponsor"])
-                    )
-                    _ci_rows = []
-                    for _disease, _grp in _ci_df.groupby("_Disease"):
-                        _total = _grp["NCTId"].nunique()
-                        if _total < 3:
-                            continue
-                        _top3 = (
-                            _grp.groupby("LeadSponsor")["NCTId"].nunique()
-                            .sort_values(ascending=False).head(3).sum()
-                        )
-                        _ci_rows.append({
-                            "Disease": _disease,
-                            "TotalTrials": _total,
-                            "Top3Share": round(100.0 * _top3 / _total, 1),
-                            "Sponsors": _grp["LeadSponsor"].nunique(),
-                        })
-                    _ci = pd.DataFrame(_ci_rows).sort_values("TotalTrials", ascending=False).head(15)
-                    if not _ci.empty:
-                        st.dataframe(
-                            _ci, width="stretch", hide_index=True,
-                            column_config={
-                                "Disease":     st.column_config.TextColumn("Disease", width="medium"),
-                                "TotalTrials": st.column_config.NumberColumn("Trials", format="%d", width="small"),
-                                "Top3Share":   st.column_config.ProgressColumn(
-                                    "Top-3 share (%)",
-                                    format="%.1f", min_value=0, max_value=100, width="medium",
-                                ),
-                                "Sponsors":    st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
-                            },
-                        )
-
-                # ── Age-group coverage (paediatric vs adult vs combined) ──
-                if "AgeGroup" in dd_df.columns:
-                    st.markdown("**Age-group coverage by disease**")
-                    st.caption(
-                        "Stacked share of paediatric / adult / combined / "
-                        "older-adult coverage per disease. Surfaces the "
-                        "paediatric-rheum gap — diseases with 0% paediatric "
-                        "trials are clinical blind spots."
-                    )
-                    _ag_in = dd_df.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
-                    _ag_in["AgeGroup"] = _ag_in["AgeGroup"].fillna("Unknown")
-                    _ag_palette = {
-                        "Paediatric":     "#86efac",  # green-300
-                        "Adult":          "#0c4a6e",  # sky-900
-                        "Older adult":    "#0369a1",  # sky-700
-                        "Adult/older adult": "#0284c7",  # sky-600
-                        "Paed/adult":     "#a78bfa",  # violet-400
-                        "Paed/adult/older": "#7c3aed",  # violet-600
-                        "Unknown":        "#cbd5e1",  # slate-300
-                    }
-                    _ag_counts = (
-                        _ag_in.groupby(["_Disease", "AgeGroup"]).size().reset_index(name="Trials")
-                    )
-                    _ag_top = (
-                        _ag_counts.groupby("_Disease")["Trials"].sum()
-                        .sort_values(ascending=False).head(15).index.tolist()
-                    )
-                    _ag_counts = _ag_counts[_ag_counts["_Disease"].isin(_ag_top)]
-                    _ag_counts["Pct"] = 100.0 * _ag_counts["Trials"] / _ag_counts.groupby("_Disease")["Trials"].transform("sum")
-                    if not _ag_counts.empty:
-                        _ag_fig = px.bar(
-                            _ag_counts,
-                            x="_Disease", y="Pct", color="AgeGroup",
-                            category_orders={"_Disease": _ag_top},
-                            color_discrete_map=_ag_palette,
-                            template="plotly_white", height=340,
-                        )
-                        _ag_fig.update_traces(
-                            marker_line_width=0,
-                            hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y:.1f}%<extra></extra>",
-                        )
-                        _ag_fig.update_layout(
-                            margin=dict(l=12, r=12, t=8, b=80),
-                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                            xaxis_title=None,
-                            yaxis_title="Age-group mix (%)",
-                            font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                            legend=dict(
-                                orientation="h", yanchor="bottom", y=-0.40, x=0,
-                                font=dict(family=FONT_FAMILY, size=10),
-                                title=dict(text=""),
-                            ),
-                            bargap=0.35,
-                        )
-                        _ag_fig.update_xaxes(tickangle=-30)
-                        _chart(_ag_fig, key="dd_disease_age_groups")
 
                 disease_choices = agg["Disease"].tolist()
                 pick = st.selectbox(
@@ -6535,10 +6347,8 @@ with tab_deepdive:
                         key_suffix=f"deep_sponsor_one_{sponsor_pick}",
                     )
 
-    # ===== Compare (side-by-side disease/target — Phase 3) =====
-    # Phase 7 consolidation: appended below the By disease tab content.
+    # ===== Compare (side-by-side disease/target — own sub-tab) =====
     with deep_sub_compare:
-        st.divider()
         st.subheader("Side-by-side comparator")
         st.caption(
             "Pick two diseases or two antigens; the dashboard renders "
