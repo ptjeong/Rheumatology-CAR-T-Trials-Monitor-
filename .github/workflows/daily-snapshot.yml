@@ -1,0 +1,154 @@
+name: Daily snapshot rebuild
+
+# Builds a fresh snapshot from the live CT.gov API every day at 03:00 UTC.
+# Skip-decision uses a composite hash of (today's trials.csv) + (the
+# files that influence classification: pipeline.py, config.py,
+# llm_overrides.json). When BOTH hashes match the previous snapshot,
+# nothing changed; the run is a no-op.
+#
+# Cross-app aligned with the onc CAR-T trials dashboard — see
+# docs/internal/CROSS_APP_PROFESSIONAL_GRADE_BRIEF_R3.md (Round 3 spec).
+
+on:
+  schedule:
+    - cron: '0 3 * * *'         # 03:00 UTC daily
+  workflow_dispatch:             # allow manual runs
+    inputs:
+      force:
+        description: "Force commit even if no data changed (debug)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write                # snapshot commits + tag pushes
+  issues:   write                # rolling-diff issue comments
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15          # full fetch + classify ≈ 3 min
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # full history needed for tag pushes
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch + classify
+        run: python scripts/build_snapshot.py --out snapshots
+
+      - name: Compute composite hash (data + classifier)
+        id: hash
+        run: |
+          set -euo pipefail
+          TODAY=$(date -u +%Y-%m-%d)
+          NEW_TRIALS="snapshots/$TODAY/trials.csv"
+
+          if [ ! -f "$NEW_TRIALS" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=no-snapshot-emitted" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Hash today's trials.csv (the only data file users see).
+          DATA_HASH=$(sha256sum "$NEW_TRIALS" | cut -c1-12)
+
+          # Hash the three files that influence classifier output —
+          # mirrors onc's _classifier_mtime() composition pattern from
+          # app.py:1615-1640. Using git rev-parse so the hash is stable
+          # across CI clones (file mtimes reset on every checkout).
+          CLASSIFIER_HASH=$(
+            { git rev-parse HEAD:pipeline.py;
+              git rev-parse HEAD:config.py;
+              [ -f llm_overrides.json ] && git rev-parse HEAD:llm_overrides.json || echo "no-overrides";
+            } | sha256sum | cut -c1-12
+          )
+
+          PREV_DATA_HASH=$(cat snapshots/.last_data_hash 2>/dev/null || echo "")
+          PREV_CLF_HASH=$(cat snapshots/.last_classifier_hash 2>/dev/null || echo "")
+
+          echo "DATA_HASH=$DATA_HASH"
+          echo "CLASSIFIER_HASH=$CLASSIFIER_HASH"
+          echo "PREV_DATA_HASH=$PREV_DATA_HASH"
+          echo "PREV_CLF_HASH=$PREV_CLF_HASH"
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "reason=forced" >> "$GITHUB_OUTPUT"
+          elif [ "$DATA_HASH" = "$PREV_DATA_HASH" ] && [ "$CLASSIFIER_HASH" = "$PREV_CLF_HASH" ]; then
+            echo "skip=true"  >> "$GITHUB_OUTPUT"
+            echo "reason=identical-to-previous" >> "$GITHUB_OUTPUT"
+            # Even on skip, remove today's snapshot so we don't accumulate
+            # identical date-stamped duplicates.
+            rm -rf "snapshots/$TODAY"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "reason=changed" >> "$GITHUB_OUTPUT"
+            echo "$DATA_HASH"       > snapshots/.last_data_hash
+            echo "$CLASSIFIER_HASH" > snapshots/.last_classifier_hash
+          fi
+          echo "snap_date=$TODAY" >> "$GITHUB_OUTPUT"
+
+      - name: Diff vs previous snapshot
+        if: steps.hash.outputs.skip == 'false'
+        id: diff
+        run: |
+          set -euo pipefail
+          # Find previous snapshot (most recent dated dir other than today).
+          PREV=$(ls -1d snapshots/2*/ 2>/dev/null | grep -v "${{ steps.hash.outputs.snap_date }}" | sort | tail -1 | sed 's:/$::')
+          if [ -z "$PREV" ]; then
+            echo "First snapshot — no previous to diff against."
+            echo "first=true" >> "$GITHUB_OUTPUT"
+          else
+            python scripts/snapshot_diff.py \
+              --previous "$PREV" \
+              --current  "snapshots/${{ steps.hash.outputs.snap_date }}" \
+              > diff.md || true
+            wc -l diff.md
+            echo "first=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit + push snapshot
+        if: steps.hash.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add snapshots/
+          if git diff --cached --quiet; then
+            echo "No tracked changes (snapshot dir unchanged); skipping commit."
+            exit 0
+          fi
+          git commit -m "Daily snapshot ${{ steps.hash.outputs.snap_date }} (auto)"
+          git push
+          # Tag for the future Zenodo workflow (round-3 W3-W4) to consume
+          git tag "snapshot-${{ steps.hash.outputs.snap_date }}"
+          git push --tags || echo "Tag push failed (likely already exists); continuing."
+
+      - name: Open / update rolling-diff issue
+        if: steps.hash.outputs.skip == 'false' && steps.diff.outputs.first == 'false'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ vars.ROLLING_DIFF_ISSUE || 1 }}
+          body-path:    diff.md
+          edit-mode:    append
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Daily snapshot summary"      >> $GITHUB_STEP_SUMMARY
+          echo "- Date: ${{ steps.hash.outputs.snap_date }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Skip: ${{ steps.hash.outputs.skip }}"      >> $GITHUB_STEP_SUMMARY
+          echo "- Reason: ${{ steps.hash.outputs.reason }}"  >> $GITHUB_STEP_SUMMARY
