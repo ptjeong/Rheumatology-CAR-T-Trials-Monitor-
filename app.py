@@ -2607,6 +2607,12 @@ def _deepdive_timeline(
         for i, g in enumerate(top_groups)
     }
     color_map["Other"] = "#94a3b8"   # slate-400 for the rollup
+    # Direct-label each line at its rightmost point (Tufte: "labels
+    # next to data" beats "legend off in a corner"). Removes the need
+    # for a bottom legend that competes with the year tick labels for
+    # space and that, with long institutional sponsor names, wraps to
+    # 3+ rows. The legend is hidden; each trace's name is rendered as
+    # an annotation at its last data point.
     fig = px.line(
         counts, x="StartYear", y="Trials", color="_Group",
         markers=True, line_shape="spline",
@@ -2616,26 +2622,39 @@ def _deepdive_timeline(
         height=height or 320,
     )
     fig.update_traces(line=dict(width=2.0), marker=dict(size=6))
-    # Bottom margin sized for a 3-row horizontal legend with very long
-    # category labels (institutional sponsor names regularly wrap into
-    # 3 lines, e.g., "Union Hospital, Tongji Medical College, Huazhong
-    # University of Science and Technology"). xaxis_title removed — the
-    # year tick labels make it self-evident. y=-0.22 + b=160 gives
-    # ~30 px clearance between the year ticks and the legend top, plus
-    # 130 px below for 3-4 wrapped legend rows. Safe for the
-    # "Top sponsors — annual trial starts" chart which has the worst
-    # case of long names.
+
+    # Build end-of-line labels. Truncate long names (institutional
+    # sponsors run 60+ chars) to 28 chars + ellipsis so they don't
+    # overflow the right margin. The full name remains in the
+    # hover-tooltip (Plotly default).
+    annotations = []
+    for grp in counts["_Group"].unique():
+        sub = counts[counts["_Group"] == grp].sort_values("StartYear")
+        if sub.empty:
+            continue
+        last_x = sub["StartYear"].iloc[-1]
+        last_y = sub["Trials"].iloc[-1]
+        label = grp if len(grp) <= 28 else grp[:25] + "…"
+        annotations.append(dict(
+            x=last_x, y=last_y, text=label, showarrow=False,
+            xanchor="left", yanchor="middle",
+            xshift=8,   # 8 px right of the last marker
+            font=dict(
+                family=FONT_FAMILY, size=10,
+                color=color_map.get(grp, "#0c4a6e"),
+            ),
+        ))
+
     fig.update_layout(
-        margin=dict(l=12, r=12, t=8, b=160),
+        # Right margin generous so end-of-line labels have room
+        # (was l=12 r=12 b=160 with bottom legend; now b=40 since
+        # legend is gone, r=180 for label space).
+        margin=dict(l=12, r=180, t=8, b=40),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis_title=None,
         yaxis_title="Trials",
-        legend=dict(
-            orientation="h", yanchor="top", y=-0.22,
-            xanchor="left", x=0,
-            font=dict(family=FONT_FAMILY, size=10),
-            title=dict(text=""),
-        ),
+        showlegend=False,
+        annotations=annotations,
         font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
     )
     return fig
@@ -3894,12 +3913,73 @@ with tab_overview:
         )
         _kpi_sponsors = int(df_filt["LeadSponsor"].dropna().nunique())
 
+        # Sparkline data — annual trial-start series for the last
+        # 6 complete years. Tufte: "small intense word-sized graphics"
+        # next to the headline number give the metric immediate
+        # historical context. Render as a thin Plotly line below
+        # each tile's number.
+        _spark_df = df_filt.copy()
+        _spark_df["StartYear"] = pd.to_numeric(_spark_df["StartYear"], errors="coerce")
+        _spark_df = _spark_df.dropna(subset=["StartYear"])
+        _today_year = pd.Timestamp.utcnow().year
+        _spark_years = list(range(_today_year - 6, _today_year + 1))
+        _spark_trials = (
+            _spark_df.groupby(_spark_df["StartYear"].astype(int)).size()
+            .reindex(_spark_years, fill_value=0)
+        )
+        _spark_open = (
+            _spark_df[_spark_df["OverallStatus"].isin(
+                ["RECRUITING", "NOT_YET_RECRUITING"]
+            )].groupby(_spark_df["StartYear"].astype(int)).size()
+            .reindex(_spark_years, fill_value=0)
+        )
+        _spark_enroll = (
+            _spark_df.groupby(_spark_df["StartYear"].astype(int))
+            .apply(lambda g: pd.to_numeric(
+                g["EnrollmentCount"], errors="coerce",
+            ).fillna(0).sum(), include_groups=False)
+            .reindex(_spark_years, fill_value=0)
+        )
+
+        def _sparkline(values, color: str = "#0c4a6e") -> "go.Figure":
+            """Tiny inline trend chart — no axes, no legend, no padding.
+            Renders the last 6-7 annual values as a single line + shaded
+            area below for visual weight. Keeps the data-ink ratio high
+            (no ticks, no grid, no labels)."""
+            fig = go.Figure(go.Scatter(
+                x=list(values.index), y=list(values.values),
+                mode="lines", line=dict(width=1.6, color=color),
+                fill="tozeroy", fillcolor="rgba(12, 74, 110, 0.10)",
+                hovertemplate="%{x}: %{y:,}<extra></extra>",
+            ))
+            fig.update_layout(
+                height=42,
+                margin=dict(l=0, r=0, t=2, b=2),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+            )
+            return fig
+
         _k1, _k2, _k3, _k4, _k5 = st.columns(5)
-        _k1.metric("Trials", f"{_kpi_n:,}")
-        _k2.metric("Open / recruiting", f"{_kpi_open:,}")
-        _k3.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
-        _k4.metric("Top antigen", _kpi_top_target)
-        _k5.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
+        with _k1:
+            st.metric("Trials", f"{_kpi_n:,}")
+            st.plotly_chart(_sparkline(_spark_trials),
+                            width="stretch", config={"displayModeBar": False})
+        with _k2:
+            st.metric("Open / recruiting", f"{_kpi_open:,}")
+            st.plotly_chart(_sparkline(_spark_open),
+                            width="stretch", config={"displayModeBar": False})
+        with _k3:
+            st.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
+            st.plotly_chart(_sparkline(_spark_enroll),
+                            width="stretch", config={"displayModeBar": False})
+        with _k4:
+            st.metric("Top antigen", _kpi_top_target)
+        with _k5:
+            st.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
 
         st.divider()
 
@@ -6599,7 +6679,10 @@ with tab_pub:
         _fig1_layout["margin"] = dict(l=72, r=36, t=24, b=130)
         fig1.update_layout(
             **_fig1_layout,
-            xaxis_title="Start year",
+            # xaxis_title removed (Tufte: year tick labels are
+            # self-evident; the "Start year" line was redundant
+            # chartjunk competing with the legend for bottom space).
+            xaxis_title=None,
             yaxis_title="Number of trials",
             legend=dict(
                 orientation="h", yanchor="top", y=-0.28, xanchor="center", x=0.5,
@@ -7558,7 +7641,8 @@ with tab_pub:
                     font=dict(size=11, color=_AX_COLOR), bgcolor="rgba(0,0,0,0)",
                     borderwidth=0,
                 ),
-                xaxis_title="Start year",
+                # xaxis_title removed (Tufte: year ticks self-evident)
+                xaxis_title=None,
                 yaxis_title=_y_title,
             )
             _chart(fig7b, key='fig7b', width='stretch', config=PUB_EXPORT)
