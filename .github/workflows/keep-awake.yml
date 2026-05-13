@@ -1,0 +1,66 @@
+# Streamlit Cloud keep-awake — scheduled empty push every 6h.
+#
+# Streamlit Cloud puts containers to sleep after a few hours of no
+# webhook activity. Bot-style GET pings (curl, UpTimeRobot) don't
+# count as activity — Streamlit's heuristics classify them as
+# non-human traffic and let the container nap anyway. The fix that
+# actually works is to push a real (empty) commit on the watched
+# branch (main), which fires the Streamlit Cloud webhook and forces
+# a fresh container build (~2-3 min). The just-rebuilt container
+# resets the sleep timer to zero.
+#
+# Trade-off: each empty push = ~2-3 min cold-start window for any
+# visitor who loads during the rebuild. At 6h cadence, ~12 min/day
+# of potential downtime — acceptable for an ad-hoc dashboard.
+#
+# Iteration history (this is the third approach):
+#   1. URL-ping via cron (curl-ing the deploy URL)  → ignored by
+#      Streamlit's bot heuristics; container kept sleeping.
+#   2. UpTimeRobot HTTP monitor every 5 min        → same problem,
+#      no in-repo config.
+#   3. Scheduled empty push (this file)            → works. Webhook
+#      fires on any push to main, regardless of content.
+#
+# Ported from the onc sister monitor (2026-05-07). Same file body,
+# same cadence, same cron-offset rationale.
+
+name: Keep-awake (scheduled empty push)
+
+on:
+  schedule:
+    # Every 6 hours at minute :17. The :17 offset dodges GH Actions'
+    # :00 cron-storm window where scheduled jobs across the platform
+    # get queued and may run minutes late.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # need write access to push an empty commit
+
+# Single concurrency group means a manual workflow_dispatch run won't
+# race the scheduled one — newer takes precedence, in-flight is cancelled.
+concurrency:
+  group: keep-awake
+  cancel-in-progress: true
+
+jobs:
+  empty-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create empty commit and push
+        run: |
+          set -euo pipefail
+          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          git commit --allow-empty -m "ci(keep-awake): scheduled empty push at ${TS}"
+          git push origin main
