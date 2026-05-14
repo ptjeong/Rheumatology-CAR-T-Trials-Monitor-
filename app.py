@@ -4355,7 +4355,27 @@ with tab_overview:
         # ── Recently updated (now full-width — YoY movers moved to By time) ──
         st.markdown("##### Recently updated trials")
         if "LastUpdatePostDate" in df_filt.columns:
-            # Filter affordances: by family + by status
+            # Filter affordances: timeframe pills + family + status.
+            # Timeframe is a pill row above the two selectboxes so the
+            # most-common interaction ("what changed recently?") is one
+            # click away. Pills > selectbox here because options are few
+            # (5) and the answer is usually visible at-glance.
+            _TIMEFRAME_DAYS = {
+                "Past week":     7,
+                "Past month":    30,
+                "Past 3 months": 90,
+                "Past year":     365,
+                "All time":      None,
+            }
+            _ra_timeframe = st.pills(
+                "Updated within",
+                options=list(_TIMEFRAME_DAYS.keys()),
+                selection_mode="single",
+                default="Past month",
+                key="overview_recently_timeframe",
+                label_visibility="collapsed",
+            ) or "Past month"
+
             _ra_f1, _ra_f2 = st.columns(2)
             with _ra_f1:
                 _fam_opts = ["All families"] + sorted(
@@ -4375,6 +4395,13 @@ with tab_overview:
             _ra = df_filt.copy()
             _ra["LastUpdatePostDate"] = pd.to_datetime(_ra["LastUpdatePostDate"], errors="coerce")
             _ra = _ra.dropna(subset=["LastUpdatePostDate"])
+            # Timeframe filter: keep rows updated within N days of today
+            _tf_days = _TIMEFRAME_DAYS.get(_ra_timeframe)
+            if _tf_days is not None:
+                _cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=_tf_days)
+                # Normalise both sides to tz-naive for comparison safety;
+                # LastUpdatePostDate is stored without tz info.
+                _ra = _ra[_ra["LastUpdatePostDate"] >= _cutoff.tz_localize(None)]
             if _ra_fam != "All families" and "DiseaseFamily" in _ra.columns:
                 _ra = _ra[_ra["DiseaseFamily"] == _ra_fam]
             if _ra_status == "Open / recruiting":
@@ -4411,7 +4438,10 @@ with tab_overview:
                         "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
                     },
                 )
-                st.caption("Top 10 most-recently-updated trials matching the filter.")
+                st.caption(
+                    f"Top {len(_ra_view)} most-recently-updated trials "
+                    f"({_ra_timeframe.lower()}, matching the filter)."
+                )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
 
@@ -5366,7 +5396,7 @@ with tab_deepdive:
     # to look like the underline-tabs we had before. The active tab is
     # also written to query_params so the URL is shareable.
     _DD_VIEWS = [
-        "By disease", "By target", "By sponsor",
+        "By disease", "By target", "By product", "By sponsor",
         "By geography", "By time", "Compare",
     ]
     # URL-bind: seed from query_params if a `dd_tab` value is present.
@@ -6255,15 +6285,13 @@ with tab_deepdive:
                     mime="text/csv",
                 )
 
-    # ===== By product (per-named-product; ported from onc commit f006d8e) =====
-    # Phase 7 consolidation: appended below the By target tab content.
-    # Per-product pipeline view — folded into the By target tab. Was its
-    # own `with deep_sub_product:` block when the tabs used a Streamlit
-    # `st.tabs` alias; with the radio-as-tabs migration the block just
-    # becomes another `if _active == "By target":` chunk rendered after
-    # the antigen-focus content.
-    if _active == "By target":
-        st.divider()
+    # ===== By product (per-named-product) =====
+    # Promoted to its own Deep Dive sub-tab 2026-05-15 per user feedback:
+    # "the by product tab should actually be a separate deep dive as it
+    # covers different ground than the by target focus, and makes the by
+    # target too busy". Was previously rendered as an appended block
+    # under `if _active == "By target":`; now stands alone.
+    if _active == "By product":
         st.subheader("Per-product pipeline view")
         st.markdown(
             f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
@@ -6616,24 +6644,177 @@ with tab_deepdive:
             )
             agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
 
-            # ── Focus picker at top of tab body (Phase B layout) ──
-            # Default ("—") → landscape (cross-type aggregate table +
-            # type × disease heatmap + phase composition). Pick a type
-            # to REPLACE the landscape with the focused drilldown
-            # (top sponsors in that bucket + their antigens / products /
-            # trial table). The specific-sponsor portfolio is its own
-            # subsection further below — picker moves are
-            # complementary, not exclusive.
+            # ── Dual-picker focus row (2026-05-15 restructure) ──
+            # Two pickers side-by-side at the top of the tab: sponsor
+            # type AND specific sponsor. The previous design required
+            # scrolling past the entire type-aggregate view to reach the
+            # specific-sponsor section's separate picker. Now both live
+            # at the top and the user picks whichever dimension they
+            # want — the page swaps to the corresponding view.
+            #
+            # Priority logic (specific-sponsor wins because it's the
+            # narrower scope):
+            #   1. Specific sponsor picked → that sponsor's portfolio
+            #   2. Sponsor type picked     → type drilldown
+            #   3. Both at default          → cross-type landscape
             sp_choices = agg["SponsorType"].tolist()
             _seed_pick_from_query("dd_sponsor_pick", sp_choices)
-            pick = st.selectbox(
-                "Focus on a sponsor type",
-                options=["—"] + sp_choices, key="dd_sponsor_pick",
-                help="Leave at '—' to see the cross-type landscape. Pick a type (Industry / Academic / Gov / Other) to see its top sponsors, antigens, and product mix.",
-            )
-            _sync_pick_to_query("dd_sponsor_pick", ("—",))
 
-            if pick == "—":
+            # Specific-sponsor options (label-suffixed with count for
+            # quick scan; the bare name is recovered post-selection).
+            _sp_one_counts = (
+                df_filt["LeadSponsor"].dropna().value_counts()
+                .rename_axis("Sponsor").reset_index(name="Trials")
+                if "LeadSponsor" in df_filt.columns
+                else pd.DataFrame(columns=["Sponsor", "Trials"])
+            )
+            _sp_one_options = ["—"] + [
+                f"{r['Sponsor']}  ({r['Trials']} trials)"
+                for _, r in _sp_one_counts.iterrows()
+            ]
+            _seed_pick_from_query("dd_sponsor_one_pick", _sp_one_options[1:])
+
+            _spc1, _spc2 = st.columns(2)
+            with _spc1:
+                pick = st.selectbox(
+                    "Focus on a sponsor type",
+                    options=["—"] + sp_choices, key="dd_sponsor_pick",
+                    help="Leave at '—' to see the cross-type landscape. Pick a type (Industry / Academic / Gov / Other) to see its top sponsors, antigens, and product mix.",
+                )
+                _sync_pick_to_query("dd_sponsor_pick", ("—",))
+            with _spc2:
+                sponsor_pick_label = st.selectbox(
+                    "Focus on a specific sponsor",
+                    _sp_one_options,
+                    key="dd_sponsor_one_pick",
+                    help="Leave at '—' for no specific sponsor. Pick a sponsor to see their full portfolio: phases, diseases, antigens, geography, and activity over time. Takes priority over the sponsor-type picker.",
+                )
+                _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
+            sponsor_pick = (
+                sponsor_pick_label.rsplit("  (", 1)[0]
+                if sponsor_pick_label and sponsor_pick_label != "—"
+                else None
+            )
+
+            if sponsor_pick:
+                # ── Priority 1: specific-sponsor portfolio ──
+                # Content moved up from the previously-separate
+                # "Specific-sponsor portfolio" block. The old layout had
+                # this section below the type-aggregate view; the user
+                # had to scroll past everything to reach the specific
+                # picker. Now it renders at top when picked.
+                spt = df_filt[df_filt["LeadSponsor"] == sponsor_pick].copy()
+                _sm1, _sm2, _sm3, _sm4 = st.columns(4)
+                _sm1.metric("Trials led", f"{len(spt):,}")
+                _sm2.metric(
+                    "Distinct diseases",
+                    f"{spt['DiseaseEntity'].dropna().nunique():,}",
+                )
+                _sm3.metric(
+                    "Distinct targets",
+                    f"{spt.loc[~spt['TargetCategory'].isin(_PLATFORM_LABELS | {'Other_or_unknown'}), 'TargetCategory'].nunique():,}",
+                )
+                _sm4.metric(
+                    "Open / recruiting",
+                    int(spt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                )
+                _spy = pd.to_numeric(spt["StartYear"], errors="coerce")
+                if _spy.notna().any():
+                    _sm_first = int(_spy.min())
+                    _sm_last = int(_spy.max())
+                    st.caption(
+                        f"**{sponsor_pick}** · "
+                        f"sponsor type: *{spt['SponsorType'].mode().iloc[0] if not spt['SponsorType'].mode().empty else '—'}* · "
+                        f"first trial: **{_sm_first}** · most recent: **{_sm_last}**"
+                    )
+                # 4-panel breakdown
+                _spA, _spB = st.columns(2)
+                with _spA:
+                    st.markdown("**Phase distribution**")
+                    _pcts = (
+                        spt.assign(PhaseLabel=spt.get("PhaseLabel", spt["Phase"]))
+                        .groupby("PhaseLabel").size().reset_index(name="Trials")
+                    )
+                    _pcts["PhaseLabel"] = pd.Categorical(
+                        _pcts["PhaseLabel"],
+                        categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_pcts["PhaseLabel"])],
+                        ordered=True,
+                    )
+                    _pcts = _pcts.sort_values("PhaseLabel")
+                    if not _pcts.empty:
+                        _chart(
+                            make_bar(_pcts, "PhaseLabel", "Trials", height=220),
+                            key=f"dd_sponsor_one_phase_{sponsor_pick}",
+                        )
+                    st.markdown("**Antigen targets**")
+                    _stg = (
+                        spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                        .fillna("Unknown").value_counts().head(8)
+                        .rename_axis("Target").reset_index(name="Trials")
+                    )
+                    if not _stg.empty:
+                        st.dataframe(_stg, width='stretch', hide_index=True,
+                                     column_config=_mini_count_cols("Target"))
+                with _spB:
+                    st.markdown("**Disease coverage**")
+                    _sdi = (
+                        spt["DiseaseEntity"].fillna("Unknown").value_counts().head(8)
+                        .rename_axis("Disease").reset_index(name="Trials")
+                    )
+                    if not _sdi.empty:
+                        st.dataframe(_sdi, width='stretch', hide_index=True,
+                                     column_config=_mini_count_cols("Disease"))
+                    st.markdown("**Annual trial starts**")
+                    _chart(
+                        _deepdive_timeline(
+                            spt, group_col="DiseaseEntity",
+                            height=240, top_n=5,
+                        ),
+                        key=f"dd_sponsor_one_timeline_{sponsor_pick}",
+                    )
+                # Sponsor's full trial list
+                st.markdown(
+                    f"### Trials led by **{sponsor_pick}** "
+                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"({len(spt)} trials · click any row for full details)</span>",
+                    unsafe_allow_html=True,
+                )
+                _spt_show = spt.copy()
+                if "NCTLink" not in _spt_show.columns:
+                    _spt_show["NCTLink"] = _spt_show["NCTId"].apply(
+                        lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
+                    )
+                if "PhaseLabel" in _spt_show.columns:
+                    _spt_show["Phase"] = _spt_show["PhaseLabel"].fillna(_spt_show["Phase"])
+                _spt_show["OverallStatus"] = _spt_show["OverallStatus"].map(
+                    STATUS_DISPLAY).fillna(_spt_show["OverallStatus"])
+                _spt_show = _spt_show.sort_values(
+                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
+                ).reset_index(drop=True)
+                _spt_cols = [c for c in (
+                    "NCTId", "NCTLink", "BriefTitle",
+                    "DiseaseEntity", "TrialDesign",
+                    "TargetCategory", "ProductType", "Phase",
+                    "OverallStatus", "StartYear", "Countries",
+                ) if c in _spt_show.columns]
+                _spt_show, _spt_cols = _attach_flag_column(_spt_show, _spt_cols)
+                _spt_event = st.dataframe(
+                    _spt_show[_spt_cols],
+                    width='stretch', height=380, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"deep_sponsor_one_table_{sponsor_pick}",
+                    column_config=_trial_detail_cols(),
+                )
+                _spt_rows = (
+                    _spt_event.selection.rows
+                    if _spt_event and hasattr(_spt_event, "selection") else []
+                )
+                if _spt_rows:
+                    _render_trial_drilldown(
+                        _spt_show.iloc[_spt_rows[0]],
+                        key_suffix=f"deep_sponsor_one_{sponsor_pick}",
+                    )
+            elif pick == "—":
                 # ── Landscape view (default) ──
                 st.caption(f"{len(agg)} sponsor categories · sorted by trial count")
                 st.dataframe(
@@ -7246,178 +7427,13 @@ with tab_deepdive:
                 )
                 _chart(_hm_fig, key="dd_time_phase_heatmap")
 
-    # ===== By sponsor (specific sponsor drilldown — Phase 3) =====
-    # Phase 7 consolidation: appended below the By sponsor type-aggregate
-    # content; both share the same tab.
-    # Specific-sponsor portfolio — folded into the By sponsor tab (same
-    # pattern as the per-product block under By target). Renders after
-    # the sponsor-type aggregate content.
-    if _active == "By sponsor":
-        st.divider()
-        st.subheader("Specific-sponsor portfolio")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>What does any one sponsor's pipeline look like — "
-            "phases, antigens, indications, activity over time?</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Drill into one sponsor's full pipeline: every trial they "
-            "lead, broken down by phase, disease, target, modality, "
-            "geography, and time. Complements the sponsor-type aggregate "
-            "above (Industry / Academic / Government / Other) — pick a "
-            "specific sponsor here to see their individual portfolio."
-        )
-        if df_filt.empty:
-            _empty_state_panel(_sync_opt_map, caller_id="dd_sponsor_one")
-        elif "LeadSponsor" not in df_filt.columns:
-            st.info("Sponsor data not available in the current snapshot.")
-        else:
-            _sp_counts = (
-                df_filt["LeadSponsor"].dropna().value_counts()
-                .rename_axis("Sponsor").reset_index(name="Trials")
-            )
-            _sp_options = ["—"] + [
-                f"{r['Sponsor']}  ({r['Trials']} trials)"
-                for _, r in _sp_counts.iterrows()
-            ]
-            _seed_pick_from_query("dd_sponsor_one_pick", _sp_options[1:])
-            sponsor_pick_label = st.selectbox(
-                "Focus on a specific sponsor",
-                _sp_options,
-                key="dd_sponsor_one_pick",
-                help="Leave at '—' for no specific sponsor. Pick a sponsor to see their full portfolio: phases, diseases, antigens, geography, and activity over time.",
-            )
-            _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
-            sponsor_pick = (
-                sponsor_pick_label.rsplit("  (", 1)[0]
-                if sponsor_pick_label and sponsor_pick_label != "—"
-                else None
-            )
-            if sponsor_pick:
-                spt = df_filt[df_filt["LeadSponsor"] == sponsor_pick].copy()
-                _sm1, _sm2, _sm3, _sm4 = st.columns(4)
-                _sm1.metric("Trials led", f"{len(spt):,}")
-                _sm2.metric(
-                    "Distinct diseases",
-                    f"{spt['DiseaseEntity'].dropna().nunique():,}",
-                )
-                _sm3.metric(
-                    "Distinct targets",
-                    f"{spt.loc[~spt['TargetCategory'].isin(_PLATFORM_LABELS | {'Other_or_unknown'}), 'TargetCategory'].nunique():,}",
-                )
-                _sm4.metric(
-                    "Open / recruiting",
-                    int(spt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
-                )
-
-                # Sponsor type + first/most-recent year
-                _spy = pd.to_numeric(spt["StartYear"], errors="coerce")
-                if _spy.notna().any():
-                    _sm_first = int(_spy.min())
-                    _sm_last = int(_spy.max())
-                    st.caption(
-                        f"**{sponsor_pick}** · "
-                        f"sponsor type: *{spt['SponsorType'].mode().iloc[0] if not spt['SponsorType'].mode().empty else '—'}* · "
-                        f"first trial: **{_sm_first}** · most recent: **{_sm_last}**"
-                    )
-
-                # 4-panel breakdown
-                _spA, _spB = st.columns(2)
-                with _spA:
-                    st.markdown("**Phase distribution**")
-                    _pcts = (
-                        spt.assign(PhaseLabel=spt.get("PhaseLabel", spt["Phase"]))
-                        .groupby("PhaseLabel").size().reset_index(name="Trials")
-                    )
-                    _pcts["PhaseLabel"] = pd.Categorical(
-                        _pcts["PhaseLabel"],
-                        categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_pcts["PhaseLabel"])],
-                        ordered=True,
-                    )
-                    _pcts = _pcts.sort_values("PhaseLabel")
-                    if not _pcts.empty:
-                        _chart(
-                            make_bar(_pcts, "PhaseLabel", "Trials", height=260),
-                            key=f"dd_sponsor_one_phase_{sponsor_pick}",
-                        )
-                    st.markdown("**Antigen targets**")
-                    _stgt = (
-                        spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"}), "TargetCategory"]
-                        .value_counts().head(10)
-                        .rename_axis("Target").reset_index(name="Trials")
-                    )
-                    if not _stgt.empty:
-                        _chart(
-                            make_bar(_stgt, "Target", "Trials", height=260),
-                            key=f"dd_sponsor_one_targets_{sponsor_pick}",
-                        )
-                with _spB:
-                    st.markdown("**Disease coverage**")
-                    _sdis = (
-                        _expand_disease_rows(spt)
-                        .drop_duplicates(subset=["NCTId", "_Disease"])
-                        .groupby("_Disease").size().sort_values(ascending=False)
-                        .head(10).reset_index().rename(columns={"_Disease": "Disease", 0: "Trials"})
-                    )
-                    if "Trials" not in _sdis.columns:
-                        _sdis.columns = ["Disease", "Trials"]
-                    if not _sdis.empty:
-                        _chart(
-                            make_bar(_sdis, "Disease", "Trials", height=260),
-                            key=f"dd_sponsor_one_diseases_{sponsor_pick}",
-                        )
-                    st.markdown("**Annual trial starts**")
-                    _chart(
-                        _deepdive_timeline(
-                            _expand_disease_rows(spt).drop_duplicates(subset=["NCTId", "_Disease"]),
-                            group_col="_Disease", height=260, top_n=5,
-                        ),
-                        key=f"dd_sponsor_one_timeline_{sponsor_pick}",
-                    )
-
-                # Sponsor's full trial list
-                st.markdown(
-                    f"### Trials led by **{sponsor_pick}** "
-                    f"<span style='color:#64748b; font-weight:400;'>"
-                    f"({len(spt)} trials · click any row for full details)</span>",
-                    unsafe_allow_html=True,
-                )
-                _spt_show = spt.copy()
-                if "NCTLink" not in _spt_show.columns:
-                    _spt_show["NCTLink"] = _spt_show["NCTId"].apply(
-                        lambda x: f"https://clinicaltrials.gov/study/{x}" if pd.notna(x) else None
-                    )
-                if "PhaseLabel" in _spt_show.columns:
-                    _spt_show["Phase"] = _spt_show["PhaseLabel"].fillna(_spt_show["Phase"])
-                _spt_show["OverallStatus"] = _spt_show["OverallStatus"].map(
-                    STATUS_DISPLAY).fillna(_spt_show["OverallStatus"])
-                _spt_show = _spt_show.sort_values(
-                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
-                ).reset_index(drop=True)
-                _spt_cols = [c for c in (
-                    "NCTId", "NCTLink", "BriefTitle",
-                    "DiseaseEntity", "TrialDesign",
-                    "TargetCategory", "ProductType", "Phase",
-                    "OverallStatus", "StartYear", "Countries",
-                ) if c in _spt_show.columns]
-                _spt_show, _spt_cols = _attach_flag_column(_spt_show, _spt_cols)
-                _spt_event = st.dataframe(
-                    _spt_show[_spt_cols],
-                    width='stretch', height=380, hide_index=True,
-                    on_select="rerun", selection_mode="single-row",
-                    key=f"deep_sponsor_one_table_{sponsor_pick}",
-                    column_config=_trial_detail_cols(),
-                )
-                _spt_rows = (
-                    _spt_event.selection.rows
-                    if _spt_event and hasattr(_spt_event, "selection") else []
-                )
-                if _spt_rows:
-                    _render_trial_drilldown(
-                        _spt_show.iloc[_spt_rows[0]],
-                        key_suffix=f"deep_sponsor_one_{sponsor_pick}",
-                    )
+    # The separate "Specific-sponsor portfolio" block that previously
+    # lived here was consolidated into the main `if _active == "By
+    # sponsor":` block above (2026-05-15 restructure per user feedback:
+    # "I don't like that one needs to scroll all the way down to select
+    # the individual sponsor type"). The specific-sponsor picker now
+    # sits beside the sponsor-type picker at the top of the tab, and
+    # selecting a specific sponsor takes priority over the type pick.
 
     # ===== Compare (side-by-side disease/target — own sub-tab) =====
     if _active == "Compare":
