@@ -3924,9 +3924,38 @@ total_trials = len(df_filt)
 recruiting_trials = int(df_filt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())
 _tc_for_top = df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"].dropna()
 top_target = _tc_for_top.value_counts().idxmax() if not _tc_for_top.empty else "—"
-_enroll_known = pd.to_numeric(df_filt["EnrollmentCount"], errors="coerce").dropna()
+_enroll_count = pd.to_numeric(df_filt["EnrollmentCount"], errors="coerce")
+_enroll_known = _enroll_count.dropna()
 total_enrolled = int(_enroll_known.sum()) if not _enroll_known.empty else 0
 median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
+
+# Split planned (ESTIMATED / ANTICIPATED) vs actual (ACTUAL) enrollment.
+# The CT.gov EnrollmentCount field is a single integer with a separate
+# "type" flag — without surfacing the type, summing the column conflates
+# "295 patients have been enrolled" with "we plan to enrol 295 patients".
+# For the rheum CAR-T population the field is mostly planned (recruiting /
+# not-yet-recruiting trials), with a small ACTUAL tail from completed
+# early-Chinese cohorts.
+if "EnrollmentType" in df_filt.columns:
+    _et = df_filt["EnrollmentType"].astype(str).str.upper()
+    _actual_mask = _et.eq("ACTUAL") & _enroll_count.notna()
+    _planned_mask = _et.isin(["ESTIMATED", "ANTICIPATED"]) & _enroll_count.notna()
+    _n_actual_pts = int(_enroll_count[_actual_mask].sum()) if _actual_mask.any() else 0
+    _n_actual_trials = int(_actual_mask.sum())
+    _n_planned_pts = int(_enroll_count[_planned_mask].sum()) if _planned_mask.any() else 0
+    _n_planned_trials = int(_planned_mask.sum())
+    if _n_actual_pts and _n_planned_pts:
+        _enroll_footer = (
+            f"{_n_planned_pts:,} planned ({_n_planned_trials} trials) "
+            f"+ {_n_actual_pts:,} actual ({_n_actual_trials} completed)"
+        )
+    elif _n_actual_pts:
+        _enroll_footer = f"{_n_actual_pts:,} actual across {_n_actual_trials} completed trials"
+    else:
+        _enroll_footer = f"Planned across {len(_enroll_known)} trials (no completed trials yet)"
+else:
+    # Older snapshot without EnrollmentType — fall back to neutral language.
+    _enroll_footer = f"Target enrollment across {len(_enroll_known)} trials with reported value"
 
 m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
@@ -3934,9 +3963,9 @@ with m1:
 with m2:
     metric_card("Open / recruiting", recruiting_trials, "Recruiting or not yet recruiting")
 with m3:
-    metric_card("Total enrolled", f"{total_enrolled:,}", f"Across {len(_enroll_known)} trials with reported enrollment")
+    metric_card("Total target enrollment", f"{total_enrolled:,}", _enroll_footer)
 with m4:
-    metric_card("Median enrollment", median_enrolled, "Patients per trial (reported trials only)")
+    metric_card("Median target enrollment", median_enrolled, "Patients per trial (reported trials only)")
 with m5:
     metric_card("Top target", top_target, "Most common target category")
 
@@ -4233,7 +4262,8 @@ with tab_overview:
         _k1, _k2, _k3, _k4, _k5 = st.columns(5)
         _k1.metric("Trials", f"{_kpi_n:,}")
         _k2.metric("Open / recruiting", f"{_kpi_open:,}")
-        _k3.metric("Total enrolled (planned)", f"{_kpi_enr:,}")
+        _k3.metric("Total target enrollment", f"{_kpi_enr:,}",
+                   help="Sum of CT.gov EnrollmentCount. Mostly planned for ongoing trials; actual for completed.")
         _k4.metric("Top antigen", _kpi_top_target)
         _k5.metric("Distinct lead sponsors", f"{_kpi_sponsors:,}")
 
@@ -5482,8 +5512,9 @@ with tab_deepdive:
                         int(sub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
                     )
                     _enr = pd.to_numeric(sub["EnrollmentCount"], errors="coerce")
-                    c3.metric("Total enrolled", f"{int(_enr.fillna(0).sum()):,}")
-                    c4.metric("Median enrollment", int(_enr.median()) if _enr.notna().any() else 0)
+                    c3.metric("Total target enrollment", f"{int(_enr.fillna(0).sum()):,}",
+                              help="Sum of CT.gov EnrollmentCount values for this disease — planned for ongoing trials, actual for completed.")
+                    c4.metric("Median target enrollment", int(_enr.median()) if _enr.notna().any() else 0)
 
                     _tgt = (
                         sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
@@ -7383,10 +7414,11 @@ with tab_pub:
     # Fig 4 — Trial enrollment
     # ------------------------------------------------------------------
     _pub_header("4", "Trial enrollment landscape",
-                "Planned-enrollment distribution (4a) and per-phase "
-                "median + IQR (4b). Trials with >1,000 planned patients "
-                "are excluded from 4a only (they compress the typical "
-                "early-phase distribution); included elsewhere.")
+                "Target-enrollment distribution (4a) and per-phase "
+                "median + IQR (4b). Most values are planned (ongoing "
+                "trials, CT.gov EnrollmentType=ESTIMATED/ANTICIPATED); "
+                "completed trials contribute actual counts. Trials with "
+                ">1,000 target enrollment are excluded from 4a only.")
 
     df_enroll = df_filt.copy()
     df_enroll["EnrollmentCount"] = pd.to_numeric(df_enroll["EnrollmentCount"], errors="coerce")
@@ -7400,9 +7432,10 @@ with tab_pub:
         p25 = int(df_enroll_known["EnrollmentCount"].quantile(0.25))
         p75 = int(df_enroll_known["EnrollmentCount"].quantile(0.75))
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Trials with reported enrollment", f"{len(df_enroll_known)} ({pct_known:.0f}%)")
-        c2.metric("Total enrolled patients", f"{total_pts:,}")
-        c3.metric("Median enrollment", med_pts)
+        c1.metric("Trials with reported value", f"{len(df_enroll_known)} ({pct_known:.0f}%)")
+        c2.metric("Total target enrollment", f"{total_pts:,}",
+                  help="Sum of CT.gov EnrollmentCount across reporting trials — mostly planned (ongoing) with actual values from completed trials.")
+        c3.metric("Median target enrollment", med_pts)
         c4.metric("IQR", f"{p25}–{p75}")
 
         # 4a — Enrollment distribution histogram
@@ -8798,9 +8831,14 @@ distinct modality categories based on target category and product type:
 
 Enrollment Analysis
 -------------------
-Planned enrollment counts were extracted from the EnrollmentCount field (type=
-"Anticipated" or "Actual") and coerced to numeric; non-numeric or missing values
-were excluded from enrollment analyses (Figure 4). Geographic classification:
+Target enrollment counts were extracted from the CT.gov EnrollmentCount field;
+each value carries a separate EnrollmentType qualifier ("ACTUAL" for completed
+trials reporting final enrollment, "ESTIMATED" or "ANTICIPATED" for planned
+counts in ongoing / not-yet-recruiting trials). The dashboard labels these
+values uniformly as "target enrollment"; the planned-vs-actual split is
+surfaced inline on the Overview KPI tile when both classes are present.
+Non-numeric or missing values were excluded from enrollment analyses (Figure 4).
+Geographic classification:
 trials recruiting exclusively in China were labelled "China"; all others
 "Non-China" (based on the Countries field). Sponsor classification used a
 two-stage rule: (i) the primary signal was the ClinicalTrials.gov

@@ -1381,6 +1381,17 @@ def _flatten_study(study: dict) -> dict:
         "StartDate": (status.get("startDateStruct") or {}).get("date"),
         "LastUpdatePostDate": (status.get("lastUpdatePostDateStruct") or {}).get("date"),
         "EnrollmentCount": (design.get("enrollmentInfo") or {}).get("count"),
+        # CT.gov returns `type` alongside `count` in enrollmentInfo:
+        #   "ACTUAL"     — completed trial reporting final enrollment
+        #   "ESTIMATED"  — pre-FPI plan (most common for not-yet-recruiting)
+        #   "ANTICIPATED"— recruiting trial's working target
+        # For autoimmune-CAR-T (overwhelmingly early-phase / recruiting)
+        # this is ~95% ESTIMATED/ANTICIPATED ("planned") with a small tail
+        # of ACTUAL from completed early Chinese trials. Storing it lets
+        # the UI label values accurately as "target enrollment" + split
+        # planned-vs-actual where useful, rather than the previous
+        # ambiguous "Total enrolled" which implied actual.
+        "EnrollmentType": (design.get("enrollmentInfo") or {}).get("type"),
         "Countries": "|".join(countries) or None,
         "BriefSummary": desc.get("briefSummary"),
         "LeadSponsor": (sponsor_mod.get("leadSponsor") or {}).get("name"),
