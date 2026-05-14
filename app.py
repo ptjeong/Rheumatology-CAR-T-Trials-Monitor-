@@ -5176,6 +5176,39 @@ with tab_data:
             st.rerun()
     _zoom_active = _zoom_country != _ALL_COUNTRIES_LABEL
 
+    # ── Row 2: classification-confidence filter + fullscreen toggle ──
+    # Per user feedback ("add a filtering option for the data trial
+    # table for the classifications? and the option for a full-screen
+    # view?"). Confidence pills sit inline with the search row so the
+    # most-common "show me only high-confidence classifications" query
+    # is one click away. The fullscreen toggle bumps the table height
+    # from 460 → 900 px so the reader can scan more rows without
+    # losing the rest of the page chrome (the dataframe also has its
+    # own native fullscreen icon on hover for true edge-to-edge view).
+    _c_conf, _c_full, _spacer_r2 = st.columns([0.55, 0.30, 0.15])
+    with _c_conf:
+        if "ClassificationConfidence" in df_filt.columns:
+            _conf_present = sorted({
+                str(v) for v in df_filt["ClassificationConfidence"].dropna()
+            })
+            _data_conf_pick = st.pills(
+                "Classification confidence",
+                options=_conf_present,
+                selection_mode="multi",
+                default=_conf_present,
+                key="data_conf_filter",
+                label_visibility="collapsed",
+            ) or _conf_present
+        else:
+            _data_conf_pick = None
+    with _c_full:
+        st.markdown('<div style="height: 32px"></div>', unsafe_allow_html=True)
+        _data_fullscreen = st.toggle(
+            "Full-screen table",
+            key="data_fullscreen",
+            help="Bumps the table to ~900 px height (vs the default 460) so more rows are visible at once. Use the dataframe's native fullscreen icon (top-right on hover) for true edge-to-edge view.",
+        )
+
     show_cols = [
         "NCTId",
         "NCTLink",
@@ -5229,6 +5262,19 @@ with tab_data:
         table_df = table_df[mask]
         st.caption(f"Search '{search_q}' · {len(table_df)} of {len(df_filt)} filtered trials match")
 
+    # Apply the inline confidence filter (Row 2 pills above).
+    if _data_conf_pick is not None and "ClassificationConfidence" in table_df.columns:
+        # When the user has narrowed below the full set of present
+        # confidences (e.g., picked only "high"), restrict.
+        if set(_data_conf_pick) != set(_conf_present):
+            table_df = table_df[
+                table_df["ClassificationConfidence"].astype(str).isin(_data_conf_pick)
+            ]
+            st.caption(
+                f"Confidence filter: {', '.join(_data_conf_pick)} · "
+                f"{len(table_df)} matching trials."
+            )
+
     # Inline 🚩 prefix on flagged trials' BriefTitle (idempotent; no-op when
     # _load_active_flags() returns {}, e.g. offline / rate-limited / no flags).
     table_df, show_cols = _attach_flag_column(table_df, show_cols)
@@ -5237,7 +5283,7 @@ with tab_data:
     _table_event = st.dataframe(
         table_df[show_cols],
         width='stretch',
-        height=460,
+        height=900 if _data_fullscreen else 460,
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
@@ -6155,14 +6201,21 @@ with tab_deepdive:
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                     bargap=0.25,
                 )
-                # Style subplot titles so they read as h5-equivalents
-                # (smaller + left-aligned, matching st.markdown bold
-                # section labels used elsewhere).
-                for _ann in _aln_fig.layout.annotations:
+                # Style subplot titles to read as h5-equivalents and
+                # ALIGN EACH title to its OWN column's left edge. The
+                # previous code forced both to `x=0, xanchor="left"`
+                # which put both titles at the page's left edge,
+                # making them overlap on top of each other (visible
+                # bug reported by user 2026-05-15). Each column's
+                # left edge in paper coordinates: col 1 starts at 0;
+                # col 2 starts at column_widths[0] + horizontal_spacing.
+                _col_lefts = [0.0, 0.38 + 0.02]
+                for _i, _ann in enumerate(_aln_fig.layout.annotations):
                     _ann.update(
                         font=dict(family=FONT_FAMILY, size=13,
                                   color=THEME["text"]),
-                        x=0, xanchor="left",
+                        x=_col_lefts[_i] if _i < len(_col_lefts) else _ann.x,
+                        xanchor="left",
                     )
                 _chart(_aln_fig, key="dd_target_emerge_phase_aligned")
         else:
@@ -6620,11 +6673,15 @@ with tab_deepdive:
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                     bargap=0.28,
                 )
-                for _ann in _prod_aln_fig.layout.annotations:
+                # Same per-column left-alignment fix as the antigen panel.
+                # Product panel column_widths=[0.55, 0.45], spacing=0.02.
+                _prod_col_lefts = [0.0, 0.55 + 0.02]
+                for _i, _ann in enumerate(_prod_aln_fig.layout.annotations):
                     _ann.update(
                         font=dict(family=FONT_FAMILY, size=13,
                                   color=THEME["text"]),
-                        x=0, xanchor="left",
+                        x=_prod_col_lefts[_i] if _i < len(_prod_col_lefts) else _ann.x,
+                        xanchor="left",
                     )
                 _chart(_prod_aln_fig, key="dd_product_phase_enroll_aligned")
             st.markdown("**Annual trial starts by product (top 6)**")
@@ -7358,17 +7415,19 @@ with tab_deepdive:
         else:
             _cmp_axis = st.radio(
                 "Comparison axis",
-                options=["Disease entity", "Antigen target"],
+                options=["Disease entity", "Antigen target", "Modality"],
                 horizontal=True, key="dd_compare_axis",
             )
-            _axis_col_cmp = (
-                "DiseaseEntity" if _cmp_axis == "Disease entity"
-                else "TargetCategory"
-            )
+            _axis_col_cmp = {
+                "Disease entity": "DiseaseEntity",
+                "Antigen target": "TargetCategory",
+                "Modality":       "Modality",
+            }[_cmp_axis]
             _hidden_cmp = (
                 {"Other_or_unknown", "CAR-T_unspecified"}
                 if _axis_col_cmp == "TargetCategory"
-                else {"Unclassified"}
+                else {"Unclassified"} if _axis_col_cmp == "DiseaseEntity"
+                else set()  # Modality has no catch-all to hide
             )
             _opts = sorted(
                 v for v in df_filt[_axis_col_cmp].dropna().unique()
