@@ -2469,6 +2469,82 @@ def _clip_future_starts(df: pd.DataFrame, year_col: str = "StartYear") -> pd.Dat
     return out[_y.isna() | (_y <= _today_year())]
 
 
+def _project_current_year_starts(
+    start_dates: pd.Series,
+    *,
+    today: pd.Timestamp | None = None,
+    min_reference_years: int = 2,
+) -> dict | None:
+    """Conservatively project end-of-year trial-start count from YTD.
+
+    Method — "same-months share" (robust to seasonality):
+      1. Determine today's calendar year and month.
+      2. YTD = trials whose StartDate falls in this year, on or before
+         today.
+      3. For each of the last N COMPLETE past years (where N =
+         min_reference_years), compute that year's "share through
+         month M" = (trials in months 1..M of year) / (trials in entire
+         year). M is the current month.
+      4. Take median(shares) as the conservative central estimate of
+         what fraction of the year is typically done by month M.
+      5. Project: total = YTD / median_share. Range: low = YTD /
+         max(shares); high = YTD / min(shares). Lower share → higher
+         implied total (less of the year is "done" by now).
+
+    Returns dict with keys: ytd, projected_low, projected_mid,
+    projected_high, n_reference_years, current_month, current_year.
+    Returns None if the projection isn't trustworthy:
+      - <min_reference_years complete past years available
+      - Today is January (too little data — projection wildly unstable)
+      - YTD count is 0
+      - Any reference year has zero trials (would divide by zero)
+
+    Pure function — no Streamlit calls. Callers handle UI / opt-in.
+    """
+    if today is None:
+        today = pd.Timestamp.now()
+    _y = today.year
+    _m = today.month
+    if _m < 2:
+        return None  # too early — projection unstable
+    _dates = pd.to_datetime(start_dates, errors="coerce").dropna()
+    if _dates.empty:
+        return None
+    # YTD: trials this year, on or before today
+    _ytd_mask = (_dates.dt.year == _y) & (_dates <= today)
+    _ytd = int(_ytd_mask.sum())
+    if _ytd == 0:
+        return None
+    # Compute per-reference-year shares
+    _shares: list[float] = []
+    for _ref in range(_y - 1, _y - 1 - min_reference_years, -1):
+        _ref_dates = _dates[_dates.dt.year == _ref]
+        _ref_total = len(_ref_dates)
+        if _ref_total == 0:
+            return None  # gap year — can't trust the pattern
+        _ref_through_m = int((_ref_dates.dt.month <= _m).sum())
+        _shares.append(_ref_through_m / _ref_total)
+    if not _shares or min(_shares) <= 0:
+        return None
+    # Proper median (average of middle two for even count, middle for odd) —
+    # pandas Series.median() handles both. The naive `sorted(_shares)[len//2]`
+    # returned the max when len=2, which collapsed the central estimate
+    # onto the upper bound of the range.
+    _median_share = float(pd.Series(_shares).median())
+    _proj_mid = int(round(_ytd / _median_share))
+    _proj_high = int(round(_ytd / min(_shares)))  # smallest historical share = highest implied total
+    _proj_low = int(round(_ytd / max(_shares)))   # largest historical share = lowest implied total
+    return {
+        "ytd": _ytd,
+        "projected_low": max(_proj_low, _ytd),  # can't be less than what we've seen
+        "projected_mid": max(_proj_mid, _ytd),
+        "projected_high": max(_proj_high, _ytd),
+        "n_reference_years": min_reference_years,
+        "current_month": _m,
+        "current_year": _y,
+    }
+
+
 def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     fig = px.bar(
         df_plot, x=x, y=y, height=height,
@@ -7073,6 +7149,69 @@ with tab_deepdive:
                 "Sponsor type":    "SponsorType",
             }
             _axis_col = _axis_map[_color_axis_choice]
+
+            # ── Year-end projection toggle (inline, on-page) ──
+            # Per user feedback ("think about how and where add a
+            # projected trial numbers for the current (incomplete) year?
+            # extrapolating conservatively from the past couple years?
+            # should be toggleable and systematic, and be robustly
+            # designed and understandable", and later: "a toggle in the
+            # main site rather than sidebar would be better"). Sits
+            # inline above the annual chart — the only chart where the
+            # projection adds value (cumulative is already monotonic;
+            # heatmaps are cell-level). Off by default so default page
+            # load shows raw data.
+            _show_projection = st.toggle(
+                "Show year-end projection for the current (incomplete) year",
+                key="dd_time_show_projection",
+                help=(
+                    "Extrapolates the current year's trial-start count to "
+                    "end-of-year, using the past two complete years' "
+                    "month-by-month pattern. Conservative: shows a low / "
+                    "mid / high range based on each reference year's "
+                    "share-through-current-month, not a single number. "
+                    "Hidden when the current month is January (too "
+                    "little data) or the reference years are unavailable."
+                ),
+            )
+            if _show_projection and "StartDate" in df_filt.columns:
+                _proj = _project_current_year_starts(df_filt["StartDate"])
+                if _proj is not None:
+                    _pc1, _pc2, _pc3 = st.columns(3)
+                    _pc1.metric(
+                        f"{_proj['current_year']} YTD",
+                        f"{_proj['ytd']:,}",
+                        help=f"Trials with StartDate in months 1–{_proj['current_month']} of {_proj['current_year']}.",
+                    )
+                    _pc2.metric(
+                        f"{_proj['current_year']} projected (mid)",
+                        f"{_proj['projected_mid']:,}",
+                        help=f"YTD / median(past-{_proj['n_reference_years']}-years' share through month {_proj['current_month']}).",
+                    )
+                    _pc3.metric(
+                        f"{_proj['current_year']} projected range",
+                        f"{_proj['projected_low']:,} – {_proj['projected_high']:,}",
+                        help="Low: assumes the year is fastest-front-loaded among reference years. High: assumes most-back-loaded.",
+                    )
+                    st.caption(
+                        f"Projection method: for each of the last "
+                        f"{_proj['n_reference_years']} complete years, "
+                        f"compute the fraction of trials that started by "
+                        f"month {_proj['current_month']}. Conservative "
+                        f"central estimate = YTD divided by the median "
+                        f"of those fractions. Range is YTD divided by "
+                        f"the min and max fractions. Assumes the field's "
+                        f"month-share pattern is stable year-on-year — "
+                        f"break this assumption (e.g., a regulatory "
+                        f"event mid-year) and the projection becomes "
+                        f"unreliable."
+                    )
+                else:
+                    st.caption(
+                        "Projection unavailable: too early in the year, "
+                        "or insufficient reference-year data. Re-check "
+                        "in a month or two."
+                    )
 
             # ── Annual trial starts (selectable axis) ──
             _ts_a, _ts_b = st.columns(2)
