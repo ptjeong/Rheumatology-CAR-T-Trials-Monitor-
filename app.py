@@ -5466,27 +5466,41 @@ with tab_deepdive:
         # amber when focus is active (Deep Dive drilldown), sky-blue
         # otherwise (sidebar filters only).
         _accent_color = "#f59e0b" if _focus_chips else "#0284c7"
+        # Chip styling — no emoji (NEJM-style discipline). Category is
+        # signaled by a tiny uppercase prefix ("FILTER" / "FOCUS") plus
+        # a category-coloured dot on the left of each chip; the chip
+        # background uses a very subtle tint of the same colour rather
+        # than the loud amber/sky from the prior emoji-based design.
         _strip_col_chips, _strip_col_btn = st.columns([0.85, 0.15])
         with _strip_col_chips:
             _chip_html_parts = [
                 f'<div style="background: #f8fafc; border-left: 3px solid {_accent_color}; '
                 f'padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;">'
             ]
+            _PREFIX_STYLE = (
+                'display: inline-block; font-size: 9px; '
+                'font-weight: 600; letter-spacing: 0.08em; '
+                'text-transform: uppercase; '
+                'padding: 2px 6px; margin-right: 6px; border-radius: 3px; '
+                'vertical-align: middle;'
+            )
             for _c in _sidebar_chips:
                 _chip_html_parts.append(
-                    f'<span style="display: inline-block; padding: 2px 10px; '
-                    f'margin: 0 6px 4px 0; background: #e0f2fe; '
-                    f'color: #0c4a6e; border-radius: 12px; font-size: 12px; '
-                    f'border: 1px solid #bae6fd;">'
-                    f'🔎 {_c}</span>'
+                    f'<span style="display: inline-block; padding: 2px 10px 2px 4px; '
+                    f'margin: 0 6px 4px 0; background: #f0f9ff; '
+                    f'color: #0c4a6e; border-radius: 3px; font-size: 12px; '
+                    f'border: 1px solid #bae6fd; vertical-align: middle;">'
+                    f'<span style="{_PREFIX_STYLE} background: #0284c7; color: white;">Filter</span>'
+                    f'{_c}</span>'
                 )
             for _c in _focus_chips:
                 _chip_html_parts.append(
-                    f'<span style="display: inline-block; padding: 2px 10px; '
-                    f'margin: 0 6px 4px 0; background: #fef3c7; '
-                    f'color: #78350f; border-radius: 12px; font-size: 12px; '
-                    f'border: 1px solid #fde68a;">'
-                    f'🎯 {_c}</span>'
+                    f'<span style="display: inline-block; padding: 2px 10px 2px 4px; '
+                    f'margin: 0 6px 4px 0; background: #fffbeb; '
+                    f'color: #78350f; border-radius: 3px; font-size: 12px; '
+                    f'border: 1px solid #fde68a; vertical-align: middle;">'
+                    f'<span style="{_PREFIX_STYLE} background: #b45309; color: white;">Focus</span>'
+                    f'{_c}</span>'
                 )
             _chip_html_parts.append('</div>')
             st.markdown(
