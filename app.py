@@ -6374,48 +6374,60 @@ with tab_deepdive:
                 .sort_values("Trials", ascending=False)
             )
             agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
-            st.caption(f"{len(agg)} sponsor categories · sorted by trial count")
-            st.dataframe(
-                agg, width='stretch', hide_index=True,
-                column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
-            )
 
-            # ── Phase 1 additions: sponsor-type landscape figures ──
-            st.markdown("##### Sponsor-type landscape — patterns at a glance")
-            _spl_a, _spl_b = st.columns(2)
-            with _spl_a:
-                st.markdown("**Sponsor type × Disease heat-map**")
-                _hm_in = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"])
-                _chart(
-                    _deepdive_heatmap(
-                        _hm_in, x_col="SponsorType", y_col="_Disease",
-                        x_label="Sponsor type", y_label="Disease entity",
-                        max_x=6, max_y=15, height=440,
-                        colorscale="Greens",
-                    ),
-                    key="dd_sponsor_x_disease_heatmap",
-                )
-            with _spl_b:
-                st.markdown("**Phase composition by sponsor type (% of total)**")
-                _chart(
-                    _deepdive_phase_stack(
-                        df_filt, group_col="SponsorType",
-                        height=300, normalize=True,
-                    ),
-                    key="dd_sponsor_phase_stack",
-                )
-                # "Annual trial starts by sponsor type" removed — the
-                # By time tab's selectable-axis timeline (set axis to
-                # "Sponsor type") is the canonical home for this view.
-                # Removing the duplicate keeps each tab focused.
-
+            # ── Focus picker at top of tab body (Phase B layout) ──
+            # Default ("—") → landscape (cross-type aggregate table +
+            # type × disease heatmap + phase composition). Pick a type
+            # to REPLACE the landscape with the focused drilldown
+            # (top sponsors in that bucket + their antigens / products /
+            # trial table). The specific-sponsor portfolio is its own
+            # subsection further below — picker moves are
+            # complementary, not exclusive.
             sp_choices = agg["SponsorType"].tolist()
             _seed_pick_from_query("dd_sponsor_pick", sp_choices)
             pick = st.selectbox(
-                "Drill into sponsor type", options=["—"] + sp_choices, key="dd_sponsor_pick",
+                "Focus on a sponsor type (leave at '—' to see the landscape)",
+                options=["—"] + sp_choices, key="dd_sponsor_pick",
             )
             _sync_pick_to_query("dd_sponsor_pick", ("—",))
-            if pick and pick != "—":
+
+            if pick == "—":
+                # ── Landscape view (default) ──
+                st.caption(f"{len(agg)} sponsor categories · sorted by trial count")
+                st.dataframe(
+                    agg, width='stretch', hide_index=True,
+                    column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
+                )
+
+                # ── Phase 1 additions: sponsor-type landscape figures ──
+                st.markdown("##### Sponsor-type landscape — patterns at a glance")
+                _spl_a, _spl_b = st.columns(2)
+                with _spl_a:
+                    st.markdown("**Sponsor type × Disease heat-map**")
+                    _hm_in = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"])
+                    _chart(
+                        _deepdive_heatmap(
+                            _hm_in, x_col="SponsorType", y_col="_Disease",
+                            x_label="Sponsor type", y_label="Disease entity",
+                            max_x=6, max_y=15, height=440,
+                            colorscale="Greens",
+                        ),
+                        key="dd_sponsor_x_disease_heatmap",
+                    )
+                with _spl_b:
+                    st.markdown("**Phase composition by sponsor type (% of total)**")
+                    _chart(
+                        _deepdive_phase_stack(
+                            df_filt, group_col="SponsorType",
+                            height=300, normalize=True,
+                        ),
+                        key="dd_sponsor_phase_stack",
+                    )
+                    # "Annual trial starts by sponsor type" removed — the
+                    # By time tab's selectable-axis timeline (set axis to
+                    # "Sponsor type") is the canonical home for this view.
+                    # Removing the duplicate keeps each tab focused.
+            else:
                 sub = df_filt[df_filt["SponsorType"] == pick].copy()
 
                 st.markdown(
@@ -6554,8 +6566,8 @@ with tab_deepdive:
                     f"{int((~_multi).sum()):,}",
                 )
 
-            # Country leaderboard
-            st.markdown("**Country leaderboard (trials by country)**")
+            # Country aggregate — computed once, used by both landscape
+            # leaderboard and (when focused) the drilldown.
             _country_agg = (
                 _geo_df.loc[_geo_df["_Country"] != "Unknown"]
                 .groupby("_Country")
@@ -6570,53 +6582,63 @@ with tab_deepdive:
                 .reset_index().rename(columns={"_Country": "Country"})
                 .sort_values("Trials", ascending=False)
             )
-            st.dataframe(
-                _country_agg.head(20), width="stretch", hide_index=True,
-                column_config={
-                    "Country":     st.column_config.TextColumn("Country", width="medium"),
-                    "Trials":      st.column_config.NumberColumn("Trials", format="%d", width="small"),
-                    "Sponsors":    st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
-                    "TopDisease":  st.column_config.TextColumn("Top disease", width="small"),
-                },
-            )
 
-            # Geo landscape: country × disease heat-map + country × phase phase-mix
-            _geo_a, _geo_b = st.columns(2)
-            with _geo_a:
-                st.markdown("**Country × Disease heat-map (top 15)**")
-                _geo_with_disease = _expand_disease_rows(_geo_df.drop_duplicates(subset=["NCTId", "_Country"]))
-                _hm_in = _geo_with_disease.loc[_geo_with_disease["_Country"] != "Unknown"]
-                _chart(
-                    _deepdive_heatmap(
-                        _hm_in.drop_duplicates(subset=["NCTId", "_Country", "_Disease"]),
-                        x_col="_Country", y_col="_Disease",
-                        x_label="Country", y_label="Disease entity",
-                        max_x=10, max_y=12, height=420,
-                        colorscale="Blues",
-                    ),
-                    key="dd_geo_country_x_disease",
-                )
-            with _geo_b:
-                st.markdown("**Phase composition by country (top 10)**")
-                _phase_in = _geo_df.loc[_geo_df["_Country"] != "Unknown"].drop_duplicates(subset=["NCTId", "_Country"])
-                _chart(
-                    _deepdive_phase_stack(
-                        _phase_in.rename(columns={"_Country": "Country"}),
-                        group_col="Country", height=420, normalize=True,
-                    ),
-                    key="dd_geo_phase_stack",
-                )
-
-            # Drill into a country
+            # ── Focus picker at top (Phase B layout) ──
+            # Default ("—") → landscape (leaderboard + country × disease
+            # heatmap + phase composition by country). Pick a country →
+            # focused drilldown REPLACES the landscape with that
+            # country's metrics + top diseases + top antigens.
             country_choices = _country_agg["Country"].tolist()
             _seed_pick_from_query("dd_geo_country_pick", country_choices)
             country_pick = st.selectbox(
-                "Drill into country",
+                "Focus on a country (leave at '—' to see the landscape)",
                 options=["—"] + country_choices,
                 key="dd_geo_country_pick",
             )
             _sync_pick_to_query("dd_geo_country_pick", ("—",))
-            if country_pick and country_pick != "—":
+
+            if country_pick == "—":
+                # ── Landscape view (default) ──
+                st.markdown("**Country leaderboard (trials by country)**")
+                st.dataframe(
+                    _country_agg.head(20), width="stretch", hide_index=True,
+                    column_config={
+                        "Country":     st.column_config.TextColumn("Country", width="medium"),
+                        "Trials":      st.column_config.NumberColumn("Trials", format="%d", width="small"),
+                        "Sponsors":    st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
+                        "TopDisease":  st.column_config.TextColumn("Top disease", width="small"),
+                },
+            )
+
+                # Geo landscape: country × disease heat-map + country × phase phase-mix
+                _geo_a, _geo_b = st.columns(2)
+                with _geo_a:
+                    st.markdown("**Country × Disease heat-map (top 15)**")
+                    _geo_with_disease = _expand_disease_rows(_geo_df.drop_duplicates(subset=["NCTId", "_Country"]))
+                    _hm_in = _geo_with_disease.loc[_geo_with_disease["_Country"] != "Unknown"]
+                    _chart(
+                        _deepdive_heatmap(
+                            _hm_in.drop_duplicates(subset=["NCTId", "_Country", "_Disease"]),
+                            x_col="_Country", y_col="_Disease",
+                            x_label="Country", y_label="Disease entity",
+                            max_x=10, max_y=12, height=420,
+                            colorscale="Blues",
+                        ),
+                        key="dd_geo_country_x_disease",
+                    )
+                with _geo_b:
+                    st.markdown("**Phase composition by country (top 10)**")
+                    _phase_in = _geo_df.loc[_geo_df["_Country"] != "Unknown"].drop_duplicates(subset=["NCTId", "_Country"])
+                    _chart(
+                        _deepdive_phase_stack(
+                            _phase_in.rename(columns={"_Country": "Country"}),
+                            group_col="Country", height=420, normalize=True,
+                        ),
+                        key="dd_geo_phase_stack",
+                    )
+
+            else:
+                # ── Focused view: drilldown for the picked country ──
                 _csub = _geo_df[_geo_df["_Country"] == country_pick].drop_duplicates(subset=["NCTId"])
                 cm1, cm2, cm3, cm4 = st.columns(4)
                 cm1.metric("Trials", len(_csub))
