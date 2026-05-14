@@ -3982,31 +3982,39 @@ median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
 # For the rheum CAR-T population the field is mostly planned (recruiting /
 # not-yet-recruiting trials), with a small ACTUAL tail from completed
 # early-Chinese cohorts.
-if "EnrollmentType" in df_filt.columns:
-    _et = df_filt["EnrollmentType"].astype(str).str.upper()
-    _actual_mask = _et.eq("ACTUAL") & _enroll_count.notna()
-    _planned_mask = _et.isin(["ESTIMATED", "ANTICIPATED"]) & _enroll_count.notna()
-    _n_actual_pts = int(_enroll_count[_actual_mask].sum()) if _actual_mask.any() else 0
-    _n_actual_trials = int(_actual_mask.sum())
-    _n_planned_pts = int(_enroll_count[_planned_mask].sum()) if _planned_mask.any() else 0
-    _n_planned_trials = int(_planned_mask.sum())
-else:
-    # Older snapshot without EnrollmentType — collapse all reported
-    # values into the "planned" bucket since most snapshot trials are
-    # ongoing.
-    _n_actual_pts = 0
-    _n_actual_trials = 0
-    _n_planned_pts = total_enrolled
-    _n_planned_trials = len(_enroll_known)
+# Split into "actual" vs "planned" enrollment via OverallStatus, not
+# the CT.gov EnrollmentType flag. Background: CT.gov's EnrollmentType
+# is set by the trial registrant and OFTEN STALE — a completed trial
+# whose maintainer forgot to flip the flag from "ANTICIPATED" →
+# "ACTUAL" still shows up as planned even though the number is the
+# real final accrual. Earlier versions of this tile used EnrollmentType
+# and showed "0 actual" even when 23 trials had clearly finished
+# enrolling. Switching to status-based classification is more honest:
+#
+#   ACTUAL   = enrollment is closed → use EnrollmentCount as the real
+#              number enrolled (COMPLETED / ACTIVE_NOT_RECRUITING /
+#              TERMINATED — these trials are NOT recruiting any new
+#              patients regardless of what the type flag says).
+#   PLANNED  = enrollment is still open → use EnrollmentCount as the
+#              target (RECRUITING / NOT_YET_RECRUITING /
+#              ENROLLING_BY_INVITATION / SUSPENDED).
+#   Other statuses (WITHDRAWN / UNKNOWN) don't count toward either —
+#   no reliable signal.
+_actual_status = {"COMPLETED", "ACTIVE_NOT_RECRUITING", "TERMINATED"}
+_planned_status = {"RECRUITING", "NOT_YET_RECRUITING",
+                   "ENROLLING_BY_INVITATION", "SUSPENDED"}
+_status_series = df_filt["OverallStatus"].astype(str).str.upper()
+_actual_mask = _status_series.isin(_actual_status) & _enroll_count.notna()
+_planned_mask = _status_series.isin(_planned_status) & _enroll_count.notna()
+_n_actual_pts = int(_enroll_count[_actual_mask].sum()) if _actual_mask.any() else 0
+_n_actual_trials = int(_actual_mask.sum())
+_n_planned_pts = int(_enroll_count[_planned_mask].sum()) if _planned_mask.any() else 0
+_n_planned_trials = int(_planned_mask.sum())
 
 # Two-tile presentation of the enrollment split (planned vs actual).
-# Previously a single "Total target enrollment" tile with the breakdown
-# crammed into the footer text. Per user feedback ("split into actual/
-# target enrolment in a concise and easily understandable way") this
-# becomes two side-by-side tiles with the same visual treatment as the
-# other KPI cards. For autoimmune CAR-T the planned tile is the big
-# headline (recruiting-trial scale); the actual tile sits beside it
-# with the smaller-but-real completed-trial accrual.
+# For autoimmune CAR-T the planned tile is the big headline (the field
+# is mostly recruiting); the actual tile sits beside it with the
+# smaller-but-growing completed + active-not-recruiting accrual.
 m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
     metric_card("Filtered trials", total_trials, "Trials matching current filters")
@@ -4016,15 +4024,24 @@ with m3:
     metric_card(
         "Planned enrollment",
         f"{_n_planned_pts:,}",
-        f"Target across {_n_planned_trials:,} ongoing trials (CT.gov ESTIMATED / ANTICIPATED)"
-        if _n_planned_trials else "No ongoing trials with reported plan",
+        f"Target across {_n_planned_trials:,} trials still enrolling"
+        if _n_planned_trials else "No trials currently enrolling",
     )
 with m4:
+    if _n_actual_trials:
+        _actual_foot = (
+            f"Across {_n_actual_trials:,} trials with closed enrolment "
+            f"(completed / active not recruiting / terminated)"
+        )
+    else:
+        _actual_foot = (
+            "No trials have closed enrolment yet — early field. "
+            "Number grows as trials reach completion or active-not-recruiting."
+        )
     metric_card(
         "Actual enrollment",
         f"{_n_actual_pts:,}",
-        f"Reported across {_n_actual_trials:,} completed trials (CT.gov ACTUAL)"
-        if _n_actual_trials else "No completed trials reporting actual yet",
+        _actual_foot,
     )
 with m5:
     metric_card("Top target", top_target, "Most common target category")
@@ -7628,11 +7645,12 @@ with tab_pub:
     # Fig 4 — Trial enrollment
     # ------------------------------------------------------------------
     _pub_header("4", "Trial enrollment landscape",
-                "Target-enrollment distribution (4a) and per-phase "
-                "median + IQR (4b). Most values are planned (ongoing "
-                "trials, CT.gov EnrollmentType=ESTIMATED/ANTICIPATED); "
-                "completed trials contribute actual counts. Trials with "
-                ">1,000 target enrollment are excluded from 4a only.")
+                "Enrollment-count distribution (4a) and per-phase median "
+                "+ IQR (4b). Most trials in this dataset are still "
+                "enrolling, so the count is the planned target; trials "
+                "with closed enrolment (completed / active not recruiting "
+                "/ terminated) contribute the actual accrual. Trials "
+                "with >1,000 enrolment are excluded from 4a only.")
 
     df_enroll = df_filt.copy()
     df_enroll["EnrollmentCount"] = pd.to_numeric(df_enroll["EnrollmentCount"], errors="coerce")
@@ -9045,13 +9063,25 @@ distinct modality categories based on target category and product type:
 
 Enrollment Analysis
 -------------------
-Target enrollment counts were extracted from the CT.gov EnrollmentCount field;
-each value carries a separate EnrollmentType qualifier ("ACTUAL" for completed
-trials reporting final enrollment, "ESTIMATED" or "ANTICIPATED" for planned
-counts in ongoing / not-yet-recruiting trials). The dashboard labels these
-values uniformly as "target enrollment"; the planned-vs-actual split is
-surfaced inline on the Overview KPI tile when both classes are present.
-Non-numeric or missing values were excluded from enrollment analyses (Figure 4).
+Enrollment counts were extracted from the CT.gov EnrollmentCount field.
+The Overview "Planned" vs "Actual" tile split is classified by OverallStatus,
+not by the CT.gov EnrollmentType flag — the latter is registrant-maintained
+and frequently stale (a completed trial whose registrant forgot to flip
+the flag from "ANTICIPATED" → "ACTUAL" still shows as planned even though
+the number is the real final accrual). Status-based classification:
+
+  "Actual"  : OverallStatus ∈ {{COMPLETED, ACTIVE_NOT_RECRUITING, TERMINATED}}
+              — enrolment is closed; EnrollmentCount = real accrual.
+  "Planned" : OverallStatus ∈ {{RECRUITING, NOT_YET_RECRUITING,
+              ENROLLING_BY_INVITATION, SUSPENDED}} — enrolment still open;
+              EnrollmentCount = target.
+
+Other statuses (WITHDRAWN, UNKNOWN) contribute to neither bucket; no
+reliable enrolment signal there. EnrollmentType is still parsed and
+stored for downstream analyses but not used for the headline split.
+
+Non-numeric or missing EnrollmentCount values were excluded from enrollment
+analyses (Figure 4).
 Geographic classification:
 trials recruiting exclusively in China were labelled "China"; all others
 "Non-China" (based on the Countries field). Sponsor classification used a
