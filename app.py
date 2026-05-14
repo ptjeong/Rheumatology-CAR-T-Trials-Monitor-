@@ -5877,29 +5877,76 @@ with tab_deepdive:
                 key=lambda t: (int(_emerge_first_all[t]), -int(_ag_counts[t])),
             )
 
-            _tld_a, _tld_b = st.columns(2)
-            with _tld_a:
-                st.markdown("**Antigen emergence timeline (year of first trial)**")
-                if _shared_ordered:
-                    _emerge_first = pd.DataFrame({
-                        "TargetCategory": _shared_ordered,
-                        "FirstTrialYear": [int(_emerge_first_all[t]) for t in _shared_ordered],
-                    })
-                    _min_yr = int(_emerge_first["FirstTrialYear"].min())
-                    _max_yr = _today_year()
-                    _line_x: list = []
-                    _line_y: list = []
-                    for _, _row in _emerge_first.iterrows():
-                        _line_x += [_min_yr - 0.4, _row["FirstTrialYear"], None]
-                        _line_y += [_row["TargetCategory"], _row["TargetCategory"], None]
-                    _emerge_fig = go.Figure()
-                    _emerge_fig.add_trace(go.Scatter(
+            # Both panels live inside a SINGLE plotly figure via
+            # make_subplots(shared_yaxes=True). Previously the two
+            # charts were separate go.Figure objects rendered in
+            # `st.columns(2)` — they LOOKED side-by-side but their y-
+            # axes weren't actually linked, so the antigen rows drifted
+            # apart by a few pixels and the reader couldn't tell at a
+            # glance which phase-bar row belonged to which antigen.
+            # make_subplots forces pixel-perfect alignment; the y-tick
+            # labels (antigen names) appear once on the left panel and
+            # the rows line up exactly across the whole figure.
+            if _shared_ordered:
+                _emerge_first = pd.DataFrame({
+                    "TargetCategory": _shared_ordered,
+                    "FirstTrialYear": [int(_emerge_first_all[t]) for t in _shared_ordered],
+                })
+                _min_yr = int(_emerge_first["FirstTrialYear"].min())
+                _max_yr = _today_year()
+
+                _phase_palette = {
+                    "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
+                    "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
+                    "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
+                    "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
+                }
+                _phase_in_aln = df_filt.loc[
+                    df_filt["TargetCategory"].isin(_shared_ordered)
+                ].copy()
+                _has_phase = (
+                    not _phase_in_aln.empty
+                    and "PhaseLabel" in _phase_in_aln.columns
+                )
+                if _has_phase:
+                    _phase_counts_aln = (
+                        _phase_in_aln.groupby(["TargetCategory", "PhaseLabel"])
+                        .size().reset_index(name="Trials")
+                    )
+                    _phase_grp_tot_aln = _phase_counts_aln.groupby("TargetCategory")["Trials"].transform("sum")
+                    _phase_counts_aln["Pct"] = 100.0 * _phase_counts_aln["Trials"] / _phase_grp_tot_aln
+                    _phase_label_order_aln = [
+                        PHASE_LABELS[p] for p in PHASE_ORDER
+                        if PHASE_LABELS[p] in set(_phase_counts_aln["PhaseLabel"])
+                    ]
+
+                _aln_fig = make_subplots(
+                    rows=1, cols=2,
+                    shared_yaxes=True,
+                    column_widths=[0.38, 0.62],
+                    horizontal_spacing=0.02,
+                    subplot_titles=(
+                        "Antigen emergence timeline (year of first trial)",
+                        "Phase composition by target",
+                    ),
+                )
+                # Col 1: lollipop. Hairlines first (drawn behind dots).
+                _line_x: list = []
+                _line_y: list = []
+                for _, _row in _emerge_first.iterrows():
+                    _line_x += [_min_yr - 0.4, _row["FirstTrialYear"], None]
+                    _line_y += [_row["TargetCategory"], _row["TargetCategory"], None]
+                _aln_fig.add_trace(
+                    go.Scatter(
                         x=_line_x, y=_line_y,
                         mode="lines",
                         line=dict(color="#e5e7eb", width=1.2),
                         hoverinfo="skip", showlegend=False,
-                    ))
-                    _emerge_fig.add_trace(go.Scatter(
+                    ),
+                    row=1, col=1,
+                )
+                _aln_fig.add_trace(
+                    go.Scatter(
                         x=_emerge_first["FirstTrialYear"],
                         y=_emerge_first["TargetCategory"],
                         mode="markers+text",
@@ -5912,93 +5959,90 @@ with tab_deepdive:
                         textfont=dict(size=10, color=THEME["muted"]),
                         hovertemplate="<b>%{y}</b><br>First trial: %{x}<extra></extra>",
                         showlegend=False, cliponaxis=False,
-                    ))
-                    _emerge_fig.update_layout(
-                        height=460,
-                        margin=dict(l=110, r=56, t=8, b=40),
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis=dict(
-                            title="Year of first trial",
-                            range=[_min_yr - 0.6, _max_yr + 0.6],
-                            dtick=1, tickformat="d",
-                            showgrid=False,
-                        ),
-                        # SHARED Y-AXIS ordering — autorange reversed puts
-                        # the first item (earliest emergence) at the top.
-                        yaxis=dict(
-                            title=None, showgrid=False,
-                            categoryorder="array",
-                            categoryarray=_shared_ordered,
-                            autorange="reversed",
-                        ),
-                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    ),
+                    row=1, col=1,
+                )
+                # Col 2: horizontal stacked phase bar. One trace per phase
+                # so the legend reads cleanly; barmode="stack" makes them
+                # stack horizontally.
+                if _has_phase:
+                    for _phase_lbl in _phase_label_order_aln:
+                        _sub = _phase_counts_aln[_phase_counts_aln["PhaseLabel"] == _phase_lbl]
+                        # Re-align rows to _shared_ordered so missing
+                        # phase × antigen pairs render as zero-width bars
+                        # (otherwise the trace skips the antigen entirely
+                        # and the stack alignment breaks).
+                        _sub_pivot = (
+                            _sub.set_index("TargetCategory")["Pct"]
+                            .reindex(_shared_ordered, fill_value=0.0)
+                            .reset_index()
+                        )
+                        _aln_fig.add_trace(
+                            go.Bar(
+                                x=_sub_pivot["Pct"],
+                                y=_sub_pivot["TargetCategory"],
+                                name=_phase_lbl,
+                                orientation="h",
+                                marker_color=_phase_palette.get(_phase_lbl, "#94a3b8"),
+                                marker_line_width=0,
+                                hovertemplate="<b>%{y}</b><br>" + _phase_lbl + ": %{x:.1f}%<extra></extra>",
+                            ),
+                            row=1, col=2,
+                        )
+                # Shared y-axis: applies to both subplots when
+                # shared_yaxes=True; categoryarray + autorange="reversed"
+                # puts the earliest-emergence antigen at the top of
+                # BOTH columns. Y-tick labels render only on col 1 (the
+                # left panel) — that's the default behaviour of
+                # shared_yaxes.
+                _aln_fig.update_yaxes(
+                    title=None,
+                    showgrid=False,
+                    categoryorder="array",
+                    categoryarray=_shared_ordered,
+                    autorange="reversed",
+                    row=1, col=1,
+                )
+                # Col 1 x-axis: year
+                _aln_fig.update_xaxes(
+                    title_text="Year of first trial",
+                    range=[_min_yr - 0.6, _max_yr + 0.6],
+                    dtick=1, tickformat="d",
+                    showgrid=False,
+                    row=1, col=1,
+                )
+                # Col 2 x-axis: percent
+                _aln_fig.update_xaxes(
+                    title_text="Phase mix (%)",
+                    range=[0, 100],
+                    row=1, col=2,
+                )
+                _aln_fig.update_layout(
+                    height=520,
+                    barmode="stack",
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    # Bottom margin (b=120) gives the legend its own row
+                    # clear of the col-2 x-axis title; previously the
+                    # legend (y=-0.10) sat on top of "Phase mix (%)".
+                    margin=dict(l=120, r=56, t=44, b=120),
+                    legend=dict(
+                        orientation="h", yanchor="top", y=-0.22, x=0,
+                        font=dict(family=FONT_FAMILY, size=10),
+                        title=dict(text=""),
+                    ),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    bargap=0.25,
+                )
+                # Style subplot titles so they read as h5-equivalents
+                # (smaller + left-aligned, matching st.markdown bold
+                # section labels used elsewhere).
+                for _ann in _aln_fig.layout.annotations:
+                    _ann.update(
+                        font=dict(family=FONT_FAMILY, size=13,
+                                  color=THEME["text"]),
+                        x=0, xanchor="left",
                     )
-                    _chart(_emerge_fig, key="dd_target_emergence_timeline")
-            with _tld_b:
-                st.markdown("**Phase composition by target (same order as left)**")
-                # Custom horizontal stacked bar with the SHARED y-axis
-                # ordering. The _deepdive_phase_stack helper produces a
-                # vertical bar — using it here would break the alignment.
-                _phase_palette = {
-                    "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
-                    "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
-                    "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
-                    "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
-                }
-                _phase_in = df_filt.loc[
-                    df_filt["TargetCategory"].isin(_shared_ordered)
-                ].copy()
-                if not _phase_in.empty and "PhaseLabel" in _phase_in.columns:
-                    _phase_counts = (
-                        _phase_in.groupby(["TargetCategory", "PhaseLabel"])
-                        .size().reset_index(name="Trials")
-                    )
-                    _phase_grp_tot = _phase_counts.groupby("TargetCategory")["Trials"].transform("sum")
-                    _phase_counts["Pct"] = 100.0 * _phase_counts["Trials"] / _phase_grp_tot
-                    _phase_label_order = [
-                        PHASE_LABELS[p] for p in PHASE_ORDER
-                        if PHASE_LABELS[p] in set(_phase_counts["PhaseLabel"])
-                    ]
-                    _phase_fig = px.bar(
-                        _phase_counts,
-                        x="Pct", y="TargetCategory", color="PhaseLabel",
-                        orientation="h",
-                        category_orders={
-                            "TargetCategory": _shared_ordered,
-                            "PhaseLabel": _phase_label_order,
-                        },
-                        color_discrete_map=_phase_palette,
-                        template="plotly_white",
-                        height=460,
-                    )
-                    _phase_fig.update_traces(
-                        marker_line_width=0,
-                        hovertemplate="<b>%{y}</b><br>%{fullData.name}: %{x:.1f}%<extra></extra>",
-                    )
-                    _phase_fig.update_layout(
-                        margin=dict(l=12, r=12, t=8, b=100),
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis=dict(title="Phase mix (%)", range=[0, 100]),
-                        # Mirror the lollipop's y-axis: same order, same reverse.
-                        # showticklabels=False because the antigen names already
-                        # appear on the lollipop to the left; duplicating them
-                        # here doubles label cost without adding info.
-                        yaxis=dict(
-                            title=None, showgrid=False,
-                            categoryorder="array",
-                            categoryarray=_shared_ordered,
-                            autorange="reversed",
-                            showticklabels=False,
-                        ),
-                        legend=dict(
-                            orientation="h", yanchor="top", y=-0.10, x=0,
-                            font=dict(family=FONT_FAMILY, size=10),
-                            title=dict(text=""),
-                        ),
-                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                        bargap=0.25,
-                    )
-                    _chart(_phase_fig, key="dd_target_phase_stack_aligned")
+                _chart(_aln_fig, key="dd_target_emerge_phase_aligned")
         else:
             # Filter by whichever pickers are set. Either or both can be
             # at "any" — the focused view only narrows on the active axes.
@@ -6343,80 +6387,76 @@ with tab_deepdive:
                 key=lambda p: (float(_med_by_prod.get(p, 0)), p),
             )
 
-            _pld_a, _pld_b = st.columns(2)
-            with _pld_a:
-                st.markdown("**Phase composition by product**")
-                _phase_palette = {
-                    "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
-                    "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
-                    "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
-                    "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
-                }
-                _pp_in = prod_df.loc[
-                    prod_df["ProductName"].isin(_shared_prod_ordered)
-                ].copy()
-                if not _pp_in.empty and "PhaseLabel" in _pp_in.columns:
-                    _pp_counts = (
-                        _pp_in.groupby(["ProductName", "PhaseLabel"])
-                        .size().reset_index(name="Trials")
+            # Same shared-y-axis approach as the antigen landscape: one
+            # make_subplots figure with phase composition (col 1) and
+            # enrollment-size box (col 2) sharing a y-axis. Product
+            # names appear once on the left; rows align pixel-for-pixel.
+            _phase_palette_p = {
+                "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
+                "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
+                "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
+                "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
+            }
+            _pp_in = prod_df.loc[
+                prod_df["ProductName"].isin(_shared_prod_ordered)
+            ].copy()
+            _pp_has_phase = (
+                not _pp_in.empty and "PhaseLabel" in _pp_in.columns
+                and bool(_shared_prod_ordered)
+            )
+            if _pp_has_phase:
+                _pp_counts = (
+                    _pp_in.groupby(["ProductName", "PhaseLabel"])
+                    .size().reset_index(name="Trials")
+                )
+                _pp_grp_tot = _pp_counts.groupby("ProductName")["Trials"].transform("sum")
+                _pp_counts["Pct"] = 100.0 * _pp_counts["Trials"] / _pp_grp_tot
+                _pp_label_order = [
+                    PHASE_LABELS[p] for p in PHASE_ORDER
+                    if PHASE_LABELS[p] in set(_pp_counts["PhaseLabel"])
+                ]
+
+                _prod_aln_fig = make_subplots(
+                    rows=1, cols=2,
+                    shared_yaxes=True,
+                    column_widths=[0.55, 0.45],
+                    horizontal_spacing=0.02,
+                    subplot_titles=(
+                        "Phase composition by product",
+                        "Enrollment-size distribution by product",
+                    ),
+                )
+                # Col 1: stacked phase bars (one trace per phase, all
+                # ordered so the y-axis lines up).
+                for _phase_lbl in _pp_label_order:
+                    _sub = _pp_counts[_pp_counts["PhaseLabel"] == _phase_lbl]
+                    _sub_pivot = (
+                        _sub.set_index("ProductName")["Pct"]
+                        .reindex(_shared_prod_ordered, fill_value=0.0)
+                        .reset_index()
                     )
-                    _pp_grp_tot = _pp_counts.groupby("ProductName")["Trials"].transform("sum")
-                    _pp_counts["Pct"] = 100.0 * _pp_counts["Trials"] / _pp_grp_tot
-                    _pp_label_order = [
-                        PHASE_LABELS[p] for p in PHASE_ORDER
-                        if PHASE_LABELS[p] in set(_pp_counts["PhaseLabel"])
-                    ]
-                    _pp_fig = px.bar(
-                        _pp_counts,
-                        x="Pct", y="ProductName", color="PhaseLabel",
-                        orientation="h",
-                        category_orders={
-                            "ProductName": _shared_prod_ordered,
-                            "PhaseLabel": _pp_label_order,
-                        },
-                        color_discrete_map=_phase_palette,
-                        template="plotly_white",
-                        height=440,
-                    )
-                    _pp_fig.update_traces(
-                        marker_line_width=0,
-                        hovertemplate="<b>%{y}</b><br>%{fullData.name}: %{x:.1f}%<extra></extra>",
-                    )
-                    _pp_fig.update_layout(
-                        margin=dict(l=120, r=12, t=8, b=100),
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis=dict(title="Phase mix (%)", range=[0, 100]),
-                        yaxis=dict(
-                            title=None, showgrid=False,
-                            categoryorder="array",
-                            categoryarray=_shared_prod_ordered,
-                            autorange="reversed",
+                    _prod_aln_fig.add_trace(
+                        go.Bar(
+                            x=_sub_pivot["Pct"],
+                            y=_sub_pivot["ProductName"],
+                            name=_phase_lbl,
+                            orientation="h",
+                            marker_color=_phase_palette_p.get(_phase_lbl, "#94a3b8"),
+                            marker_line_width=0,
+                            hovertemplate="<b>%{y}</b><br>" + _phase_lbl + ": %{x:.1f}%<extra></extra>",
                         ),
-                        legend=dict(
-                            orientation="h", yanchor="top", y=-0.12, x=0,
-                            font=dict(family=FONT_FAMILY, size=10),
-                            title=dict(text=""),
-                        ),
-                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                        bargap=0.28,
+                        row=1, col=1,
                     )
-                    _chart(_pp_fig, key="dd_product_phase_stack")
-            with _pld_b:
-                st.markdown("**Enrollment-size distribution by product (same order as left)**")
-                # Horizontal box plot to align with the phase chart's
-                # y-axis. Product name on y, EnrollmentCount on x.
-                # Y-tick labels are hidden because the names already
-                # appear on the phase chart to the left.
+                # Col 2: horizontal box per product, sharing y-axis.
                 _box_in = _prod_with_enroll.loc[
                     _prod_with_enroll["ProductName"].isin(_shared_prod_ordered)
                 ].copy()
-                if not _box_in.empty:
-                    _box_fig = go.Figure()
-                    for _p in _shared_prod_ordered:
-                        _vals = _box_in.loc[_box_in["ProductName"] == _p, "EnrollmentCount"]
-                        if _vals.empty:
-                            continue
-                        _box_fig.add_trace(go.Box(
+                for _p in _shared_prod_ordered:
+                    _vals = _box_in.loc[_box_in["ProductName"] == _p, "EnrollmentCount"]
+                    if _vals.empty:
+                        continue
+                    _prod_aln_fig.add_trace(
+                        go.Box(
                             x=_vals, y=[_p] * len(_vals),
                             name=_p,
                             marker_color="#0c4a6e",
@@ -6426,27 +6466,49 @@ with tab_deepdive:
                             marker=dict(size=4, color="#0c4a6e"),
                             orientation="h",
                             showlegend=False,
-                            hovertemplate=(
-                                f"<b>{_p}</b><br>"
-                                "Min %{x.min}, Median %{median}, Max %{x.max}"
-                                "<extra></extra>"
-                            ),
-                        ))
-                    _box_fig.update_layout(
-                        height=440,
-                        margin=dict(l=12, r=12, t=8, b=40),
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis=dict(title="EnrollmentCount"),
-                        yaxis=dict(
-                            title=None, showgrid=False,
-                            categoryorder="array",
-                            categoryarray=_shared_prod_ordered,
-                            autorange="reversed",
-                            showticklabels=False,
+                            hovertemplate=f"<b>{_p}</b><br>"
+                                          "Min %{x.min}, Median %{median}, Max %{x.max}"
+                                          "<extra></extra>",
                         ),
-                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                        row=1, col=2,
                     )
-                    _chart(_box_fig, key="dd_product_enrollment_box")
+                # Shared y-axis applies to BOTH columns; tick labels
+                # render only on col 1 thanks to shared_yaxes.
+                _prod_aln_fig.update_yaxes(
+                    title=None, showgrid=False,
+                    categoryorder="array",
+                    categoryarray=_shared_prod_ordered,
+                    autorange="reversed",
+                    row=1, col=1,
+                )
+                _prod_aln_fig.update_xaxes(
+                    title_text="Phase mix (%)", range=[0, 100],
+                    row=1, col=1,
+                )
+                _prod_aln_fig.update_xaxes(
+                    title_text="EnrollmentCount",
+                    row=1, col=2,
+                )
+                _prod_aln_fig.update_layout(
+                    height=500,
+                    barmode="stack",
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=130, r=20, t=44, b=120),
+                    legend=dict(
+                        orientation="h", yanchor="top", y=-0.22, x=0,
+                        font=dict(family=FONT_FAMILY, size=10),
+                        title=dict(text=""),
+                    ),
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    bargap=0.28,
+                )
+                for _ann in _prod_aln_fig.layout.annotations:
+                    _ann.update(
+                        font=dict(family=FONT_FAMILY, size=13,
+                                  color=THEME["text"]),
+                        x=0, xanchor="left",
+                    )
+                _chart(_prod_aln_fig, key="dd_product_phase_enroll_aligned")
             st.markdown("**Annual trial starts by product (top 6)**")
             _chart(
                 _deepdive_timeline(
