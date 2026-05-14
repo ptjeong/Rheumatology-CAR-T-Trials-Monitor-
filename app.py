@@ -1686,6 +1686,47 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
+    /* ── Design tokens ────────────────────────────────────────────────── */
+    /* Single source of truth for typography. Every font-size rule below
+       routes through one of these seven variables. Before this scale was
+       defined the codebase had 14+ distinct rem values (0.59, 0.66, 0.7,
+       0.72, 0.73, 0.75, 0.78, 0.82, 0.84, 0.86, 1.05, 1.4, 1.65, 1.7)
+       used inconsistently — visually almost-identical sizes were
+       scattered across the CSS, making the hierarchy fuzzy. The seven-
+       step scale below is modular (~1.16× ratio) and gives the reader a
+       clear visual cue for each role:
+         micro → uppercase eyebrows, sidebar nav headings
+         xs    → captions, table footnotes, multiselect text
+         sm    → secondary body, button text, sub-section headings
+         base  → primary body, tab labels, small-note
+         md    → figure titles, expander headings
+         lg    → metric values (headline numbers)
+         xl    → hero title (top-of-page eyebrow + title)
+       Line-height and weight variables follow the same role-based
+       naming so future contributors don't have to guess. */
+    :root {{
+        --fs-micro: 0.625rem;    /* 10px */
+        --fs-xs:    0.75rem;     /* 12px */
+        --fs-sm:    0.8125rem;   /* 13px */
+        --fs-base:  0.875rem;    /* 14px */
+        --fs-md:    1.0625rem;   /* 17px */
+        --fs-lg:    1.5rem;      /* 24px */
+        --fs-xl:    1.75rem;     /* 28px */
+        --lh-tight:   1.15;
+        --lh-snug:    1.35;
+        --lh-normal:  1.5;
+        --lh-relaxed: 1.65;
+        --fw-regular: 400;
+        --fw-medium:  500;
+        --fw-semibold: 600;
+        --fw-bold:    700;
+        --tracking-tight:  -0.022em;
+        --tracking-snug:   -0.012em;
+        --tracking-normal: -0.005em;
+        --tracking-wide:    0.12em;
+        --tracking-widest:  0.16em;
+    }}
+
     /* ── Reset / base ─────────────────────────────────────────────────── */
     /* System font on body content. Scoped narrowly so Streamlit's icon
        font (Material Symbols Outlined, used for expander chevrons +
@@ -1762,7 +1803,7 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        font-size: 0.66rem;
+        font-size: var(--fs-micro);
         font-weight: 600;
         letter-spacing: 0.16em;
         text-transform: uppercase;
@@ -1780,7 +1821,7 @@ st.markdown(
     }}
 
     .hero-title {{
-        font-size: 1.7rem;
+        font-size: var(--fs-xl);
         font-weight: 600;
         letter-spacing: -0.022em;
         line-height: 1.2;
@@ -1789,7 +1830,7 @@ st.markdown(
     }}
 
     .hero-sub {{
-        font-size: 0.86rem;
+        font-size: var(--fs-base);
         line-height: 1.6;
         color: {THEME["muted"]};
         max-width: 820px;
@@ -1808,7 +1849,7 @@ st.markdown(
     }}
 
     .section-card h3 {{
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
         font-weight: 600;
         letter-spacing: 0.04em;
         text-transform: uppercase;
@@ -1834,7 +1875,7 @@ st.markdown(
     }}
 
     .metric-label {{
-        font-size: 0.66rem;
+        font-size: var(--fs-micro);
         font-weight: 600;
         color: {THEME["muted"]};
         letter-spacing: 0.12em;
@@ -1843,7 +1884,7 @@ st.markdown(
     }}
 
     .metric-value {{
-        font-size: 1.65rem;
+        font-size: var(--fs-lg);
         font-weight: 600;
         letter-spacing: -0.02em;
         color: {THEME["text"]};
@@ -1853,7 +1894,7 @@ st.markdown(
 
     .metric-foot {{
         margin-top: 0.35rem;
-        font-size: 0.72rem;
+        font-size: var(--fs-xs);
         color: {THEME["faint"]};
         font-weight: 400;
         line-height: 1.4;
@@ -1861,7 +1902,7 @@ st.markdown(
 
     .small-note {{
         color: {THEME["muted"]};
-        font-size: 0.84rem;
+        font-size: var(--fs-base);
         line-height: 1.6;
         margin-top: 0.3rem;
         margin-bottom: 0.55rem;
@@ -1883,7 +1924,7 @@ st.markdown(
     div[data-testid="stSidebar"] h1,
     div[data-testid="stSidebar"] h2,
     div[data-testid="stSidebar"] h3 {{
-        font-size: 0.59rem !important;
+        font-size: var(--fs-micro) !important;
         font-weight: 700 !important;
         letter-spacing: 0.14em !important;
         text-transform: uppercase !important;
@@ -1898,14 +1939,14 @@ st.markdown(
 
     /* Widget labels */
     div[data-testid="stSidebar"] label {{
-        font-size: 0.73rem !important;
+        font-size: var(--fs-xs) !important;
         font-weight: 500 !important;
         color: {THEME["muted"]} !important;
         letter-spacing: -0.01em !important;
     }}
     div[data-testid="stSidebar"] p {{
         color: {THEME["text"]};
-        font-size: 0.75rem;
+        font-size: var(--fs-xs);
     }}
 
     /* Multiselect / select inputs — flat, square */
@@ -1914,7 +1955,7 @@ st.markdown(
         border: 1px solid {THEME["border"]} !important;
         border-radius: 2px !important;
         min-height: 28px !important;
-        font-size: 0.75rem !important;
+        font-size: var(--fs-xs) !important;
     }}
     div[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {{
         border-color: {THEME["primary"]} !important;
@@ -1940,7 +1981,7 @@ st.markdown(
         border: 1px solid {THEME["border"]};
         border-radius: 2px;
         padding: 0.42rem 0.95rem;
-        font-size: 0.82rem;
+        font-size: var(--fs-sm);
         font-weight: 500;
         letter-spacing: -0.005em;
         box-shadow: none;
@@ -1968,7 +2009,7 @@ st.markdown(
     div[data-testid="stTabs"] [data-baseweb="tab"] {{
         border-radius: 0;
         padding: 10px 18px;
-        font-size: 0.84rem;
+        font-size: var(--fs-base);
         font-weight: 500;
         letter-spacing: -0.005em;
         color: {THEME["muted"]};
@@ -2098,14 +2139,14 @@ st.markdown(
     }}
     div[data-testid="stMetricValue"] > div {{
         color: {THEME["text"]} !important;
-        font-size: 1.4rem !important;
+        font-size: var(--fs-lg) !important;
         font-weight: 600 !important;
         letter-spacing: -0.02em !important;
         font-variant-numeric: tabular-nums;
     }}
     div[data-testid="stMetricLabel"] > div {{
         color: {THEME["muted"]} !important;
-        font-size: 0.7rem !important;
+        font-size: var(--fs-micro) !important;
         font-weight: 600 !important;
         letter-spacing: 0.10em !important;
         text-transform: uppercase !important;
@@ -2140,7 +2181,7 @@ st.markdown(
         border-top: 1px solid {THEME["border"]};
     }}
     .pub-fig-eyebrow {{
-        font-size: 0.66rem;
+        font-size: var(--fs-micro);
         font-weight: 700;
         letter-spacing: 0.16em;
         text-transform: uppercase;
@@ -2148,7 +2189,7 @@ st.markdown(
         margin-bottom: 0.35rem;
     }}
     .pub-fig-title {{
-        font-size: 1.05rem;
+        font-size: var(--fs-md);
         font-weight: 600;
         letter-spacing: -0.012em;
         line-height: 1.3;
@@ -2156,14 +2197,14 @@ st.markdown(
         margin-bottom: 0.2rem;
     }}
     .pub-fig-sub {{
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
         font-weight: 400;
         line-height: 1.5;
         color: {THEME["muted"]};
         margin-top: 0.15rem;
     }}
     .pub-fig-caption {{
-        font-size: 0.72rem;
+        font-size: var(--fs-xs);
         font-style: italic;
         color: {THEME["faint"]};
         margin: 0.4rem 0 0.8rem 0;
@@ -2418,7 +2459,7 @@ def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=8, r=8, t=8, b=8),
-        font=dict(family="Inter, sans-serif", size=12, color=THEME["text"]),
+        font=dict(family=FONT_FAMILY, size=12, color=THEME["text"]),
         xaxis_title=None,
         yaxis_title=None,
         showlegend=False,
@@ -4387,12 +4428,21 @@ with tab_overview:
                     _ra_view = _ra[["NCTId", "BriefTitle", "DiseaseEntity",
                                     "TargetCategory", "LastUpdatePostDate"]].copy()
                     _ra_view["LastUpdatePostDate"] = _ra_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
-                    _ra_view["BriefTitle"] = _ra_view["BriefTitle"].astype(str).str[:60]
+                    # No string-pre-truncation: Streamlit's table renders
+                    # full text on hover when the column overflows. The
+                    # previous str[:60] cut destroyed hover-recovery and
+                    # left readers seeing "A Study of Healthy Donor CD19-
+                    # Targeted Allogeneic CA…" with no way to recover the
+                    # rest. Column is width="large" + a help tooltip so
+                    # narrow viewports still get a discoverable affordance.
                     st.dataframe(
                         _ra_view, width="stretch", hide_index=True, height=240,
                         column_config={
                             "NCTId":              st.column_config.TextColumn("NCT", width="small"),
-                            "BriefTitle":         st.column_config.TextColumn("Title", width="medium"),
+                            "BriefTitle":         st.column_config.TextColumn(
+                                "Title", width="large",
+                                help="Hover any cell to see the full title.",
+                            ),
                             "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
                             "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
                             "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
@@ -9454,25 +9504,25 @@ regulatory, or decision-support tool.
     max-width: 520px;
 ">
     <div style="
-        font-size: 1.02rem;
+        font-size: var(--fs-md);
         font-weight: 600;
         color: {THEME['text']};
         letter-spacing: -0.01em;
         margin-bottom: 0.35rem;
     ">Peter Jeong</div>
     <div style="
-        font-size: 0.88rem;
+        font-size: var(--fs-base);
         color: {THEME['text']};
         line-height: 1.45;
     ">Universitätsklinikum Köln</div>
     <div style="
-        font-size: 0.82rem;
+        font-size: var(--fs-sm);
         color: {THEME['muted']};
         line-height: 1.5;
         margin-bottom: 0.6rem;
     ">Klinik I für Innere Medizin<br>Hämatologie und Onkologie<br>Klinische Immunologie und Rheumatologie</div>
     <div style="
-        font-size: 0.80rem;
+        font-size: var(--fs-sm);
         color: {THEME['muted']};
         line-height: 1.55;
         padding-top: 0.55rem;
@@ -9483,7 +9533,7 @@ regulatory, or decision-support tool.
         display: inline-flex;
         align-items: center;
         gap: 0.4rem;
-        font-size: 0.84rem;
+        font-size: var(--fs-base);
         font-weight: 500;
         color: {THEME['primary']};
         text-decoration: none;
