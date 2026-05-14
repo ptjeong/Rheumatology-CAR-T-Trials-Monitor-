@@ -4114,6 +4114,54 @@ _tabs = st.tabs(_tab_labels)
 tab_overview, tab_geo, tab_data, tab_deepdive, tab_pub, tab_methods, tab_about = _tabs[:7]
 tab_moderation = _tabs[7] if _MODERATOR_MODE else None
 
+def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
+    """Explode trials with pipe-joined DiseaseEntities into one row per
+    entity, preserving the rest of the trial record.
+
+    For trials whose primary entity is the uninformative "Other immune-
+    mediated" or "cGVHD" bucket, the row is split by the same sub-
+    family / neuro-disease classifier the sunburst uses, so the by-
+    disease landscape surfaces "Myasthenia / MS / NMOSD / Pemphigus /
+    Cytopenias / Endocrine autoimmune / …" rather than a single opaque
+    "Other immune-mediated" line. Same record can fan out into multiple
+    rows; users asking "what's IN that bucket?" get a real answer.
+
+    Defined at module scope so EVERY tab (Map, Deep Dive, Pub Figs) can
+    call it. Was previously nested inside `with tab_deepdive:` which
+    made it invisible to the Map tab (which renders earlier in the
+    script).
+    """
+    rows = []
+    for _, r in df_in.iterrows():
+        rd = r.to_dict()
+        ents = [e.strip() for e in str(rd.get("DiseaseEntities", "")).split("|") if e.strip()]
+        if not ents:
+            ents = [str(rd.get("DiseaseEntity", "Unclassified"))]
+        promoted: list[str] = []
+        text = (
+            str(rd.get("Conditions", "") or "") + " "
+            + str(rd.get("BriefTitle", "") or "")
+        )
+        for e in ents:
+            if e == "Other immune-mediated":
+                sub = _system_subfamily(text)
+                if sub == "Neurologic autoimmune":
+                    promoted.append(_neuro_disease(text))
+                elif sub != "Other autoimmune":
+                    promoted.append(sub)
+                else:
+                    promoted.append("Other autoimmune (unclassified)")
+            elif e == "cGVHD":
+                promoted.append("cGVHD")
+            else:
+                promoted.append(e)
+        for e in promoted:
+            rr = dict(rd)
+            rr["_Disease"] = e
+            rows.append(rr)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
 with tab_overview:
     # -----------------------------------------------------------------
     # Hero — disease hierarchy sunburst (the signature visual).
@@ -4584,6 +4632,31 @@ with tab_geo:
                 help=f"Distinct trials with at least one site in {_reg}",
             )
 
+        # ── Trial-level geography stats (folded in from the former Deep
+        # Dive → By geography sub-tab, 2026-05-15). Three tile second row
+        # showing dataset-wide country diversity.
+        _multi_mask = (
+            df_filt["Countries"].fillna("").astype(str)
+            .apply(lambda s: len([c for c in s.split("|") if c.strip()]) >= 2)
+        )
+        _n_distinct_countries = len({
+            c.strip() for cs in df_filt["Countries"].dropna()
+            for c in str(cs).split("|") if c.strip()
+        })
+        _g1, _g2, _g3 = st.columns(3)
+        _g1.metric(
+            "Distinct countries", f"{_n_distinct_countries:,}",
+            help="Countries with ≥1 trial site in the filtered set",
+        )
+        _g2.metric(
+            "Multi-country trials", f"{int(_multi_mask.sum()):,}",
+            help="Trials enrolling sites in ≥2 countries",
+        )
+        _g3.metric(
+            "Single-country trials", f"{int((~_multi_mask).sum()):,}",
+            help="Trials enrolling sites in exactly one country",
+        )
+
     countries_long = split_pipe_values(df_filt["Countries"])
     if countries_long:
         country_df = pd.DataFrame({"Country": countries_long})
@@ -4697,6 +4770,61 @@ with tab_geo:
                 make_bar(country_counts.head(12), "Country", "Count", height=320, color=THEME["primary"]),
                 key="top_countries", width='stretch', config=PUB_EXPORT,
             )
+
+        # ── Cross-cutting analytical charts (folded in from Deep Dive →
+        # By geography, 2026-05-15). Same data the user could only see
+        # in Deep Dive before. Now all geography content lives here.
+        st.markdown("##### Country × disease and phase patterns")
+        # Build the geo-disease long-form once for both charts.
+        _geo_rows: list = []
+        for _, _r in df_filt.iterrows():
+            cs = str(_r.get("Countries") or "").split("|")
+            _r_dict = _r.to_dict()
+            _added = False
+            for c in cs:
+                c = c.strip()
+                if c:
+                    rd = dict(_r_dict)
+                    rd["_Country"] = c
+                    _geo_rows.append(rd)
+                    _added = True
+            if not _added:
+                rd = dict(_r_dict)
+                rd["_Country"] = "Unknown"
+                _geo_rows.append(rd)
+        _geo_long = pd.DataFrame(_geo_rows) if _geo_rows else pd.DataFrame()
+        if not _geo_long.empty:
+            _geo_a, _geo_b = st.columns(2)
+            with _geo_a:
+                st.markdown("**Country × Disease heat-map (top 15)**")
+                _geo_with_disease = _expand_disease_rows(
+                    _geo_long.drop_duplicates(subset=["NCTId", "_Country"])
+                )
+                _hm_in_geo = _geo_with_disease.loc[
+                    _geo_with_disease["_Country"] != "Unknown"
+                ]
+                _chart(
+                    _deepdive_heatmap(
+                        _hm_in_geo.drop_duplicates(subset=["NCTId", "_Country", "_Disease"]),
+                        x_col="_Country", y_col="_Disease",
+                        x_label="Country", y_label="Disease entity",
+                        max_x=10, max_y=12, height=420,
+                        colorscale="Blues",
+                    ),
+                    key="map_country_x_disease",
+                )
+            with _geo_b:
+                st.markdown("**Phase composition by country (top 10)**")
+                _phase_in_geo = _geo_long.loc[
+                    _geo_long["_Country"] != "Unknown"
+                ].drop_duplicates(subset=["NCTId", "_Country"])
+                _chart(
+                    _deepdive_phase_stack(
+                        _phase_in_geo.rename(columns={"_Country": "Country"}),
+                        group_col="Country", height=420, normalize=True,
+                    ),
+                    key="map_country_phase_stack",
+                )
     else:
         st.info("No country data in the current filter selection.")
 
@@ -4745,6 +4873,49 @@ with tab_geo:
                     country_study_view["NCTId"].nunique() if not country_study_view.empty else 0,
                     f"NCT IDs with at least one open {selected_country} site",
                 )
+
+            # ── Analytical breakdown for the picked country (folded in
+            # from Deep Dive → By geography drilldown, 2026-05-15). Top
+            # diseases + top antigens for the selected country, sitting
+            # alongside the operational site-level detail below.
+            _country_trials = df_filt.loc[
+                df_filt["Countries"].fillna("").str.contains(
+                    re.escape(selected_country), na=False, regex=True,
+                )
+            ].drop_duplicates(subset=["NCTId"]).copy()
+            if not _country_trials.empty:
+                st.markdown(f"##### What's being studied in {selected_country}")
+                _cdz1, _cdz2 = st.columns(2)
+                with _cdz1:
+                    st.markdown(f"**Top diseases in {selected_country}**")
+                    _cd = (
+                        _expand_disease_rows(_country_trials)
+                        .drop_duplicates(subset=["NCTId", "_Disease"])
+                        .groupby("_Disease").size().sort_values(ascending=False)
+                        .head(10).reset_index()
+                        .rename(columns={"_Disease": "Disease", 0: "Trials"})
+                    )
+                    if "Trials" not in _cd.columns:
+                        _cd.columns = ["Disease", "Trials"]
+                    if not _cd.empty:
+                        _chart(
+                            make_bar(_cd, "Disease", "Trials", height=260),
+                            key=f"map_geo_diseases_{selected_country}",
+                        )
+                with _cdz2:
+                    st.markdown(f"**Top antigens in {selected_country}**")
+                    _ct = (
+                        _country_trials.loc[
+                            ~_country_trials["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})
+                        ]
+                        .groupby("TargetCategory").size().sort_values(ascending=False)
+                        .head(10).reset_index(name="Trials")
+                    )
+                    if not _ct.empty:
+                        _chart(
+                            make_bar(_ct, "TargetCategory", "Trials", height=260),
+                            key=f"map_geo_targets_{selected_country}",
+                        )
 
             _country_geo = _get_geo_sites()
             if not _country_geo.empty:
@@ -5397,7 +5568,7 @@ with tab_deepdive:
     # also written to query_params so the URL is shareable.
     _DD_VIEWS = [
         "By disease", "By target", "By product", "By sponsor",
-        "By geography", "By time", "Compare",
+        "By time", "Compare",
     ]
     # URL-bind: seed from query_params if a `dd_tab` value is present.
     if "dd_active_view" not in st.session_state:
@@ -5427,57 +5598,9 @@ with tab_deepdive:
     else:
         st.query_params.pop("dd_tab", None)
 
-    def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
-        """Explode trials with pipe-joined DiseaseEntities into one row per
-        entity, preserving the rest of the trial record.
-
-        For trials whose primary entity is the uninformative
-        "Other immune-mediated" or "cGVHD" bucket, the row is split by
-        the same sub-family / neuro-disease classifier the sunburst uses,
-        so the by-disease landscape surfaces "Myasthenia / MS / NMOSD /
-        Pemphigus / Cytopenias / Endocrine autoimmune / …" rather than a
-        single opaque "Other immune-mediated" line. Same record can fan
-        out into multiple rows; users asking "what's IN that bucket?"
-        get a real answer."""
-        rows = []
-        for _, r in df_in.iterrows():
-            rd = r.to_dict()
-            ents = [e.strip() for e in str(rd.get("DiseaseEntities", "")).split("|") if e.strip()]
-            if not ents:
-                ents = [str(rd.get("DiseaseEntity", "Unclassified"))]
-            # Promote uninformative bucket entries to their sub-family /
-            # neuro-disease label using the same helpers the sunburst L2
-            # consumes. Keeps the landscape table consistent with the
-            # radial figure.
-            promoted: list[str] = []
-            text = (
-                str(rd.get("Conditions", "") or "") + " "
-                + str(rd.get("BriefTitle", "") or "")
-            )
-            for e in ents:
-                if e == "Other immune-mediated":
-                    sub = _system_subfamily(text)
-                    if sub == "Neurologic autoimmune":
-                        # Drill one level further into the specific
-                        # neurologic disease so the landscape doesn't
-                        # collapse 30+ neuro trials into one wedge.
-                        promoted.append(_neuro_disease(text))
-                    elif sub != "Other autoimmune":
-                        promoted.append(sub)
-                    else:
-                        promoted.append("Other autoimmune (unclassified)")
-                elif e == "cGVHD":
-                    # cGVHD is a strict-map entity, but the by-disease
-                    # landscape benefits from preserving the GVHD label
-                    # as-is rather than rolling into Other autoimmune.
-                    promoted.append("cGVHD")
-                else:
-                    promoted.append(e)
-            for e in promoted:
-                rr = dict(rd)
-                rr["_Disease"] = e
-                rows.append(rr)
-        return pd.DataFrame(rows) if rows else pd.DataFrame()
+    # _expand_disease_rows moved to module scope (above) so the Map tab
+    # (which renders before this block) can also call it for the
+    # consolidated By-geography content.
 
     # ===== By disease =====
     if _active == "By disease":
@@ -6925,191 +7048,6 @@ with tab_deepdive:
                         _sp_trials.iloc[_sp_rows[0]],
                         key_suffix=f"deep_sponsor_{pick}",
                     )
-
-    # ===== By geography (NEW Phase 2) =====
-    if _active == "By geography":
-        st.subheader("Geographic landscape")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>Where are sites located, and how does activity vary "
-            "by country / region?</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Country-level slicing: leaderboard, country × disease and "
-            "country × phase heat-maps, multi-country trial flag, and a "
-            "drill-into-one country view. Countries are exploded from "
-            "the pipe-joined Countries field — a single trial enrolling "
-            "in 4 countries appears in 4 rows below."
-        )
-        if df_filt.empty:
-            _empty_state_panel(_sync_opt_map, caller_id="dd_geo")
-        else:
-            # Long-format: one row per (NCTId, Country)
-            _geo_rows = []
-            for _, _r in df_filt.iterrows():
-                cs = str(_r.get("Countries") or "").split("|")
-                _r_dict = _r.to_dict()
-                added = False
-                for c in cs:
-                    c = c.strip()
-                    if c:
-                        rd = dict(_r_dict)
-                        rd["_Country"] = c
-                        _geo_rows.append(rd)
-                        added = True
-                if not added:
-                    rd = dict(_r_dict)
-                    rd["_Country"] = "Unknown"
-                    _geo_rows.append(rd)
-            _geo_df = pd.DataFrame(_geo_rows)
-
-            # Multi-country trial flag — useful for geographic-collaboration analysis
-            _multi = (
-                df_filt["Countries"].fillna("").astype(str)
-                .apply(lambda s: len([c for c in s.split("|") if c.strip()]) >= 2)
-            )
-            _n_multi = int(_multi.sum())
-
-            m1, m2, m3 = st.columns(3)
-            with m1:
-                st.metric(
-                    "Distinct countries",
-                    f"{_geo_df.loc[_geo_df['_Country'] != 'Unknown', '_Country'].nunique():,}",
-                )
-            with m2:
-                st.metric(
-                    "Multi-country trials",
-                    f"{_n_multi:,}",
-                    help="Trials enrolling in ≥2 countries",
-                )
-            with m3:
-                st.metric(
-                    "Single-country trials",
-                    f"{int((~_multi).sum()):,}",
-                )
-
-            # Country aggregate — computed once, used by both landscape
-            # leaderboard and (when focused) the drilldown.
-            _country_agg = (
-                _geo_df.loc[_geo_df["_Country"] != "Unknown"]
-                .groupby("_Country")
-                .agg(
-                    Trials=("NCTId", "nunique"),
-                    Sponsors=("LeadSponsor", "nunique"),
-                    TopDisease=(
-                        "DiseaseEntity",
-                        lambda s: s.value_counts().index[0] if not s.empty else "—",
-                    ),
-                )
-                .reset_index().rename(columns={"_Country": "Country"})
-                .sort_values("Trials", ascending=False)
-            )
-
-            # ── Focus picker at top (Phase B layout) ──
-            # Default ("—") → landscape (leaderboard + country × disease
-            # heatmap + phase composition by country). Pick a country →
-            # focused drilldown REPLACES the landscape with that
-            # country's metrics + top diseases + top antigens.
-            country_choices = _country_agg["Country"].tolist()
-            _seed_pick_from_query("dd_geo_country_pick", country_choices)
-            country_pick = st.selectbox(
-                "Focus on a country",
-                options=["—"] + country_choices,
-                key="dd_geo_country_pick",
-                help="Leave at '—' to see the cross-country landscape. Pick a country to see its trial count, top diseases, and top antigens.",
-            )
-            _sync_pick_to_query("dd_geo_country_pick", ("—",))
-
-            if country_pick == "—":
-                # ── Landscape view (default) ──
-                st.markdown("**Country leaderboard (trials by country)**")
-                st.dataframe(
-                    _country_agg.head(20), width="stretch", hide_index=True,
-                    column_config={
-                        "Country":     st.column_config.TextColumn("Country", width="medium"),
-                        "Trials":      st.column_config.NumberColumn("Trials", format="%d", width="small"),
-                        "Sponsors":    st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
-                        "TopDisease":  st.column_config.TextColumn("Top disease", width="small"),
-                },
-            )
-
-                # Geo landscape: country × disease heat-map + country × phase phase-mix
-                _geo_a, _geo_b = st.columns(2)
-                with _geo_a:
-                    st.markdown("**Country × Disease heat-map (top 15)**")
-                    _geo_with_disease = _expand_disease_rows(_geo_df.drop_duplicates(subset=["NCTId", "_Country"]))
-                    _hm_in = _geo_with_disease.loc[_geo_with_disease["_Country"] != "Unknown"]
-                    _chart(
-                        _deepdive_heatmap(
-                            _hm_in.drop_duplicates(subset=["NCTId", "_Country", "_Disease"]),
-                            x_col="_Country", y_col="_Disease",
-                            x_label="Country", y_label="Disease entity",
-                            max_x=10, max_y=12, height=420,
-                            colorscale="Blues",
-                        ),
-                        key="dd_geo_country_x_disease",
-                    )
-                with _geo_b:
-                    st.markdown("**Phase composition by country (top 10)**")
-                    _phase_in = _geo_df.loc[_geo_df["_Country"] != "Unknown"].drop_duplicates(subset=["NCTId", "_Country"])
-                    _chart(
-                        _deepdive_phase_stack(
-                            _phase_in.rename(columns={"_Country": "Country"}),
-                            group_col="Country", height=420, normalize=True,
-                        ),
-                        key="dd_geo_phase_stack",
-                    )
-
-            else:
-                # ── Focused view: drilldown for the picked country ──
-                _csub = _geo_df[_geo_df["_Country"] == country_pick].drop_duplicates(subset=["NCTId"])
-                cm1, cm2, cm3, cm4 = st.columns(4)
-                cm1.metric("Trials", len(_csub))
-                cm2.metric(
-                    "Open / recruiting",
-                    int(_csub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
-                )
-                cm3.metric(
-                    "Distinct sponsors",
-                    f"{_csub['LeadSponsor'].nunique():,}",
-                )
-                _enr_c = pd.to_numeric(_csub["EnrollmentCount"], errors="coerce")
-                cm4.metric(
-                    "Median enrollment",
-                    int(_enr_c.median()) if _enr_c.notna().any() else 0,
-                )
-
-                # Top diseases / top antigens for this country
-                _cda, _cdb = st.columns(2)
-                with _cda:
-                    st.markdown(f"**Top diseases in {country_pick}**")
-                    _cd = (
-                        _expand_disease_rows(_csub)
-                        .drop_duplicates(subset=["NCTId", "_Disease"])
-                        .groupby("_Disease").size().sort_values(ascending=False)
-                        .head(10).reset_index()
-                        .rename(columns={"_Disease": "Disease", 0: "Trials"})
-                    )
-                    if "Trials" not in _cd.columns:
-                        _cd.columns = ["Disease", "Trials"]
-                    if not _cd.empty:
-                        _chart(
-                            make_bar(_cd, "Disease", "Trials", height=260),
-                            key=f"dd_geo_diseases_{country_pick}",
-                        )
-                with _cdb:
-                    st.markdown(f"**Top antigens in {country_pick}**")
-                    _ct = (
-                        _csub.loc[~_csub["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
-                        .groupby("TargetCategory").size().sort_values(ascending=False)
-                        .head(10).reset_index(name="Trials")
-                    )
-                    if not _ct.empty:
-                        _chart(
-                            make_bar(_ct, "TargetCategory", "Trials", height=260),
-                            key=f"dd_geo_targets_{country_pick}",
-                        )
 
     # ===== By time (NEW Phase 2) =====
     if _active == "By time":
