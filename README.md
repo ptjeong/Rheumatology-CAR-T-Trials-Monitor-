@@ -1,4 +1,4 @@
-# CAR-T Rheumatology Trials Monitor
+# CAR-T Rheumatology & Autoimmune Trials Monitor
 
 **Live app: [rheum-car-t-trial-monitor.streamlit.app](https://rheum-car-t-trial-monitor.streamlit.app)**  
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19713049.svg)](https://doi.org/10.5281/zenodo.19713049)
@@ -284,7 +284,7 @@ filter state, row count, and API source — readable via
 
 If you use this dashboard in scientific work, please cite:
 
-> Jeong P. CAR-T Rheumatology Trials Monitor (version `<sha>`) [Internet].
+> Jeong P. CAR-T Rheumatology & Autoimmune Trials Monitor (version `<sha>`) [Internet].
 > Klinik I für Innere Medizin, Klinische Immunologie und Rheumatologie,
 > Universitätsklinikum Köln; `<year>` [cited `<YYYY-MM-DD>`].
 > Data snapshot: `<date>`. Source: ClinicalTrials.gov API v2.

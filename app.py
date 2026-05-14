@@ -62,7 +62,7 @@ from config import (
 )
 
 st.set_page_config(
-    page_title="CAR-T Rheumatology Trials Monitor",
+    page_title="CAR-T Rheumatology & Autoimmune Trials Monitor",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
@@ -3029,12 +3029,12 @@ st.markdown(
     """
     <div class="hero">
         <div class="hero-eyebrow">ClinicalTrials.gov &middot; Live pipeline</div>
-        <div class="hero-title">CAR-T &amp; Cell Therapies<br>in Rheumatologic Diseases</div>
+        <div class="hero-title">CAR-T &amp; Cell Therapies<br>in Rheumatologic and Autoimmune Diseases</div>
         <div class="hero-sub">
             Systematic landscape analysis of CAR-T, CAR-NK, CAAR-T, and CAR-Treg trials
-            in systemic autoimmune diseases — with disease, target-antigen, and
-            cell-therapy modality classification; global site-level geography; and
-            publication-ready figures.
+            in rheumatologic and autoimmune diseases — with disease, target-antigen,
+            and cell-therapy modality classification; global site-level geography;
+            and publication-ready figures.
         </div>
         <div class="hero-sub" style="margin-top: 0.55rem;">
             Use the <strong>sidebar filters</strong> to narrow to a subgroup of interest — every chart, table, map, and CSV export on every tab respects the active filter state.
@@ -9890,9 +9890,9 @@ with tab_about:
     st.subheader("About this dashboard")
     st.markdown(
         f"""
-**CAR-T Rheumatology Trials Monitor** is an interactive dashboard that tracks
-CAR-T and related cell-therapy clinical trials for rheumatologic and
-immune-mediated diseases, sourced from the public ClinicalTrials.gov registry.
+**CAR-T Rheumatology & Autoimmune Trials Monitor** is an interactive dashboard
+that tracks CAR-T and related cell-therapy clinical trials for rheumatologic
+and autoimmune diseases, sourced from the public ClinicalTrials.gov registry.
 It is designed as a research and educational resource — not a medical,
 regulatory, or decision-support tool.
 
@@ -9966,7 +9966,7 @@ regulatory, or decision-support tool.
     st.divider()
     st.subheader("Suggested citation")
     citation = (
-        f"Jeong P. CAR-T Rheumatology Trials Monitor "
+        f"Jeong P. CAR-T Rheumatology & Autoimmune Trials Monitor "
         f"(version {sha}) [Internet]. "
         f"Klinik I für Innere Medizin, Hämatologie und Onkologie, "
         f"Klinische Immunologie und Rheumatologie, "
