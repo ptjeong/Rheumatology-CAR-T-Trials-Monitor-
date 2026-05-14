@@ -3262,6 +3262,101 @@ def _reset_focus_picks() -> None:
         st.query_params.pop(qk, None)
 
 
+def _active_sidebar_filters(sync_opt_map: dict[str, list[str]]) -> list[tuple[str, list[str]]]:
+    """Return [(filter_name, current_values), ...] for sidebar filters whose
+    selection is narrower than the full option set. Used by the empty-state
+    helper to tell the reader what's currently restricting the data."""
+    out: list[tuple[str, list[str]]] = []
+    for state_key, options in sync_opt_map.items():
+        val = st.session_state.get(state_key)
+        if val is not None and set(val) != set(options):
+            display = state_key.replace("flt_", "").replace("_", " ").title()
+            out.append((display, list(val)))
+    return out
+
+
+def _active_focus_picks() -> list[tuple[str, str]]:
+    """Return [(picker_label, current_value), ...] for Deep Dive focus
+    pickers that are currently set to a non-default value."""
+    sentinels = {"—", "(any — show landscape)", "", None}
+    labels = {
+        "dd_disease_pick":     "Disease",
+        "dd_target_pick":      "Target",
+        "dd_sponsor_pick":     "Sponsor type",
+        "dd_sponsor_one_pick": "Sponsor",
+        "dd_geo_country_pick": "Country",
+    }
+    out: list[tuple[str, str]] = []
+    for k, lbl in labels.items():
+        v = st.session_state.get(k)
+        if v not in sentinels:
+            v_display = (
+                v.rsplit("  (", 1)[0]
+                if k == "dd_sponsor_one_pick" and "  (" in str(v)
+                else v
+            )
+            out.append((lbl, v_display))
+    return out
+
+
+def _empty_state_panel(sync_opt_map: dict[str, list[str]], *, caller_id: str) -> None:
+    """Render a friendly 'no trials match' panel when df_filt is empty.
+
+    Replaces the bare `st.info("No trials in the current filter selection.")`
+    with a structured message that:
+      1. Lists which sidebar filters are currently narrowed (which is the
+         most common cause of empty results)
+      2. Lists which Deep Dive focus pickers are set
+      3. Offers a concrete next step: clear filters / clear focus
+
+    `caller_id` is used to namespace the reset buttons' widget keys —
+    multiple call sites on the same render would otherwise collide on
+    duplicate button keys. Pass a short string unique to each call site
+    (e.g. "dd_disease", "dd_target", "fig11").
+
+    Future work (Stage 2B): augment with per-filter relax counts ("if you
+    remove filter X, N trials match") — requires refactoring the filter-
+    mask computation to expose individual masks, deferred until needed."""
+    active_filters = _active_sidebar_filters(sync_opt_map)
+    active_focus = _active_focus_picks()
+
+    st.warning("**No trials match the current filter combination.**")
+    if not active_filters and not active_focus:
+        st.caption(
+            "No sidebar filters or Deep Dive focus picks are narrowing the "
+            "data. The empty result may indicate a data issue — try the "
+            "**Refresh now** button in the sidebar."
+        )
+        return
+
+    _msg_parts: list[str] = []
+    if active_filters:
+        _filter_summary = ", ".join(
+            f"**{name}** ({', '.join(list(vals)[:2])}{'…' if len(vals) > 2 else ''})"
+            for name, vals in active_filters
+        )
+        _msg_parts.append(f"Sidebar filters active: {_filter_summary}.")
+    if active_focus:
+        _focus_summary = ", ".join(f"**{lbl}** = {val}" for lbl, val in active_focus)
+        _msg_parts.append(f"Drilldown focus: {_focus_summary}.")
+    st.markdown(" ".join(_msg_parts))
+
+    _esp_c1, _esp_c2, _esp_c3 = st.columns([0.3, 0.3, 0.4])
+    if active_filters:
+        with _esp_c1:
+            if st.button("Clear sidebar filters", key=f"empty_clear_filters_{caller_id}"):
+                for _k in _FILTER_KEYS:
+                    st.session_state.pop(_k, None)
+                for _qk in _FILTER_QPARAM.values():
+                    st.query_params.pop(_qk, None)
+                st.rerun()
+    if active_focus:
+        with _esp_c2:
+            if st.button("Clear focus picks", key=f"empty_clear_focus_{caller_id}"):
+                _reset_focus_picks()
+                st.rerun()
+
+
 if st.sidebar.button("Reset filters", width='stretch'):
     for _k in _FILTER_KEYS:
         st.session_state.pop(_k, None)
@@ -5161,9 +5256,18 @@ with tab_deepdive:
             )
             _focus_chips.append(f"{_lbl}: {_v_display}")
     if _sidebar_chips or _focus_chips:
+        # Style: subtle slate-50 background with a left accent bar so the
+        # strip reads as a STATUS BAR (one logical element, not just free-
+        # floating chips). The left bar's colour signals state class:
+        # amber when focus is active (Deep Dive drilldown), sky-blue
+        # otherwise (sidebar filters only).
+        _accent_color = "#f59e0b" if _focus_chips else "#0284c7"
         _strip_col_chips, _strip_col_btn = st.columns([0.85, 0.15])
         with _strip_col_chips:
-            _chip_html_parts = []
+            _chip_html_parts = [
+                f'<div style="background: #f8fafc; border-left: 3px solid {_accent_color}; '
+                f'padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;">'
+            ]
             for _c in _sidebar_chips:
                 _chip_html_parts.append(
                     f'<span style="display: inline-block; padding: 2px 10px; '
@@ -5180,6 +5284,7 @@ with tab_deepdive:
                     f'border: 1px solid #fde68a;">'
                     f'🎯 {_c}</span>'
                 )
+            _chip_html_parts.append('</div>')
             st.markdown(
                 "".join(_chip_html_parts),
                 unsafe_allow_html=True,
@@ -5270,7 +5375,7 @@ with tab_deepdive:
             unsafe_allow_html=True,
         )
         if df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_disease")
         else:
             dd_df = _expand_disease_rows(df_filt)
             if dd_df.empty:
@@ -5540,7 +5645,7 @@ with tab_deepdive:
             )
 
         if df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_target")
         elif target_pick == "(any — show landscape)":
             st.markdown(
                 "**Top antigens by trial count** "
@@ -6052,7 +6157,7 @@ with tab_deepdive:
         if "SponsorType" not in df_filt.columns:
             st.info("Sponsor type not available in the current snapshot.")
         elif df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_sponsor")
         else:
             agg = (
                 df_filt.groupby("SponsorType")
@@ -6201,7 +6306,7 @@ with tab_deepdive:
             "in 4 countries appears in 4 rows below."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_geo")
         else:
             # Long-format: one row per (NCTId, Country)
             _geo_rows = []
@@ -6377,7 +6482,7 @@ with tab_deepdive:
             "signals real pipeline progression."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_time")
         else:
             _color_axis_choice = st.radio(
                 "Colour axis",
@@ -6624,7 +6729,7 @@ with tab_deepdive:
             "specific sponsor here to see their individual portfolio."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_sponsor_one")
         elif "LeadSponsor" not in df_filt.columns:
             st.info("Sponsor data not available in the current snapshot.")
         else:
@@ -6789,7 +6894,7 @@ with tab_deepdive:
             "SSc in pipeline maturity?'."
         )
         if df_filt.empty:
-            st.info("No trials in the current filter selection.")
+            _empty_state_panel(_sync_opt_map, caller_id="dd_compare")
         else:
             _cmp_axis = st.radio(
                 "Comparison axis",
@@ -8488,7 +8593,7 @@ with tab_pub:
         unsafe_allow_html=True,
     )
     if df_filt.empty:
-        st.info("No trials in the current filter selection.")
+        _empty_state_panel(_sync_opt_map, caller_id="fig11")
     else:
         _ci_in = _expand_disease_rows(df_filt).drop_duplicates(subset=["NCTId", "_Disease"])
         _ci_in = _ci_in.dropna(subset=["LeadSponsor"])
