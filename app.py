@@ -4327,6 +4327,11 @@ with tab_overview:
         # Three quick reads: at-a-glance KPIs, last-complete-year YoY
         # movers (skipping the current incomplete year), and a
         # filterable "what's new since last visit" panel.
+        st.markdown("##### Headline numbers")
+        st.caption(
+            "Single-glance summary of the filtered set. All five tiles "
+            "respect the sidebar filters above."
+        )
         _kpi_n = len(df_filt)
         _kpi_open = int(df_filt["OverallStatus"].isin(
             ["RECRUITING", "NOT_YET_RECRUITING"]
@@ -4559,6 +4564,12 @@ with tab_overview:
 
 with tab_geo:
     st.subheader("Global studies by country")
+    st.markdown(
+        f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
+        "<b>Where is each trial being run, and how does activity spread "
+        "across regions and individual countries?</b></p>",
+        unsafe_allow_html=True,
+    )
 
     # ── Phase 5: Regional aggregates strip ──────────────────────────
     # Maps each ISO country into one of five world regions so a reader
@@ -4975,6 +4986,19 @@ with tab_geo:
 
 with tab_data:
     st.subheader("Trial table")
+    st.markdown(
+        f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
+        "<b>Find a specific trial — searchable, filterable, with row-click "
+        "drilldown to the full record.</b></p>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Type-ahead search runs over NCT ID, title, sponsor, disease, "
+        "target, and product name. Country zoom narrows to trials with "
+        "≥1 active site in the chosen country and shows that country's "
+        "city + site-status detail in place of the default Countries "
+        "column. Sidebar filters apply on top of the search."
+    )
 
     # Search + country zoom side-by-side.  Country zoom filters the main
     # table to trials with at least one open/recruiting site in the chosen
@@ -5507,7 +5531,7 @@ with tab_deepdive:
     if _active == "By disease":
         st.subheader("Disease-entity focus")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>Which indications have the most activity, and which "
             "antigens are being tried in each?</b></p>",
             unsafe_allow_html=True,
@@ -5545,9 +5569,10 @@ with tab_deepdive:
                 disease_choices = agg["Disease"].tolist()
                 _seed_pick_from_query("dd_disease_pick", disease_choices)
                 pick = st.selectbox(
-                    "Focus on a disease (leave at '—' to see the landscape)",
+                    "Focus on a disease",
                     options=["—"] + disease_choices,
                     key="dd_disease_pick",
+                    help="Leave at '—' to see the cross-disease landscape. Pick a specific disease to drill into its targets, sponsors, countries, and trial list.",
                 )
                 _sync_pick_to_query("dd_disease_pick", ("—",))
 
@@ -5747,7 +5772,7 @@ with tab_deepdive:
     if _active == "By target":
         st.subheader("Antigen target focus")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>Which antigens dominate, in which diseases, and how "
             "have they emerged over time?</b></p>",
             unsafe_allow_html=True,
@@ -5786,13 +5811,14 @@ with tab_deepdive:
         with ct1:
             _seed_pick_from_query("dd_target_pick", _target_options_sorted)
             target_pick = st.selectbox(
-                "Antigen target",
+                "Focus on an antigen target",
                 ["(any — show landscape)"] + _target_options_sorted,
                 key="dd_target_pick",
                 format_func=lambda t: (
                     t if t == "(any — show landscape)"
                     else f"{t}  ({_target_counts.get(t, 0)} trials)"
                 ),
+                help="Leave at '(any — show landscape)' to see all antigens. Pick one to filter to that antigen — combine with the modality picker for cross-axis narrowing.",
             )
             _sync_pick_to_query("dd_target_pick", ("(any — show landscape)",))
         with ct2:
@@ -5800,9 +5826,10 @@ with tab_deepdive:
             # picker; doesn't reset disease/sponsor sidebar filters.
             _seed_pick_from_query("dd_target_modality_pick", _modality_options_dd)
             modality_pick = st.selectbox(
-                "Modality (within antigen focus)",
+                "Focus on a modality",
                 ["(any)"] + _modality_options_dd,
                 key="dd_target_modality_pick",
+                help="Applies as an additional filter on top of the antigen pick. Leave at '(any)' for no modality filter.",
             )
             _sync_pick_to_query("dd_target_modality_pick", ("(any)",))
         with ct3:
@@ -6155,7 +6182,7 @@ with tab_deepdive:
         st.divider()
         st.subheader("Per-product pipeline view")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>Where is each named CAR-T product in its development "
             "pipeline, and which sponsors / indications does it span?</b></p>",
             unsafe_allow_html=True,
@@ -6332,7 +6359,7 @@ with tab_deepdive:
     if _active == "By sponsor":
         st.subheader("Landscape by sponsor type")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>Who's sponsoring trials, how concentrated is each "
             "indication, and what's any single sponsor's portfolio?</b></p>",
             unsafe_allow_html=True,
@@ -6386,8 +6413,9 @@ with tab_deepdive:
             sp_choices = agg["SponsorType"].tolist()
             _seed_pick_from_query("dd_sponsor_pick", sp_choices)
             pick = st.selectbox(
-                "Focus on a sponsor type (leave at '—' to see the landscape)",
+                "Focus on a sponsor type",
                 options=["—"] + sp_choices, key="dd_sponsor_pick",
+                help="Leave at '—' to see the cross-type landscape. Pick a type (Industry / Academic / Gov / Other) to see its top sponsors, antigens, and product mix.",
             )
             _sync_pick_to_query("dd_sponsor_pick", ("—",))
 
@@ -6507,7 +6535,7 @@ with tab_deepdive:
     if _active == "By geography":
         st.subheader("Geographic landscape")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>Where are sites located, and how does activity vary "
             "by country / region?</b></p>",
             unsafe_allow_html=True,
@@ -6591,9 +6619,10 @@ with tab_deepdive:
             country_choices = _country_agg["Country"].tolist()
             _seed_pick_from_query("dd_geo_country_pick", country_choices)
             country_pick = st.selectbox(
-                "Focus on a country (leave at '—' to see the landscape)",
+                "Focus on a country",
                 options=["—"] + country_choices,
                 key="dd_geo_country_pick",
+                help="Leave at '—' to see the cross-country landscape. Pick a country to see its trial count, top diseases, and top antigens.",
             )
             _sync_pick_to_query("dd_geo_country_pick", ("—",))
 
@@ -6691,7 +6720,7 @@ with tab_deepdive:
     if _active == "By time":
         st.subheader("Temporal landscape")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>How is the field growing, by what metric, and how do "
             "recent cohorts mature?</b></p>",
             unsafe_allow_html=True,
@@ -6943,7 +6972,7 @@ with tab_deepdive:
         st.divider()
         st.subheader("Specific-sponsor portfolio")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>What does any one sponsor's pipeline look like — "
             "phases, antigens, indications, activity over time?</b></p>",
             unsafe_allow_html=True,
@@ -6970,7 +6999,10 @@ with tab_deepdive:
             ]
             _seed_pick_from_query("dd_sponsor_one_pick", _sp_options[1:])
             sponsor_pick_label = st.selectbox(
-                "Pick a sponsor", _sp_options, key="dd_sponsor_one_pick",
+                "Focus on a specific sponsor",
+                _sp_options,
+                key="dd_sponsor_one_pick",
+                help="Leave at '—' for no specific sponsor. Pick a sponsor to see their full portfolio: phases, diseases, antigens, geography, and activity over time.",
             )
             _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
             sponsor_pick = (
@@ -7107,7 +7139,7 @@ with tab_deepdive:
     if _active == "Compare":
         st.subheader("Side-by-side comparator")
         st.markdown(
-            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
             "<b>Pick any two diseases or antigens — see them side-by-"
             "side as matched mini-dashboards.</b></p>",
             unsafe_allow_html=True,
