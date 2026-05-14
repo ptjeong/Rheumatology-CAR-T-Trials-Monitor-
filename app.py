@@ -2229,6 +2229,26 @@ st.markdown(
         margin: 0.4rem 0 0.8rem 0;
         line-height: 1.45;
     }}
+    /* Sub-figure label (e.g. "3a — Top 10 countries"). Sits BELOW the
+       _pub_header() block for a parent figure that has sub-panels.
+       Previously rendered as `<strong style="color: #0b1220;">` inline
+       overrides inside a pub-fig-sub div — 7 sites with the same
+       pattern. Centralised here. */
+    .pub-subfig-header {{
+        font-size: var(--fs-sm);
+        font-weight: 600;
+        color: {THEME["text"]};
+        margin-top: 1rem;
+        margin-bottom: 0.4rem;
+    }}
+    /* Inline secondary metadata — small grey "(N trials · click any
+       row for full details)" suffix inside drilldown headings.
+       Previously rendered as `<span style="color:#64748b;
+       font-weight:400;">` at 9 sites. */
+    .meta-small {{
+        color: {THEME["muted"]};
+        font-weight: 400;
+    }}
     /* Don't double-stroke the auto h3 border on figure headers */
     .pub-fig-header + div h3,
     .pub-fig-header ~ div[data-testid="stVerticalBlock"] h3 {{
@@ -5881,7 +5901,7 @@ with tab_deepdive:
                     detail, _dd_cols = _attach_flag_column(detail, _dd_cols)
                     st.markdown(
                         f"### Trials — **{pick}** "
-                        f"<span style='color:#64748b; font-weight:400;'>"
+                        f"<span class='meta-small'>"
                         f"({len(detail)} trial{'s' if len(detail) != 1 else ''} · click any row for full details)</span>",
                         unsafe_allow_html=True,
                     )
@@ -5982,7 +6002,7 @@ with tab_deepdive:
         elif _target_no_focus:
             st.markdown(
                 "**Top antigens by trial count** "
-                "<span style='color:#64748b; font-weight:400;'>"
+                "<span class='meta-small'>"
                 "— pick a specific antigen above to drill in</span>",
                 unsafe_allow_html=True,
             )
@@ -6404,7 +6424,7 @@ with tab_deepdive:
                 # Top sponsors developing this antigen
                 st.markdown(
                     f"**Top sponsors — {_focus_label}** "
-                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"<span class='meta-small'>"
                     f"({_sponsors} distinct sponsors total)</span>",
                     unsafe_allow_html=True,
                 )
@@ -6420,7 +6440,7 @@ with tab_deepdive:
                 # Trial list with row-click → drilldown
                 st.markdown(
                     f"### Trials — **{_focus_label}** "
-                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"<span class='meta-small'>"
                     f"({_n} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
                 )
@@ -6756,7 +6776,7 @@ with tab_deepdive:
 
                 st.markdown(
                     f"### Trials for **{_picked_product}** "
-                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"<span class='meta-small'>"
                     f"({len(_prod_trials)} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
                 )
@@ -6965,7 +6985,7 @@ with tab_deepdive:
                 # Sponsor's full trial list
                 st.markdown(
                     f"### Trials led by **{sponsor_pick}** "
-                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"<span class='meta-small'>"
                     f"({len(spt)} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
                 )
@@ -7045,7 +7065,7 @@ with tab_deepdive:
 
                 st.markdown(
                     f"**Sponsors in *{pick}*** "
-                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"<span class='meta-small'>"
                     f"({len(sub)} trials, {sub['LeadSponsor'].nunique()} distinct sponsors)"
                     f"</span>",
                     unsafe_allow_html=True,
@@ -7095,7 +7115,7 @@ with tab_deepdive:
                 _sp_trials, _sp_cols = _attach_flag_column(_sp_trials, _sp_cols)
                 st.markdown(
                     f"### Trials in **{pick}** sponsor bucket "
-                    f"<span style='color:#64748b; font-weight:400;'>"
+                    f"<span class='meta-small'>"
                     f"({len(_sp_trials)} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
                 )
@@ -7282,7 +7302,7 @@ with tab_deepdive:
 
             st.markdown(
                 f"**Year-over-year movers** "
-                f"<span style='color:#64748b; font-weight:400;'>"
+                f"<span class='meta-small'>"
                 f"({_prev_complete} → {_last_complete}, last two complete years)"
                 f"</span>" if _last_complete else "**Year-over-year movers**",
                 unsafe_allow_html=True,
@@ -7971,17 +7991,13 @@ with tab_pub:
         _f3_map_col, _f3_bar_col = st.columns([0.60, 0.40])
         with _f3_map_col:
             st.markdown(
-                '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
-                '<strong style="color: #0b1220;">3a — Choropleth of trial counts by country</strong>'
-                '</div>',
+                '<div class="pub-subfig-header">3a — Choropleth of trial counts by country</div>',
                 unsafe_allow_html=True,
             )
             _chart(fig3_map, key='fig3_map', width='stretch', config=PUB_EXPORT)
         with _f3_bar_col:
             st.markdown(
-                '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
-                '<strong style="color: #0b1220;">3b — Top 10 countries</strong>'
-                '</div>',
+                '<div class="pub-subfig-header">3b — Top 10 countries</div>',
                 unsafe_allow_html=True,
             )
             _chart(fig3_bar, key='fig3_bar', width='stretch', config=PUB_EXPORT)
@@ -8104,10 +8120,7 @@ with tab_pub:
         _f4a_col, _f4b_col = st.columns(2)
         with _f4a_col:
             st.markdown(
-                '<div class="pub-fig-sub" style="margin-top: 1rem; '
-                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-                '<strong style="color: #0b1220;">4a — Distribution of planned enrollment</strong>'
-                '</div>',
+                '<div class="pub-subfig-header">4a — Distribution of planned enrollment</div>',
                 unsafe_allow_html=True,
             )
             _chart(fig4a, key='fig4a', width='stretch', config=PUB_EXPORT)
@@ -8122,10 +8135,7 @@ with tab_pub:
                 )
         with _f4b_col:
             st.markdown(
-                '<div class="pub-fig-sub" style="margin-top: 1rem; '
-                'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-                '<strong style="color: #0b1220;">4b — Median enrollment by trial phase</strong>'
-                '</div>',
+                '<div class="pub-subfig-header">4b — Median enrollment by trial phase</div>',
                 unsafe_allow_html=True,
             )
             _chart(fig4b, key='fig4b', width='stretch', config=PUB_EXPORT)
@@ -8215,11 +8225,9 @@ with tab_pub:
         # ── Forest plot: one panel replacing the three previous comparison charts.
         #    Rows are grouped vertically by category; dot = median, whisker = IQR.
         st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 1rem; '
-            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">4c — Enrollment by subgroup</strong> '
-            '<span style="color: #94a3b8;">— median (dot) and IQR (whisker)</span>'
-            '</div>',
+            '<div class="pub-subfig-header">4c — Enrollment by subgroup '
+            f'<span style="font-weight: 400; color: {THEME["faint"]};">'
+            '— median (dot) and IQR (whisker)</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -8617,9 +8625,7 @@ with tab_pub:
         # 7a: Therapy modality — cumulative horizontal bar
         # Modality is baked in _post_process_trials; no recompute needed per rerun.
         st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 0.4rem;">'
-            '<strong style="color: #0b1220;">7a — Cell-therapy modality distribution</strong>'
-            '</div>',
+            '<div class="pub-subfig-header">7a — Cell-therapy modality distribution</div>',
             unsafe_allow_html=True,
         )
         modality_counts = (
@@ -8652,10 +8658,7 @@ with tab_pub:
 
         # 7b: Modality over time (stacked bar shows composition and inflection points)
         st.markdown(
-            '<div class="pub-fig-sub" style="margin-top: 1rem; '
-            'border-top: 1px solid #e5e7eb; padding-top: 0.8rem;">'
-            '<strong style="color: #0b1220;">7b — Modality mix by start year</strong>'
-            '</div>',
+            '<div class="pub-subfig-header">7b — Modality mix by start year</div>',
             unsafe_allow_html=True,
         )
         # Prep outside the fragment: groupby runs once per filter change, not per
