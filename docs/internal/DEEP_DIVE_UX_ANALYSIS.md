@@ -1,5 +1,17 @@
 # Deep Dive — UX restructure analysis
 
+> **Update (post-2026-05-15):** most of Stages 1 + 2 from this brief
+> have shipped. The current Deep Dive sub-tab structure is: By
+> disease, By antigen (formerly "By target"; now with a modality
+> sub-filter), By product (its own sub-tab, was appended under By
+> target), By sponsor (type + specific consolidated into one tab),
+> By time (with year-end projection toggle), Compare. "By geography"
+> was removed entirely — all geographic content lives in the top-
+> level Geography / Map tab, which now uses the same picker-on-top /
+> landscape-default UX as the Deep Dive sub-tabs. The references
+> below to "By target" / "By geography" reflect the pre-restructure
+> state; they're preserved for historical context.
+
 The Deep Dive section is information-dense and powerful, but
 **hard to navigate intuitively**. A first-time visitor doesn't
 know which sub-tab answers their question. A returning visitor

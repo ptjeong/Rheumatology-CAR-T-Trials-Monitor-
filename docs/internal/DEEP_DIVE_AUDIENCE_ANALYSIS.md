@@ -1,5 +1,15 @@
 # Deep Dive — audience-driven restructure analysis
 
+> **Update (post-2026-05-15):** the sub-tab layout described in this
+> document has changed. Deep Dive now has 6 sub-tabs: By disease, By
+> antigen (with modality sub-filter, was "By target"), By product
+> (promoted out of By target), By sponsor (type + specific in one
+> tab), By time, Compare. Geography moved out entirely — all
+> geographic content lives in the top-level Geography / Map tab.
+> The audience analysis below is preserved for historical context;
+> some specific panel-by-panel scores no longer map directly to the
+> current structure. Treat as design intent, not current state.
+
 The Deep Dive section currently renders ~30 distinct charts across
 6 sub-tabs (By disease / By target / By sponsor / By geography /
 By time / Compare), counted in the canonical sense (a stacked-bar

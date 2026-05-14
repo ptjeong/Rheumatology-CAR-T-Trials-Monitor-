@@ -5540,11 +5540,13 @@ with tab_deepdive:
     st.markdown(
         f'<p class="small-note" style="color:{THEME["muted"]}">'
         "Six axis-pages with landscape figures + drilldowns: "
-        "<b>By disease</b>, <b>By target</b> (incl. per-product "
-        "pipeline), <b>By sponsor</b>, <b>By geography</b>, "
+        "<b>By disease</b>, <b>By antigen</b> (with modality sub-filter), "
+        "<b>By product</b>, <b>By sponsor</b> (type + specific), "
         "<b>By time</b> (annual starts, cumulative, cohort × phase, "
-        "Sankey), <b>Compare</b> (two diseases or antigens side-by-side). "
-        "Trial tables support row-click drilldown.</p>",
+        "year-end projection), <b>Compare</b> (two diseases / antigens / "
+        "modalities side-by-side). Geographic detail lives in the "
+        "<b>Geography / Map</b> tab above. Trial tables support row-click "
+        "drilldown to the full record.</p>",
         unsafe_allow_html=True,
     )
 
