@@ -5814,32 +5814,56 @@ with tab_deepdive:
             )
 
             # Row 2: Emergence lollipop (left) + Phase composition (right)
+            # — SHARED Y-AXIS for cross-read. Both charts plot the same
+            # antigens (top-12 by trial count, sorted by emergence year
+            # ascending so the earliest one sits at the top of both
+            # charts). Reader can scan one row across the panel: antigen
+            # X first appeared in year Y AND has phase mix Z. Without the
+            # alignment the lollipop and phase chart used different
+            # orderings (year vs trial count) and the reader had to track
+            # antigen names visually across charts.
+
+            # Compute the shared antigen list once
+            _emerge = (
+                df_filt.dropna(subset=["StartYear"])
+                .loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
+                .copy()
+            )
+            _emerge["StartYear"] = pd.to_numeric(_emerge["StartYear"], errors="coerce")
+            # An antigen hasn't "emerged" until its first ACTUAL trial
+            # starts. Clip planned-future rows so a target whose only
+            # CT.gov entry has a 2027 planned start doesn't appear on
+            # the timeline as a 2027 dot.
+            _emerge = _emerge[_emerge["StartYear"] <= _today_year()]
+
+            # Top 12 antigens by trial count among those with an
+            # emergence year. Sorted by emergence year ascending —
+            # ties broken by trial count descending so the more-active
+            # antigen appears higher within a year.
+            _ag_counts = _emerge["TargetCategory"].value_counts()
+            _emerge_first_all = (
+                _emerge.groupby("TargetCategory")["StartYear"].min()
+                .dropna().astype(int)
+            )
+            _ag_with_emerge = _ag_counts[_ag_counts.index.isin(_emerge_first_all.index)]
+            _shared_top = _ag_with_emerge.sort_values(ascending=False).head(12).index.tolist()
+            # Sort the chosen antigens by emergence year (asc), tiebreak
+            # by trial count (desc).
+            _shared_ordered = sorted(
+                _shared_top,
+                key=lambda t: (int(_emerge_first_all[t]), -int(_ag_counts[t])),
+            )
+
             _tld_a, _tld_b = st.columns(2)
             with _tld_a:
                 st.markdown("**Antigen emergence timeline (year of first trial)**")
-                _emerge = (
-                    df_filt.dropna(subset=["StartYear"])
-                    .loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
-                    .copy()
-                )
-                _emerge["StartYear"] = pd.to_numeric(_emerge["StartYear"], errors="coerce")
-                # An antigen hasn't "emerged" until its first ACTUAL trial
-                # starts. Clip planned-future rows so a target whose only
-                # CT.gov entry has a 2027 planned start doesn't appear on
-                # the timeline as a 2027 dot.
-                _emerge = _emerge[_emerge["StartYear"] <= _today_year()]
-                _emerge_first = (
-                    _emerge.groupby("TargetCategory")["StartYear"].min()
-                    .dropna().astype(int)
-                    .sort_values(ascending=False)  # earliest first → top via yaxis reverse below
-                    .reset_index().rename(columns={"StartYear": "FirstTrialYear"})
-                )
-                if not _emerge_first.empty:
+                if _shared_ordered:
+                    _emerge_first = pd.DataFrame({
+                        "TargetCategory": _shared_ordered,
+                        "FirstTrialYear": [int(_emerge_first_all[t]) for t in _shared_ordered],
+                    })
                     _min_yr = int(_emerge_first["FirstTrialYear"].min())
                     _max_yr = _today_year()
-                    # Build hairline traces (one Scatter trace with None
-                    # gaps draws all leader lines in one shape — much
-                    # faster than one trace per row).
                     _line_x: list = []
                     _line_y: list = []
                     for _, _row in _emerge_first.iterrows():
@@ -5876,22 +5900,82 @@ with tab_deepdive:
                             dtick=1, tickformat="d",
                             showgrid=False,
                         ),
-                        yaxis=dict(title=None, showgrid=False),
+                        # SHARED Y-AXIS ordering — autorange reversed puts
+                        # the first item (earliest emergence) at the top.
+                        yaxis=dict(
+                            title=None, showgrid=False,
+                            categoryorder="array",
+                            categoryarray=_shared_ordered,
+                            autorange="reversed",
+                        ),
                         font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                     )
                     _chart(_emerge_fig, key="dd_target_emergence_timeline")
             with _tld_b:
-                st.markdown("**Phase composition by target (top 12)**")
-                _tphase_in = df_filt.loc[
-                    ~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})
+                st.markdown("**Phase composition by target (same order as left)**")
+                # Custom horizontal stacked bar with the SHARED y-axis
+                # ordering. The _deepdive_phase_stack helper produces a
+                # vertical bar — using it here would break the alignment.
+                _phase_palette = {
+                    "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
+                    "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
+                    "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
+                    "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
+                }
+                _phase_in = df_filt.loc[
+                    df_filt["TargetCategory"].isin(_shared_ordered)
                 ].copy()
-                _chart(
-                    _deepdive_phase_stack(
-                        _tphase_in, group_col="TargetCategory",
-                        height=460, normalize=True,
-                    ),
-                    key="dd_target_phase_stack",
-                )
+                if not _phase_in.empty and "PhaseLabel" in _phase_in.columns:
+                    _phase_counts = (
+                        _phase_in.groupby(["TargetCategory", "PhaseLabel"])
+                        .size().reset_index(name="Trials")
+                    )
+                    _phase_grp_tot = _phase_counts.groupby("TargetCategory")["Trials"].transform("sum")
+                    _phase_counts["Pct"] = 100.0 * _phase_counts["Trials"] / _phase_grp_tot
+                    _phase_label_order = [
+                        PHASE_LABELS[p] for p in PHASE_ORDER
+                        if PHASE_LABELS[p] in set(_phase_counts["PhaseLabel"])
+                    ]
+                    _phase_fig = px.bar(
+                        _phase_counts,
+                        x="Pct", y="TargetCategory", color="PhaseLabel",
+                        orientation="h",
+                        category_orders={
+                            "TargetCategory": _shared_ordered,
+                            "PhaseLabel": _phase_label_order,
+                        },
+                        color_discrete_map=_phase_palette,
+                        template="plotly_white",
+                        height=460,
+                    )
+                    _phase_fig.update_traces(
+                        marker_line_width=0,
+                        hovertemplate="<b>%{y}</b><br>%{fullData.name}: %{x:.1f}%<extra></extra>",
+                    )
+                    _phase_fig.update_layout(
+                        margin=dict(l=12, r=12, t=8, b=100),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis=dict(title="Phase mix (%)", range=[0, 100]),
+                        # Mirror the lollipop's y-axis: same order, same reverse.
+                        # showticklabels=False because the antigen names already
+                        # appear on the lollipop to the left; duplicating them
+                        # here doubles label cost without adding info.
+                        yaxis=dict(
+                            title=None, showgrid=False,
+                            categoryorder="array",
+                            categoryarray=_shared_ordered,
+                            autorange="reversed",
+                            showticklabels=False,
+                        ),
+                        legend=dict(
+                            orientation="h", yanchor="top", y=-0.10, x=0,
+                            font=dict(family=FONT_FAMILY, size=10),
+                            title=dict(text=""),
+                        ),
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                        bargap=0.25,
+                    )
+                    _chart(_phase_fig, key="dd_target_phase_stack_aligned")
         else:
             # Filter by whichever pickers are set. Either or both can be
             # at "any" — the focused view only narrows on the active axes.
