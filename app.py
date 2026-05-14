@@ -5533,85 +5533,98 @@ with tab_deepdive:
                     .sort_values("Trials", ascending=False)
                 )
                 agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
-                st.caption(f"{len(agg)} diseases · sorted by trial count")
-                st.dataframe(
-                    agg, width='stretch', hide_index=True,
-                    column_config=_landscape_table_cols("Disease", "Disease"),
-                )
 
-                # ── Phase 1 additions: landscape-level overview figures ──
-                st.markdown("##### Disease landscape — patterns at a glance")
-                _ld_a, _ld_b = st.columns(2)
-                with _ld_a:
-                    st.markdown("**Disease × Antigen heat-map**")
-                    _hm_df = dd_df.loc[
-                        ~dd_df["TargetCategory"].isin(_PLATFORM_LABELS | {"Unknown", "Other_or_unknown"})
-                    ].drop_duplicates(subset=["NCTId", "_Disease"])
-                    _chart(
-                        _deepdive_heatmap(
-                            _hm_df, x_col="TargetCategory", y_col="_Disease",
-                            x_label="Antigen target", y_label="Disease entity",
-                            max_x=12, max_y=15, height=440,
-                        ),
-                        key="dd_disease_x_target_heatmap",
-                    )
-                with _ld_b:
-                    # "Annual trial starts by disease" removed — the
-                    # By time tab's selectable-axis timeline (group_col=
-                    # DiseaseEntity) is the canonical home for this view.
-                    # Keeping it here too duplicated the same data on the
-                    # same scroll.
-                    st.markdown("**Phase composition (top 12 diseases)**")
-                    _phase_in = dd_df.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
-                    _chart(
-                        _deepdive_phase_stack(
-                            _phase_in, group_col="_Disease",
-                            height=320, normalize=True,
-                        ),
-                        key="dd_disease_phase_stack",
-                    )
-
-                # ── Trial age by status (kept) ──
-                # Sibling sections "Competitive intensity (top-3 sponsor
-                # share)" and "Age-group coverage by disease" were
-                # removed 2026-05-07 per user feedback. The trial-age
-                # box plot stays — it's the most actionable of the
-                # three for spotting stalled vs active recruiting.
-                st.markdown("**Trial age by status (years since start)**")
-                st.caption(
-                    "Boxes show the distribution of years since each "
-                    "trial's start year, stratified by current status. "
-                    "Long Recruiting whiskers (≥3 y) flag stalled "
-                    "enrolment; long Active whiskers flag delayed "
-                    "completion."
-                )
-                _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
-                _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
-                _age_in = _age_in.dropna(subset=["StartYear"])
-                # Clip planned-future starts: a trial that hasn't started
-                # yet has a negative "TrialAge" which would smear the
-                # OverallStatus boxes leftward.
-                _age_in = _age_in[_age_in["StartYear"] <= _today_year()]
-                _age_in["TrialAge"] = _today_year() - _age_in["StartYear"].astype(int)
-                if not _age_in.empty:
-                    _chart(
-                        _deepdive_box(
-                            _age_in, group_col="OverallStatus",
-                            value_col="TrialAge",
-                            height=300, top_n=6,
-                        ),
-                        key="dd_disease_trial_age",
-                    )
-
+                # ── Focus picker at TOP of tab body ──
+                # Layout restructure 2026-05-15: default = landscape view
+                # (the across-all-diseases summary table + figures below);
+                # picking a specific disease here REPLACES the landscape
+                # with a focused drilldown for that disease. The previous
+                # layout had the picker mid-page after the landscape, which
+                # meant the reader scrolled past every chart before
+                # discovering the drilldown affordance.
                 disease_choices = agg["Disease"].tolist()
                 _seed_pick_from_query("dd_disease_pick", disease_choices)
                 pick = st.selectbox(
-                    "Drill into disease",
+                    "Focus on a disease (leave at '—' to see the landscape)",
                     options=["—"] + disease_choices,
                     key="dd_disease_pick",
                 )
                 _sync_pick_to_query("dd_disease_pick", ("—",))
-                if pick and pick != "—":
+
+                if pick == "—":
+                    # ── Landscape view (default) ──
+                    st.caption(f"{len(agg)} diseases · sorted by trial count")
+                    st.dataframe(
+                        agg, width='stretch', hide_index=True,
+                        column_config=_landscape_table_cols("Disease", "Disease"),
+                    )
+
+                    # ── Phase 1 additions: landscape-level overview figures ──
+                    st.markdown("##### Disease landscape — patterns at a glance")
+                    _ld_a, _ld_b = st.columns(2)
+                    with _ld_a:
+                        st.markdown("**Disease × Antigen heat-map**")
+                        _hm_df = dd_df.loc[
+                            ~dd_df["TargetCategory"].isin(_PLATFORM_LABELS | {"Unknown", "Other_or_unknown"})
+                        ].drop_duplicates(subset=["NCTId", "_Disease"])
+                        _chart(
+                            _deepdive_heatmap(
+                                _hm_df, x_col="TargetCategory", y_col="_Disease",
+                                x_label="Antigen target", y_label="Disease entity",
+                                max_x=12, max_y=15, height=440,
+                            ),
+                            key="dd_disease_x_target_heatmap",
+                        )
+                    with _ld_b:
+                        # "Annual trial starts by disease" removed — the
+                        # By time tab's selectable-axis timeline (group_col=
+                        # DiseaseEntity) is the canonical home for this view.
+                        # Keeping it here too duplicated the same data on the
+                        # same scroll.
+                        st.markdown("**Phase composition (top 12 diseases)**")
+                        _phase_in = dd_df.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
+                        _chart(
+                            _deepdive_phase_stack(
+                                _phase_in, group_col="_Disease",
+                                height=320, normalize=True,
+                            ),
+                            key="dd_disease_phase_stack",
+                        )
+
+                    # ── Trial age by status (kept) ──
+                    # Sibling sections "Competitive intensity (top-3 sponsor
+                    # share)" and "Age-group coverage by disease" were
+                    # removed 2026-05-07 per user feedback. The trial-age
+                    # box plot stays — it's the most actionable of the
+                    # three for spotting stalled vs active recruiting.
+                    st.markdown("**Trial age by status (years since start)**")
+                    st.caption(
+                        "Boxes show the distribution of years since each "
+                        "trial's start year, stratified by current status. "
+                        "Long Recruiting whiskers (≥3 y) flag stalled "
+                        "enrolment; long Active whiskers flag delayed "
+                        "completion."
+                    )
+                    _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
+                    _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
+                    _age_in = _age_in.dropna(subset=["StartYear"])
+                    # Clip planned-future starts: a trial that hasn't started
+                    # yet has a negative "TrialAge" which would smear the
+                    # OverallStatus boxes leftward.
+                    _age_in = _age_in[_age_in["StartYear"] <= _today_year()]
+                    _age_in["TrialAge"] = _today_year() - _age_in["StartYear"].astype(int)
+                    if not _age_in.empty:
+                        _chart(
+                            _deepdive_box(
+                                _age_in, group_col="OverallStatus",
+                                value_col="TrialAge",
+                                height=300, top_n=6,
+                            ),
+                            key="dd_disease_trial_age",
+                        )
+
+                else:
+                    # ── Focused view: drilldown for the picked disease ──
                     sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Trials", len(sub))
@@ -5763,7 +5776,13 @@ with tab_deepdive:
             _antigens_only, key=lambda t: -_target_counts.get(t, 0)
         )
 
-        ct1, ct2 = st.columns([0.7, 0.3])
+        # Two focus dimensions in By target: antigen AND modality. Picking
+        # antigen=CD19 + modality=Allogeneic shows the allogeneic CD19
+        # sub-population. Each picker independently defaults to "any" so
+        # the user can focus on one axis at a time. The landscape view
+        # renders when BOTH are at "any".
+        _modality_options_dd = [m for m in _MODALITY_ORDER if m in set(df_filt["Modality"])]
+        ct1, ct2, ct3 = st.columns([0.45, 0.35, 0.2])
         with ct1:
             _seed_pick_from_query("dd_target_pick", _target_options_sorted)
             target_pick = st.selectbox(
@@ -5777,15 +5796,31 @@ with tab_deepdive:
             )
             _sync_pick_to_query("dd_target_pick", ("(any — show landscape)",))
         with ct2:
+            # Modality focus — applies AS A FILTER on top of antigen
+            # picker; doesn't reset disease/sponsor sidebar filters.
+            _seed_pick_from_query("dd_target_modality_pick", _modality_options_dd)
+            modality_pick = st.selectbox(
+                "Modality (within antigen focus)",
+                ["(any)"] + _modality_options_dd,
+                key="dd_target_modality_pick",
+            )
+            _sync_pick_to_query("dd_target_modality_pick", ("(any)",))
+        with ct3:
             st.metric(
-                "Antigens in dataset",
+                "Antigens",
                 f"{len(_antigens_only)}",
                 help="Excludes catch-all buckets (Other_or_unknown / CAR-T_unspecified)",
             )
 
+        # Compute the focused subset once — used by all focused-view
+        # panels below. Landscape renders when both picks are default.
+        _target_no_focus = (
+            target_pick == "(any — show landscape)" and modality_pick == "(any)"
+        )
+
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_target")
-        elif target_pick == "(any — show landscape)":
+        elif _target_no_focus:
             st.markdown(
                 "**Top antigens by trial count** "
                 "<span style='color:#64748b; font-weight:400;'>"
@@ -5898,11 +5933,34 @@ with tab_deepdive:
                     key="dd_target_phase_stack",
                 )
         else:
-            focus = df_filt[df_filt["TargetCategory"] == target_pick].copy()
+            # Filter by whichever pickers are set. Either or both can be
+            # at "any" — the focused view only narrows on the active axes.
+            focus = df_filt.copy()
+            if target_pick != "(any — show landscape)":
+                focus = focus[focus["TargetCategory"] == target_pick]
+            if modality_pick != "(any)":
+                focus = focus[focus["Modality"] == modality_pick]
+            # Build a human-readable focus label for headings + empty-state
+            _focus_parts: list[str] = []
+            if target_pick != "(any — show landscape)":
+                _focus_parts.append(f"target = {target_pick}")
+            if modality_pick != "(any)":
+                _focus_parts.append(f"modality = {modality_pick}")
+            _focus_label = " · ".join(_focus_parts) if _focus_parts else "all trials"
+            # Streamlit widget keys must be alphanumeric-ish — sanitise the
+            # focus identifiers (target_pick + modality_pick) for use in
+            # per-focus widget keys further below.
+            def _safe(s: str) -> str:
+                return (
+                    str(s).replace("(", "").replace(")", "")
+                    .replace(" ", "_").replace("/", "-")
+                    .replace("—", "any").replace("·", "_")[:40]
+                )
+            _focus_token = f"t={_safe(target_pick)}_m={_safe(modality_pick)}"
 
             if focus.empty:
                 st.info(
-                    f"No trials match target = {target_pick}. "
+                    f"No trials match {_focus_label}. "
                     "Broaden the upstream sidebar filters if a category is excluded."
                 )
             else:
@@ -5921,7 +5979,7 @@ with tab_deepdive:
 
                 m1, m2, m3, m4 = st.columns(4)
                 with m1:
-                    st.metric("Trials", f"{_n:,}", help=f"Targeting {target_pick}")
+                    st.metric("Trials", f"{_n:,}", help=f"Focus: {_focus_label}")
                 with m2:
                     st.metric("Open / recruiting", f"{_rec:,}")
                 with m3:
@@ -5945,7 +6003,7 @@ with tab_deepdive:
                     if not _ents.empty:
                         _chart(
                             make_bar(_ents, "Entity", "Trials", height=280),
-                            key=f"focus_entity_{target_pick}",
+                            key=f"focus_entity_{_focus_token}",
                             width="stretch", config=PUB_EXPORT,
                         )
 
@@ -5974,7 +6032,7 @@ with tab_deepdive:
                     if not _phase_counts.empty:
                         _chart(
                             make_bar(_phase_counts, "Phase", "Count", height=280),
-                            key=f"focus_phase_{target_pick}",
+                            key=f"focus_phase_{_focus_token}",
                             width="stretch", config=PUB_EXPORT,
                         )
 
@@ -5993,14 +6051,14 @@ with tab_deepdive:
                 # ── Phase 1 additions: per-target drill-in figures ──
                 _td1, _td2 = st.columns(2)
                 with _td1:
-                    st.markdown(f"**Annual trial starts targeting {target_pick}**")
+                    st.markdown(f"**Annual trial starts — {_focus_label}**")
                     _focus_with_disease = _expand_disease_rows(focus)
                     _chart(
                         _deepdive_timeline(
                             _focus_with_disease.drop_duplicates(subset=["NCTId", "_Disease"]),
                             group_col="_Disease", height=280, top_n=5,
                         ),
-                        key=f"dd_target_timeline_{target_pick}",
+                        key=f"dd_target_timeline_{_focus_token}",
                     )
                 with _td2:
                     st.markdown("**Enrollment-size distribution by disease**")
@@ -6011,12 +6069,12 @@ with tab_deepdive:
                             value_col="EnrollmentCount",
                             height=280, top_n=8,
                         ),
-                        key=f"dd_target_enrollment_box_{target_pick}",
+                        key=f"dd_target_enrollment_box_{_focus_token}",
                     )
 
                 # Top sponsors developing this antigen
                 st.markdown(
-                    f"**Top sponsors developing {target_pick}** "
+                    f"**Top sponsors — {_focus_label}** "
                     f"<span style='color:#64748b; font-weight:400;'>"
                     f"({_sponsors} distinct sponsors total)</span>",
                     unsafe_allow_html=True,
@@ -6032,7 +6090,7 @@ with tab_deepdive:
 
                 # Trial list with row-click → drilldown
                 st.markdown(
-                    f"### Trials targeting **{target_pick}** "
+                    f"### Trials — **{_focus_label}** "
                     f"<span style='color:#64748b; font-weight:400;'>"
                     f"({_n} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
@@ -6062,7 +6120,7 @@ with tab_deepdive:
                     _focus_sorted[_target_trial_cols],
                     width="stretch", height=420, hide_index=True,
                     on_select="rerun", selection_mode="single-row",
-                    key=f"deep_target_trial_table_{target_pick}",
+                    key=f"deep_target_trial_table_{_focus_token}",
                     column_config=_trial_detail_cols(),
                 )
                 _target_rows = (
@@ -6073,15 +6131,15 @@ with tab_deepdive:
                 if _target_rows:
                     _render_trial_drilldown(
                         _focus_sorted.iloc[_target_rows[0]],
-                        key_suffix=f"deep_target_{target_pick}",
+                        key_suffix=f"deep_target_{_focus_token}",
                     )
 
                 st.download_button(
-                    f"Download trials targeting {target_pick} (CSV)",
+                    f"Download trials — {_focus_label} (CSV)",
                     data=_csv_with_provenance(
-                        focus, f"Deep-dive by target: {target_pick}",
+                        focus, f"Deep-dive by target: {_focus_label}",
                     ),
-                    file_name=f"deep_dive_target_{target_pick}.csv".replace(
+                    file_name=f"deep_dive_target_{_focus_token}.csv".replace(
                         "/", "_").replace(" ", "_"),
                     mime="text/csv",
                 )
