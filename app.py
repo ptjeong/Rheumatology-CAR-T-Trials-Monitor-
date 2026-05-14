@@ -2374,6 +2374,41 @@ def _mini_count_cols(label: str) -> dict:
     }
 
 
+# ── Year-axis clipping helper ───────────────────────────────────────────────
+# Every year-axis chart in the dashboard clips its visible x-range at today's
+# calendar year. CT.gov entries are sometimes registered 6-18 months ahead
+# of first-patient-in (e.g. a study registered in 2026 with planned start
+# 2027); without this clip the auto-scaled axis draws a near-zero "future
+# year" column that tells the reader nothing except "future date exists in
+# the data". Auto-adapts as the calendar year advances — no per-year
+# maintenance needed.
+#
+# Helper returns the current calendar year as an int. Use either as a hard
+# upper bound on an axis range, or as a filter on the underlying df before
+# grouping by year (`df[df["StartYear"] <= _today_year()]`). The full data
+# is still in the per-figure CSV download — only the chart visual clips.
+def _today_year() -> int:
+    """Current calendar year — used to clip every year-axis chart's
+    x-range so planned-future StartYear rows don't drag the visible
+    axis past today."""
+    return pd.Timestamp.now().year
+
+
+def _clip_future_starts(df: pd.DataFrame, year_col: str = "StartYear") -> pd.DataFrame:
+    """Drop rows whose `year_col` value is past `_today_year()`. Safe on
+    empty / missing-column inputs. Coerces year_col to numeric so string
+    or float years don't slip through (CT.gov returns these as strings
+    in some snapshots). Returns a copy so the caller's df isn't mutated."""
+    if df.empty or year_col not in df.columns:
+        return df
+    out = df.copy()
+    _y = pd.to_numeric(out[year_col], errors="coerce")
+    # Keep rows where year is missing OR ≤ today (missing-year rows are
+    # filtered elsewhere if the chart can't handle them; this helper is
+    # specifically about future-year filtering, not missing-year filtering).
+    return out[_y.isna() | (_y <= _today_year())]
+
+
 def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     fig = px.bar(
         df_plot, x=x, y=y, height=height,
@@ -2584,6 +2619,10 @@ def _deepdive_timeline(
     df["StartYear"] = pd.to_numeric(df["StartYear"], errors="coerce")
     df = df.dropna(subset=["StartYear"])
     df["StartYear"] = df["StartYear"].astype(int)
+    # Clip planned-future StartYears so the rightmost year of the chart
+    # is never past today. Single chokepoint serving all 5 timeline call
+    # sites (By disease, By target, By sponsor, By time, By product).
+    df = df[df["StartYear"] <= _today_year()]
     if df.empty:
         return go.Figure()
     top_groups = (
@@ -5140,11 +5179,14 @@ with tab_deepdive:
                     "enrolment; long Active whiskers flag delayed "
                     "completion."
                 )
-                _today_year = pd.Timestamp.utcnow().year
                 _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
                 _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
                 _age_in = _age_in.dropna(subset=["StartYear"])
-                _age_in["TrialAge"] = _today_year - _age_in["StartYear"].astype(int)
+                # Clip planned-future starts: a trial that hasn't started
+                # yet has a negative "TrialAge" which would smear the
+                # OverallStatus boxes leftward.
+                _age_in = _age_in[_age_in["StartYear"] <= _today_year()]
+                _age_in["TrialAge"] = _today_year() - _age_in["StartYear"].astype(int)
                 if not _age_in.empty:
                     _chart(
                         _deepdive_box(
@@ -5392,6 +5434,11 @@ with tab_deepdive:
                     .copy()
                 )
                 _emerge["StartYear"] = pd.to_numeric(_emerge["StartYear"], errors="coerce")
+                # An antigen hasn't "emerged" until its first ACTUAL trial
+                # starts. Clip planned-future rows so a target whose only
+                # CT.gov entry has a 2027 planned start doesn't appear on
+                # the timeline as a 2027 dot.
+                _emerge = _emerge[_emerge["StartYear"] <= _today_year()]
                 _emerge_first = (
                     _emerge.groupby("TargetCategory")["StartYear"].min()
                     .dropna().astype(int).sort_values()
@@ -6167,6 +6214,7 @@ with tab_deepdive:
                 _df_t = _df_t.dropna(subset=["StartYear"])
                 if not _df_t.empty:
                     _df_t["StartYear"] = _df_t["StartYear"].astype(int)
+                    _df_t = _df_t[_df_t["StartYear"] <= _today_year()]
                     _yearly = (
                         _df_t.groupby("StartYear").size()
                         .sort_index().cumsum().reset_index(name="CumulativeTrials")
@@ -6195,6 +6243,7 @@ with tab_deepdive:
             _cohort_in = df_filt.copy()
             _cohort_in["StartYear"] = pd.to_numeric(_cohort_in["StartYear"], errors="coerce")
             _cohort_in = _cohort_in.dropna(subset=["StartYear"])
+            _cohort_in = _cohort_in[_cohort_in["StartYear"] <= _today_year()]
             if not _cohort_in.empty:
                 _cohort_in["StartYear"] = _cohort_in["StartYear"].astype(int).astype(str)
                 _chart(
@@ -6237,6 +6286,7 @@ with tab_deepdive:
             _hm_in = df_filt.copy()
             _hm_in["StartYear"] = pd.to_numeric(_hm_in["StartYear"], errors="coerce")
             _hm_in = _hm_in.dropna(subset=["StartYear"])
+            _hm_in = _hm_in[_hm_in["StartYear"] <= _today_year()]
             if not _hm_in.empty:
                 _hm_in["StartYear"] = _hm_in["StartYear"].astype(int).astype(str)
                 _hm_in["PhaseLabel"] = _hm_in["PhaseLabel"].fillna("Unknown")
@@ -6600,18 +6650,13 @@ with tab_pub:
     # ------------------------------------------------------------------
     years_raw = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
     _FIG1_LEADING_MIN = 3
-    # Cap the visible x-axis at today's calendar year. Some industry trials
-    # have a StartYear set 6-18 months in the future (e.g. NCT entries
-    # registered in 2026 with a planned 2027 first-patient-in date); without
-    # this cap the chart shows a near-zero 2027 column that tells the reader
-    # nothing except "future date exists in the data". The full data is
-    # still in the CSV download — only the visual axis is clipped.
-    _today_year = pd.Timestamp.now().year
+    # Visible x-axis clips at _today_year() — see helper comment for
+    # rationale. Underlying CSV still contains any future-year rows.
     if len(years_raw):
         _yearly_raw = years_raw.value_counts().sort_index()
         _above_raw = _yearly_raw[_yearly_raw >= _FIG1_LEADING_MIN]
         _yr_display_min = int(_above_raw.index.min()) if not _above_raw.empty else int(_yearly_raw.index.min())
-        _yr_display_max = min(int(_yearly_raw.index.max()), _today_year)
+        _yr_display_max = min(int(_yearly_raw.index.max()), _today_year())
     else:
         _yr_display_min = _yr_display_max = None
     _pub_header(
@@ -6722,8 +6767,9 @@ with tab_pub:
         fig1.update_xaxes(tickmode="linear", dtick=1, tickformat="d", showgrid=False)
         fig1.update_yaxes(rangemode="tozero")
 
-        # Partial-year marker
-        _current_year = pd.Timestamp.now().year
+        # Partial-year marker — shades the current (incomplete) calendar
+        # year so the reader doesn't mistake it for a YoY drop.
+        _current_year = _today_year()
         if int(fig1_long["StartYear"].max()) >= _current_year:
             fig1.add_vrect(
                 x0=_current_year - 0.5, x1=_current_year + 0.5,
@@ -7609,7 +7655,10 @@ with tab_pub:
         # year at most — restricting to ≥2019 avoids noisy early bars dominating
         # the "% of year" view.
         _mod_year_raw = (
-            df_innov[df_innov["StartYear"] >= 2019]
+            df_innov[
+                (df_innov["StartYear"] >= 2019)
+                & (df_innov["StartYear"] <= _today_year())
+            ]
             .groupby(["StartYear", "Modality"]).size()
             .reset_index(name="Trials")
         )
