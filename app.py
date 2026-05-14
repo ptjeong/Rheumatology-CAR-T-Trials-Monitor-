@@ -2038,47 +2038,10 @@ st.markdown(
         display: none !important;
     }}
 
-    /* ── Radio-as-tabs (Deep Dive sub-nav) ────────────────────────────
-       Streamlit's st.tabs doesn't persist active tab across reruns.
-       We use st.radio with horizontal=True styled to look like tabs.
-       Scoped via the .dd-tabs-radio wrapper so other radios on the
-       page (e.g., Time-axis colour selector inside the By time tab)
-       keep their default Streamlit radio styling. */
-    .dd-tabs-radio + div div[data-testid="stRadio"] > div {{
-        flex-direction: row !important;
-        gap: 0 !important;
-        border-bottom: 1px solid {THEME["border"]};
-        margin-bottom: 0.6rem;
-    }}
-    .dd-tabs-radio + div div[data-testid="stRadio"] label {{
-        padding: 10px 18px !important;
-        margin: 0 !important;
-        border: none !important;
-        border-radius: 0 !important;
-        border-bottom: 2px solid transparent !important;
-        margin-bottom: -1px !important;
-        cursor: pointer;
-        transition: color 0.12s, border-color 0.12s;
-        font-size: var(--fs-base) !important;
-        font-weight: var(--fw-medium) !important;
-        letter-spacing: var(--tracking-normal) !important;
-        color: {THEME["muted"]} !important;
-        background: transparent !important;
-    }}
-    .dd-tabs-radio + div div[data-testid="stRadio"] label:hover {{
-        background: transparent !important;
-        color: {THEME["text"]} !important;
-    }}
-    /* Hide the radio circle — only the label text + underline read as a tab */
-    .dd-tabs-radio + div div[data-testid="stRadio"] label > div:first-child {{
-        display: none !important;
-    }}
-    /* Active option — underline + primary colour */
-    .dd-tabs-radio + div div[data-testid="stRadio"] label:has(input:checked) {{
-        color: {THEME["primary"]} !important;
-        font-weight: var(--fw-semibold) !important;
-        border-bottom-color: {THEME["primary"]} !important;
-    }}
+    /* The previous radio-as-tabs hack (dd-tabs-radio class + :has() CSS)
+       was replaced with st.pills (native Streamlit widget designed for
+       tab-like nav). The browser's default st.pills styling is already
+       on-brand; no override needed. */
 
     /* ── Data table ───────────────────────────────────────────────────── */
     div[data-testid="stDataFrame"] {{
@@ -5373,15 +5336,21 @@ with tab_deepdive:
             _qp_tab = _qp_tab[0] if _qp_tab else None
         if _qp_tab in _DD_VIEWS:
             st.session_state.dd_active_view = _qp_tab
-    st.markdown('<div class="dd-tabs-radio">', unsafe_allow_html=True)
-    _active = st.radio(
+    # st.pills is a native Streamlit widget (1.39+) designed exactly for
+    # tab-like navigation — pill-shaped buttons with proper active-state
+    # styling out of the box. Replaces the prior st.radio + CSS hack
+    # which relied on :has(input:checked) and a fragile DOM-targeting
+    # rule to make radio circles look like tabs. With st.pills the
+    # underline-style tab visual just works and persists state across
+    # reruns via the key= parameter (same as the previous radio).
+    _active = st.pills(
         "Deep Dive view",
         options=_DD_VIEWS,
-        horizontal=True,
+        selection_mode="single",
+        default=st.session_state.get("dd_active_view", "By disease"),
         label_visibility="collapsed",
         key="dd_active_view",
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+    ) or "By disease"
     # Sync to URL (skip default to keep clean URLs short).
     if _active != "By disease":
         st.query_params["dd_tab"] = _active
@@ -5720,18 +5689,23 @@ with tab_deepdive:
         # the user can focus on one axis at a time. The landscape view
         # renders when BOTH are at "any".
         _modality_options_dd = [m for m in _MODALITY_ORDER if m in set(df_filt["Modality"])]
-        ct1, ct2, ct3 = st.columns([0.45, 0.35, 0.2])
+        # Two focus pickers, 50/50 split. The previous layout had a
+        # third column showing a small "Antigens N" metric tile — that
+        # standalone count number didn't add enough value to earn its
+        # ~20% of horizontal space. The count now lives as a small
+        # caption below the antigen picker (compact + on-context).
+        ct1, ct2 = st.columns(2)
         with ct1:
             _seed_pick_from_query("dd_target_pick", _target_options_sorted)
             target_pick = st.selectbox(
-                "Focus on an antigen target",
+                f"Focus on an antigen target — {len(_antigens_only)} available",
                 ["(any — show landscape)"] + _target_options_sorted,
                 key="dd_target_pick",
                 format_func=lambda t: (
                     t if t == "(any — show landscape)"
                     else f"{t}  ({_target_counts.get(t, 0)} trials)"
                 ),
-                help="Leave at '(any — show landscape)' to see all antigens. Pick one to filter to that antigen — combine with the modality picker for cross-axis narrowing.",
+                help="Leave at '(any — show landscape)' to see all antigens. Pick one to filter to that antigen — combine with the modality picker for cross-axis narrowing. Catch-all buckets (Other_or_unknown / CAR-T_unspecified) are excluded.",
             )
             _sync_pick_to_query("dd_target_pick", ("(any — show landscape)",))
         with ct2:
@@ -5739,18 +5713,12 @@ with tab_deepdive:
             # picker; doesn't reset disease/sponsor sidebar filters.
             _seed_pick_from_query("dd_target_modality_pick", _modality_options_dd)
             modality_pick = st.selectbox(
-                "Focus on a modality",
+                f"Focus on a modality — {len(_modality_options_dd)} available",
                 ["(any)"] + _modality_options_dd,
                 key="dd_target_modality_pick",
                 help="Applies as an additional filter on top of the antigen pick. Leave at '(any)' for no modality filter.",
             )
             _sync_pick_to_query("dd_target_modality_pick", ("(any)",))
-        with ct3:
-            st.metric(
-                "Antigens",
-                f"{len(_antigens_only)}",
-                help="Excludes catch-all buckets (Other_or_unknown / CAR-T_unspecified)",
-            )
 
         # Compute the focused subset once — used by all focused-view
         # panels below. Landscape renders when both picks are default.
@@ -5799,26 +5767,38 @@ with tab_deepdive:
                 "Pick a specific antigen above to see its full focus view."
             )
 
-            # ── Phase 1 additions: target landscape figures ──
+            # ── Antigen landscape figures (restructured 2026-05-14) ──
+            # Previous layout: 2 columns, heatmap on the left (took the
+            # full vertical), emergence + phase composition stacked on
+            # the right (both cramped — phase composition was h=320 and
+            # the emergence scatter had text labels overflowing the
+            # right margin). New layout: heatmap full-width on top, then
+            # emergence + phase composition side-by-side below at h=460
+            # each. Emergence redesigned from scatter-with-text to
+            # Cleveland lollipop dotplot — antigen names as y-axis tick
+            # labels (legible, no overlap) + dots at year of first trial
+            # + thin hairlines for visual grouping.
             st.markdown("##### Antigen landscape — patterns at a glance")
+
+            # Row 1: Target × Disease heatmap (full-width, the most data-
+            # dense chart of the three)
+            st.markdown("**Target × Disease heat-map**")
+            _hm_in = _expand_disease_rows(df_filt)
+            _hm_in = _hm_in.loc[~_hm_in["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
+            _chart(
+                _deepdive_heatmap(
+                    _hm_in.drop_duplicates(subset=["NCTId", "_Disease"]),
+                    x_col="TargetCategory", y_col="_Disease",
+                    x_label="Antigen target", y_label="Disease entity",
+                    max_x=12, max_y=15, height=440,
+                    colorscale="Purples",
+                ),
+                key="dd_target_landscape_heatmap",
+            )
+
+            # Row 2: Emergence lollipop (left) + Phase composition (right)
             _tld_a, _tld_b = st.columns(2)
             with _tld_a:
-                st.markdown("**Target × Disease heat-map**")
-                # Explode multi-disease baskets so a SLE+SSc trial counts in
-                # both rows. Filter platform labels out of the antigen axis.
-                _hm_in = _expand_disease_rows(df_filt)
-                _hm_in = _hm_in.loc[~_hm_in["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})]
-                _chart(
-                    _deepdive_heatmap(
-                        _hm_in.drop_duplicates(subset=["NCTId", "_Disease"]),
-                        x_col="TargetCategory", y_col="_Disease",
-                        x_label="Antigen target", y_label="Disease entity",
-                        max_x=12, max_y=15, height=440,
-                        colorscale="Purples",
-                    ),
-                    key="dd_target_landscape_heatmap",
-                )
-            with _tld_b:
                 st.markdown("**Antigen emergence timeline (year of first trial)**")
                 _emerge = (
                     df_filt.dropna(subset=["StartYear"])
@@ -5833,34 +5813,57 @@ with tab_deepdive:
                 _emerge = _emerge[_emerge["StartYear"] <= _today_year()]
                 _emerge_first = (
                     _emerge.groupby("TargetCategory")["StartYear"].min()
-                    .dropna().astype(int).sort_values()
+                    .dropna().astype(int)
+                    .sort_values(ascending=False)  # earliest first → top via yaxis reverse below
                     .reset_index().rename(columns={"StartYear": "FirstTrialYear"})
                 )
                 if not _emerge_first.empty:
-                    _emerge_fig = px.scatter(
-                        _emerge_first.assign(_y=range(len(_emerge_first), 0, -1)),
-                        x="FirstTrialYear", y="_y",
-                        text="TargetCategory",
-                        template="plotly_white",
-                        height=440,
-                    )
-                    _emerge_fig.update_traces(
-                        textposition="middle right",
-                        marker=dict(size=10, color=[
+                    _min_yr = int(_emerge_first["FirstTrialYear"].min())
+                    _max_yr = _today_year()
+                    # Build hairline traces (one Scatter trace with None
+                    # gaps draws all leader lines in one shape — much
+                    # faster than one trace per row).
+                    _line_x: list = []
+                    _line_y: list = []
+                    for _, _row in _emerge_first.iterrows():
+                        _line_x += [_min_yr - 0.4, _row["FirstTrialYear"], None]
+                        _line_y += [_row["TargetCategory"], _row["TargetCategory"], None]
+                    _emerge_fig = go.Figure()
+                    _emerge_fig.add_trace(go.Scatter(
+                        x=_line_x, y=_line_y,
+                        mode="lines",
+                        line=dict(color="#e5e7eb", width=1.2),
+                        hoverinfo="skip", showlegend=False,
+                    ))
+                    _emerge_fig.add_trace(go.Scatter(
+                        x=_emerge_first["FirstTrialYear"],
+                        y=_emerge_first["TargetCategory"],
+                        mode="markers+text",
+                        marker=dict(size=11, color=[
                             ENTITY_COLORS.get(t, "#0c4a6e")
                             for t in _emerge_first["TargetCategory"]
                         ]),
-                    )
+                        text=_emerge_first["FirstTrialYear"],
+                        textposition="middle right",
+                        textfont=dict(size=10, color=THEME["muted"]),
+                        hovertemplate="<b>%{y}</b><br>First trial: %{x}<extra></extra>",
+                        showlegend=False, cliponaxis=False,
+                    ))
                     _emerge_fig.update_layout(
-                        margin=dict(l=12, r=140, t=12, b=40),
+                        height=460,
+                        margin=dict(l=110, r=56, t=8, b=40),
                         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis_title="Year of first trial",
-                        yaxis=dict(visible=False, range=[0, len(_emerge_first) + 1]),
+                        xaxis=dict(
+                            title="Year of first trial",
+                            range=[_min_yr - 0.6, _max_yr + 0.6],
+                            dtick=1, tickformat="d",
+                            showgrid=False,
+                        ),
+                        yaxis=dict(title=None, showgrid=False),
                         font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                        showlegend=False,
                     )
                     _chart(_emerge_fig, key="dd_target_emergence_timeline")
-
+            with _tld_b:
                 st.markdown("**Phase composition by target (top 12)**")
                 _tphase_in = df_filt.loc[
                     ~df_filt["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})
@@ -5868,7 +5871,7 @@ with tab_deepdive:
                 _chart(
                     _deepdive_phase_stack(
                         _tphase_in, group_col="TargetCategory",
-                        height=320, normalize=True,
+                        height=460, normalize=True,
                     ),
                     key="dd_target_phase_stack",
                 )
