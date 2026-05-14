@@ -3187,6 +3187,81 @@ def _sync_filters_to_query(opt_map: dict[str, list[str]]) -> None:
             st.query_params[qkey] = ",".join(val)
 
 
+# ── Deep Dive focus pickers — single-value URL binding ──────────────────────
+# Each Deep Dive sub-tab (By disease / target / sponsor / geography) has a
+# "drill into one X" selectbox that historically lived in session_state with
+# no URL state. As part of the Stage-1 UX restructure (see
+# docs/internal/DEEP_DIVE_UX_ANALYSIS.md) these pickers now round-trip
+# through st.query_params, so a focused view becomes a shareable URL:
+#   /?fd=SLE&ft=CD19&fc=Germany   → opens with SLE / CD19 / Germany focused
+#
+# Map: session_state key → URL param key.
+_FOCUS_PICKER_QPARAM = {
+    "dd_disease_pick":      "fd",   # focus disease
+    "dd_target_pick":       "ft",   # focus target
+    "dd_sponsor_pick":      "fst",  # focus sponsor type
+    "dd_sponsor_one_pick":  "fsp",  # focus specific sponsor (label-suffixed)
+    "dd_geo_country_pick":  "fco",  # focus country
+}
+
+
+def _seed_pick_from_query(state_key: str, options: list[str]) -> None:
+    """Seed a single-value picker's session_state from query_params.
+
+    Symmetric with `_seed_filter_from_query` but for single-value
+    selectboxes. If the URL contains a value that's not in the
+    current options (e.g. a stale link after sidebar filters
+    narrowed the data), the seed is silently dropped — the picker
+    falls back to its default."""
+    if state_key in st.session_state:
+        return
+    qkey = _FOCUS_PICKER_QPARAM.get(state_key)
+    if not qkey:
+        return
+    raw = st.query_params.get(qkey)
+    if raw is None:
+        return
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw and raw in set(options):
+        st.session_state[state_key] = raw
+
+
+def _sync_pick_to_query(state_key: str, no_focus_sentinels: tuple[str, ...]) -> None:
+    """Write a single-value picker's session_state back to URL params.
+    `no_focus_sentinels` lists the "no selection" values for this
+    picker (most use "—"; the target picker uses
+    "(any — show landscape)"). When the picker is at a no-focus
+    value, the URL param is removed entirely so a fresh URL stays
+    clean."""
+    qkey = _FOCUS_PICKER_QPARAM.get(state_key)
+    if not qkey:
+        return
+    val = st.session_state.get(state_key)
+    if val is None or val in no_focus_sentinels:
+        st.query_params.pop(qkey, None)
+    else:
+        st.query_params[qkey] = str(val)
+
+
+def _any_focus_active() -> bool:
+    """True if any Deep Dive focus picker is set to a non-default value.
+    Drives the visibility of the "Reset focus" button."""
+    sentinels = {"—", "(any — show landscape)", "", None}
+    return any(
+        st.session_state.get(k) not in sentinels
+        for k in _FOCUS_PICKER_QPARAM
+    )
+
+
+def _reset_focus_picks() -> None:
+    """Clear every Deep Dive focus picker's session_state + URL param."""
+    for k in _FOCUS_PICKER_QPARAM:
+        st.session_state.pop(k, None)
+    for qk in _FOCUS_PICKER_QPARAM.values():
+        st.query_params.pop(qk, None)
+
+
 if st.sidebar.button("Reset filters", width='stretch'):
     for _k in _FILTER_KEYS:
         st.session_state.pop(_k, None)
@@ -5046,6 +5121,75 @@ with tab_deepdive:
         unsafe_allow_html=True,
     )
 
+    # ── Active-state strip (chips + reset button) ──────────────────────
+    # Stage-1 UX restructure (DEEP_DIVE_UX_ANALYSIS.md). Two goals:
+    #   1. Make the sidebar filter state VISIBLE while exploring Deep
+    #      Dive — readers were forgetting which filters were active
+    #      and misinterpreting sparse charts as "the field is small".
+    #   2. Make the per-tab drilldown picks ("focused on SLE / CD19 /
+    #      Germany") visible at-glance, and one-click resettable.
+    #
+    # The strip only renders when something non-default is active —
+    # a clean default view has no chip strip, no visual noise.
+    _sidebar_chips: list[str] = []
+    for _sk, _opts in _sync_opt_map.items():
+        _val = st.session_state.get(_sk)
+        if _val is not None and set(_val) != set(_opts):
+            _label = _sk.replace("flt_", "").replace("_", " ").title()
+            # Cap displayed values at 3 + suffix to avoid huge chips
+            _shown = list(_val)[:3]
+            _suffix = f" +{len(_val) - 3}" if len(_val) > 3 else ""
+            _sidebar_chips.append(f"{_label}: {', '.join(_shown)}{_suffix}")
+    _focus_chips: list[str] = []
+    _focus_labels = {
+        "dd_disease_pick":     "Disease",
+        "dd_target_pick":      "Target",
+        "dd_sponsor_pick":     "Sponsor type",
+        "dd_sponsor_one_pick": "Sponsor",
+        "dd_geo_country_pick": "Country",
+    }
+    _focus_sentinels = {"—", "(any — show landscape)", "", None}
+    for _k, _lbl in _focus_labels.items():
+        _v = st.session_state.get(_k)
+        if _v not in _focus_sentinels:
+            # Specific-sponsor picker stores "Sponsor (N trials)" labels —
+            # strip the count parenthetical for display.
+            _v_display = (
+                _v.rsplit("  (", 1)[0]
+                if _k == "dd_sponsor_one_pick" and "  (" in str(_v)
+                else _v
+            )
+            _focus_chips.append(f"{_lbl}: {_v_display}")
+    if _sidebar_chips or _focus_chips:
+        _strip_col_chips, _strip_col_btn = st.columns([0.85, 0.15])
+        with _strip_col_chips:
+            _chip_html_parts = []
+            for _c in _sidebar_chips:
+                _chip_html_parts.append(
+                    f'<span style="display: inline-block; padding: 2px 10px; '
+                    f'margin: 0 6px 4px 0; background: #e0f2fe; '
+                    f'color: #0c4a6e; border-radius: 12px; font-size: 12px; '
+                    f'border: 1px solid #bae6fd;">'
+                    f'🔎 {_c}</span>'
+                )
+            for _c in _focus_chips:
+                _chip_html_parts.append(
+                    f'<span style="display: inline-block; padding: 2px 10px; '
+                    f'margin: 0 6px 4px 0; background: #fef3c7; '
+                    f'color: #78350f; border-radius: 12px; font-size: 12px; '
+                    f'border: 1px solid #fde68a;">'
+                    f'🎯 {_c}</span>'
+                )
+            st.markdown(
+                "".join(_chip_html_parts),
+                unsafe_allow_html=True,
+            )
+        with _strip_col_btn:
+            if _focus_chips and st.button("Reset focus", key="dd_reset_focus",
+                                          help="Clear all Deep Dive drilldown picks (does not affect sidebar filters)"):
+                _reset_focus_picks()
+                st.rerun()
+
     # ── Sub-tab structure (post-consolidation, 2026-05-07) ──
     # Compare is its own tab again per user feedback (it was briefly
     # appended to By disease in the Phase 7 consolidation; restored
@@ -5119,6 +5263,12 @@ with tab_deepdive:
     # ===== By disease =====
     with deep_sub_disease:
         st.subheader("Disease-entity focus")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>Which indications have the most activity, and which "
+            "antigens are being tried in each?</b></p>",
+            unsafe_allow_html=True,
+        )
         if df_filt.empty:
             st.info("No trials in the current filter selection.")
         else:
@@ -5211,11 +5361,13 @@ with tab_deepdive:
                     )
 
                 disease_choices = agg["Disease"].tolist()
+                _seed_pick_from_query("dd_disease_pick", disease_choices)
                 pick = st.selectbox(
                     "Drill into disease",
                     options=["—"] + disease_choices,
                     key="dd_disease_pick",
                 )
+                _sync_pick_to_query("dd_disease_pick", ("—",))
                 if pick and pick != "—":
                     sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
                     c1, c2, c3, c4 = st.columns(4)
@@ -5337,6 +5489,12 @@ with tab_deepdive:
     # ===== By target (NEW; ported from onc commit 5e6553b, rheum-adapted) =====
     with deep_sub_target:
         st.subheader("Antigen target focus")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>Which antigens dominate, in which diseases, and how "
+            "have they emerged over time?</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Pick an antigen to see how its pipeline spreads across diseases, "
             "phases, modalities, and sponsors. Same row-click drilldown as the "
@@ -5363,6 +5521,7 @@ with tab_deepdive:
 
         ct1, ct2 = st.columns([0.7, 0.3])
         with ct1:
+            _seed_pick_from_query("dd_target_pick", _target_options_sorted)
             target_pick = st.selectbox(
                 "Antigen target",
                 ["(any — show landscape)"] + _target_options_sorted,
@@ -5372,6 +5531,7 @@ with tab_deepdive:
                     else f"{t}  ({_target_counts.get(t, 0)} trials)"
                 ),
             )
+            _sync_pick_to_query("dd_target_pick", ("(any — show landscape)",))
         with ct2:
             st.metric(
                 "Antigens in dataset",
@@ -5687,6 +5847,12 @@ with tab_deepdive:
     with deep_sub_product:
         st.divider()
         st.subheader("Per-product pipeline view")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>Where is each named CAR-T product in its development "
+            "pipeline, and which sponsors / indications does it span?</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Each row is one named CAR-T product (KYV-101, CABA-201, ADI-001, "
             "CNTY-101, …). Shows the product's portfolio across the filtered "
@@ -5858,6 +6024,12 @@ with tab_deepdive:
     # ===== By sponsor type =====
     with deep_sub_sponsor:
         st.subheader("Landscape by sponsor type")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>Who's sponsoring trials, how concentrated is each "
+            "indication, and what's any single sponsor's portfolio?</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Aggregates the filtered dataset by sponsor type "
             "(Industry / Academic / Government / Other). Drill into any "
@@ -5931,9 +6103,11 @@ with tab_deepdive:
                 # Removing the duplicate keeps each tab focused.
 
             sp_choices = agg["SponsorType"].tolist()
+            _seed_pick_from_query("dd_sponsor_pick", sp_choices)
             pick = st.selectbox(
                 "Drill into sponsor type", options=["—"] + sp_choices, key="dd_sponsor_pick",
             )
+            _sync_pick_to_query("dd_sponsor_pick", ("—",))
             if pick and pick != "—":
                 sub = df_filt[df_filt["SponsorType"] == pick].copy()
 
@@ -6013,6 +6187,12 @@ with tab_deepdive:
     # ===== By geography (NEW Phase 2) =====
     with deep_sub_geo:
         st.subheader("Geographic landscape")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>Where are sites located, and how does activity vary "
+            "by country / region?</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Country-level slicing: leaderboard, country × disease and "
             "country × phase heat-maps, multi-country trial flag, and a "
@@ -6122,11 +6302,13 @@ with tab_deepdive:
 
             # Drill into a country
             country_choices = _country_agg["Country"].tolist()
+            _seed_pick_from_query("dd_geo_country_pick", country_choices)
             country_pick = st.selectbox(
                 "Drill into country",
                 options=["—"] + country_choices,
                 key="dd_geo_country_pick",
             )
+            _sync_pick_to_query("dd_geo_country_pick", ("—",))
             if country_pick and country_pick != "—":
                 _csub = _geo_df[_geo_df["_Country"] == country_pick].drop_duplicates(subset=["NCTId"])
                 cm1, cm2, cm3, cm4 = st.columns(4)
@@ -6179,6 +6361,12 @@ with tab_deepdive:
     # ===== By time (NEW Phase 2) =====
     with deep_sub_time:
         st.subheader("Temporal landscape")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>How is the field growing, by what metric, and how do "
+            "recent cohorts mature?</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Annual trial-start dynamics with selectable colour axis "
             "(disease, target, sponsor type, family). Cumulative active "
@@ -6422,6 +6610,12 @@ with tab_deepdive:
     with deep_sub_sponsor_one:
         st.divider()
         st.subheader("Specific-sponsor portfolio")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>What does any one sponsor's pipeline look like — "
+            "phases, antigens, indications, activity over time?</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Drill into one sponsor's full pipeline: every trial they "
             "lead, broken down by phase, disease, target, modality, "
@@ -6442,9 +6636,11 @@ with tab_deepdive:
                 f"{r['Sponsor']}  ({r['Trials']} trials)"
                 for _, r in _sp_counts.iterrows()
             ]
+            _seed_pick_from_query("dd_sponsor_one_pick", _sp_options[1:])
             sponsor_pick_label = st.selectbox(
                 "Pick a sponsor", _sp_options, key="dd_sponsor_one_pick",
             )
+            _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
             sponsor_pick = (
                 sponsor_pick_label.rsplit("  (", 1)[0]
                 if sponsor_pick_label and sponsor_pick_label != "—"
@@ -6578,6 +6774,12 @@ with tab_deepdive:
     # ===== Compare (side-by-side disease/target — own sub-tab) =====
     with deep_sub_compare:
         st.subheader("Side-by-side comparator")
+        st.markdown(
+            f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
+            "<b>Pick any two diseases or antigens — see them side-by-"
+            "side as matched mini-dashboards.</b></p>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Pick two diseases or two antigens; the dashboard renders "
             "matched mini-panels (trial counts, phase distribution, "
