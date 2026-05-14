@@ -4029,10 +4029,33 @@ with m3:
     )
 with m4:
     if _n_actual_trials:
-        _actual_foot = (
-            f"Across {_n_actual_trials:,} trials with closed enrolment "
-            f"(completed / active not recruiting / terminated)"
-        )
+        # Footer caveats the number honestly: it's the sum of CT.gov
+        # EnrollmentCount across trials whose enrolment has closed. Most
+        # registrants update the count to real final values when
+        # enrolment closes, but not all do — so this is technically an
+        # upper bound. Where the registrant has explicitly flagged the
+        # value as "ACTUAL" via EnrollmentType, that's the definitive
+        # number. Surface that sub-count to let the user gauge how much
+        # of the headline is registrant-confirmed actual vs registrant-
+        # unconfirmed-but-enrolment-closed.
+        if "EnrollmentType" in df_filt.columns:
+            _et_filt = df_filt["EnrollmentType"].astype(str).str.upper()
+            _et_confirmed = _actual_mask & _et_filt.eq("ACTUAL")
+            _n_confirmed = int(_et_confirmed.sum())
+            _actual_foot = (
+                f"Across {_n_actual_trials:,} trials with closed enrolment "
+                f"(completed / active not recruiting / terminated). "
+                f"Of these, {_n_confirmed:,} are registrant-confirmed ACTUAL "
+                f"via CT.gov EnrollmentType — the rest have closed enrolment "
+                f"but their count may still reflect the original target."
+            )
+        else:
+            _actual_foot = (
+                f"Across {_n_actual_trials:,} trials with closed enrolment "
+                f"(completed / active not recruiting / terminated). "
+                f"Treat as an upper bound — not all registrants update "
+                f"EnrollmentCount to the real final number post-closure."
+            )
     else:
         _actual_foot = (
             "No trials have closed enrolment yet — early field. "
@@ -6290,28 +6313,140 @@ with tab_deepdive:
                 mime="text/csv",
             )
 
-            # ── Phase 1 additions: per-product landscape figures ──
+            # ── Per-product landscape figures (shared y-axis) ──
+            # Same alignment trick as the antigen landscape: a shared
+            # product-name list sorted by median enrollment ascending
+            # makes both charts read as one panel — phase mix and
+            # enrollment distribution for the same product line up in
+            # the same row. Previously the two charts used different
+            # orderings (both sorted by trial count) but in different
+            # axis directions, so cross-reading was friction-heavy.
             st.markdown("##### Product landscape — patterns at a glance")
+
+            # Compute shared product list once. Top 10 by trial count
+            # among products with at least one numeric EnrollmentCount.
+            # Sort by median enrollment ascending (smallest trials at
+            # top; gives the chart a natural "small → big" progression).
+            _prod_enroll = prod_df.copy()
+            _prod_enroll["EnrollmentCount"] = pd.to_numeric(
+                _prod_enroll["EnrollmentCount"], errors="coerce")
+            _prod_with_enroll = _prod_enroll.dropna(subset=["EnrollmentCount"])
+            _prod_counts = _prod_with_enroll["ProductName"].value_counts()
+            _shared_prod_top = _prod_counts.head(10).index.tolist()
+            _med_by_prod = (
+                _prod_with_enroll.loc[
+                    _prod_with_enroll["ProductName"].isin(_shared_prod_top)
+                ].groupby("ProductName")["EnrollmentCount"].median()
+            )
+            _shared_prod_ordered = sorted(
+                _shared_prod_top,
+                key=lambda p: (float(_med_by_prod.get(p, 0)), p),
+            )
+
             _pld_a, _pld_b = st.columns(2)
             with _pld_a:
-                st.markdown("**Phase composition by product (top 12)**")
-                _chart(
-                    _deepdive_phase_stack(
-                        prod_df, group_col="ProductName",
-                        height=320, normalize=True,
-                    ),
-                    key="dd_product_phase_stack",
-                )
+                st.markdown("**Phase composition by product**")
+                _phase_palette = {
+                    "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
+                    "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
+                    "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
+                    "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
+                }
+                _pp_in = prod_df.loc[
+                    prod_df["ProductName"].isin(_shared_prod_ordered)
+                ].copy()
+                if not _pp_in.empty and "PhaseLabel" in _pp_in.columns:
+                    _pp_counts = (
+                        _pp_in.groupby(["ProductName", "PhaseLabel"])
+                        .size().reset_index(name="Trials")
+                    )
+                    _pp_grp_tot = _pp_counts.groupby("ProductName")["Trials"].transform("sum")
+                    _pp_counts["Pct"] = 100.0 * _pp_counts["Trials"] / _pp_grp_tot
+                    _pp_label_order = [
+                        PHASE_LABELS[p] for p in PHASE_ORDER
+                        if PHASE_LABELS[p] in set(_pp_counts["PhaseLabel"])
+                    ]
+                    _pp_fig = px.bar(
+                        _pp_counts,
+                        x="Pct", y="ProductName", color="PhaseLabel",
+                        orientation="h",
+                        category_orders={
+                            "ProductName": _shared_prod_ordered,
+                            "PhaseLabel": _pp_label_order,
+                        },
+                        color_discrete_map=_phase_palette,
+                        template="plotly_white",
+                        height=440,
+                    )
+                    _pp_fig.update_traces(
+                        marker_line_width=0,
+                        hovertemplate="<b>%{y}</b><br>%{fullData.name}: %{x:.1f}%<extra></extra>",
+                    )
+                    _pp_fig.update_layout(
+                        margin=dict(l=120, r=12, t=8, b=100),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis=dict(title="Phase mix (%)", range=[0, 100]),
+                        yaxis=dict(
+                            title=None, showgrid=False,
+                            categoryorder="array",
+                            categoryarray=_shared_prod_ordered,
+                            autorange="reversed",
+                        ),
+                        legend=dict(
+                            orientation="h", yanchor="top", y=-0.12, x=0,
+                            font=dict(family=FONT_FAMILY, size=10),
+                            title=dict(text=""),
+                        ),
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                        bargap=0.28,
+                    )
+                    _chart(_pp_fig, key="dd_product_phase_stack")
             with _pld_b:
-                st.markdown("**Enrollment-size distribution by product**")
-                _chart(
-                    _deepdive_box(
-                        prod_df, group_col="ProductName",
-                        value_col="EnrollmentCount",
-                        height=320, top_n=10,
-                    ),
-                    key="dd_product_enrollment_box",
-                )
+                st.markdown("**Enrollment-size distribution by product (same order as left)**")
+                # Horizontal box plot to align with the phase chart's
+                # y-axis. Product name on y, EnrollmentCount on x.
+                # Y-tick labels are hidden because the names already
+                # appear on the phase chart to the left.
+                _box_in = _prod_with_enroll.loc[
+                    _prod_with_enroll["ProductName"].isin(_shared_prod_ordered)
+                ].copy()
+                if not _box_in.empty:
+                    _box_fig = go.Figure()
+                    for _p in _shared_prod_ordered:
+                        _vals = _box_in.loc[_box_in["ProductName"] == _p, "EnrollmentCount"]
+                        if _vals.empty:
+                            continue
+                        _box_fig.add_trace(go.Box(
+                            x=_vals, y=[_p] * len(_vals),
+                            name=_p,
+                            marker_color="#0c4a6e",
+                            line_color="#0c4a6e",
+                            fillcolor="rgba(12, 74, 110, 0.14)",
+                            boxpoints="outliers",
+                            marker=dict(size=4, color="#0c4a6e"),
+                            orientation="h",
+                            showlegend=False,
+                            hovertemplate=(
+                                f"<b>{_p}</b><br>"
+                                "Min %{x.min}, Median %{median}, Max %{x.max}"
+                                "<extra></extra>"
+                            ),
+                        ))
+                    _box_fig.update_layout(
+                        height=440,
+                        margin=dict(l=12, r=12, t=8, b=40),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis=dict(title="EnrollmentCount"),
+                        yaxis=dict(
+                            title=None, showgrid=False,
+                            categoryorder="array",
+                            categoryarray=_shared_prod_ordered,
+                            autorange="reversed",
+                            showticklabels=False,
+                        ),
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                    )
+                    _chart(_box_fig, key="dd_product_enrollment_box")
             st.markdown("**Annual trial starts by product (top 6)**")
             _chart(
                 _deepdive_timeline(
