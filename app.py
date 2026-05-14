@@ -2514,6 +2514,42 @@ def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     return fig
 
 
+def _topn_sparkbar_html(
+    items: list[tuple[str, int]],
+    *,
+    color: str = "#1d4ed8",
+) -> str:
+    """Compact top-N list with inline horizontal sparkbars.
+
+    Replaces a small Plotly bar chart when the category count varies
+    (e.g., country drilldowns where some countries have 3 antigens and
+    others 10): rows stack vertically with constant per-row height, so
+    no large empty plot area appears for short lists.
+    """
+    if not items:
+        return ""
+    _max = max(_n for _, _n in items) or 1
+    _rows: list[str] = []
+    for _lbl, _n in items:
+        _pct = max(2, int(round(100 * _n / _max)))
+        _rows.append(
+            '<div style="display:grid; grid-template-columns:'
+            ' minmax(0,1fr) auto 120px; gap: 0 10px; align-items: center;'
+            ' padding: 3px 0;">'
+            f'<span style="font-size: var(--fs-sm); color: {THEME["text"]};'
+            ' white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"'
+            f' title="{_lbl}">{_lbl}</span>'
+            f'<span style="font-size: var(--fs-sm); font-weight: 600;'
+            f' color: {THEME["text"]}; font-variant-numeric: tabular-nums;'
+            f' text-align:right; min-width: 24px;">{_n}</span>'
+            f'<div style="background: {THEME["surf2"]}; height: 8px;'
+            ' border-radius: 2px; overflow: hidden;">'
+            f'<div style="background: {color}; height: 100%; width: {_pct}%;"></div>'
+            '</div></div>'
+        )
+    return "".join(_rows)
+
+
 def uniq_join(series):
     vals = []
     for v in series.dropna():
@@ -4875,7 +4911,7 @@ with tab_geo:
                 st.markdown(f"##### What's being studied in {selected_country}")
                 _cdz1, _cdz2 = st.columns(2)
                 with _cdz1:
-                    st.markdown(f"**Top diseases in {selected_country}**")
+                    st.markdown("**Top diseases**")
                     _cd = (
                         _expand_disease_rows(_country_trials)
                         .drop_duplicates(subset=["NCTId", "_Disease"])
@@ -4886,12 +4922,17 @@ with tab_geo:
                     if "Trials" not in _cd.columns:
                         _cd.columns = ["Disease", "Trials"]
                     if not _cd.empty:
-                        _chart(
-                            make_bar(_cd, "Disease", "Trials", height=260),
-                            key=f"map_geo_diseases_{selected_country}",
+                        st.markdown(
+                            _topn_sparkbar_html(
+                                list(zip(
+                                    _cd["Disease"].astype(str),
+                                    _cd["Trials"].astype(int),
+                                ))
+                            ),
+                            unsafe_allow_html=True,
                         )
                 with _cdz2:
-                    st.markdown(f"**Top antigens in {selected_country}**")
+                    st.markdown("**Top antigens**")
                     _ct = (
                         _country_trials.loc[
                             ~_country_trials["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"})
@@ -4900,9 +4941,14 @@ with tab_geo:
                         .head(10).reset_index(name="Trials")
                     )
                     if not _ct.empty:
-                        _chart(
-                            make_bar(_ct, "TargetCategory", "Trials", height=260),
-                            key=f"map_geo_targets_{selected_country}",
+                        st.markdown(
+                            _topn_sparkbar_html(
+                                list(zip(
+                                    _ct["TargetCategory"].astype(str),
+                                    _ct["Trials"].astype(int),
+                                ))
+                            ),
+                            unsafe_allow_html=True,
                         )
 
             _country_geo = _get_geo_sites()
