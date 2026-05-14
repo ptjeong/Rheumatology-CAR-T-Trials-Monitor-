@@ -2489,82 +2489,6 @@ def _clip_future_starts(df: pd.DataFrame, year_col: str = "StartYear") -> pd.Dat
     return out[_y.isna() | (_y <= _today_year())]
 
 
-def _project_current_year_starts(
-    start_dates: pd.Series,
-    *,
-    today: pd.Timestamp | None = None,
-    min_reference_years: int = 2,
-) -> dict | None:
-    """Conservatively project end-of-year trial-start count from YTD.
-
-    Method — "same-months share" (robust to seasonality):
-      1. Determine today's calendar year and month.
-      2. YTD = trials whose StartDate falls in this year, on or before
-         today.
-      3. For each of the last N COMPLETE past years (where N =
-         min_reference_years), compute that year's "share through
-         month M" = (trials in months 1..M of year) / (trials in entire
-         year). M is the current month.
-      4. Take median(shares) as the conservative central estimate of
-         what fraction of the year is typically done by month M.
-      5. Project: total = YTD / median_share. Range: low = YTD /
-         max(shares); high = YTD / min(shares). Lower share → higher
-         implied total (less of the year is "done" by now).
-
-    Returns dict with keys: ytd, projected_low, projected_mid,
-    projected_high, n_reference_years, current_month, current_year.
-    Returns None if the projection isn't trustworthy:
-      - <min_reference_years complete past years available
-      - Today is January (too little data — projection wildly unstable)
-      - YTD count is 0
-      - Any reference year has zero trials (would divide by zero)
-
-    Pure function — no Streamlit calls. Callers handle UI / opt-in.
-    """
-    if today is None:
-        today = pd.Timestamp.now()
-    _y = today.year
-    _m = today.month
-    if _m < 2:
-        return None  # too early — projection unstable
-    _dates = pd.to_datetime(start_dates, errors="coerce").dropna()
-    if _dates.empty:
-        return None
-    # YTD: trials this year, on or before today
-    _ytd_mask = (_dates.dt.year == _y) & (_dates <= today)
-    _ytd = int(_ytd_mask.sum())
-    if _ytd == 0:
-        return None
-    # Compute per-reference-year shares
-    _shares: list[float] = []
-    for _ref in range(_y - 1, _y - 1 - min_reference_years, -1):
-        _ref_dates = _dates[_dates.dt.year == _ref]
-        _ref_total = len(_ref_dates)
-        if _ref_total == 0:
-            return None  # gap year — can't trust the pattern
-        _ref_through_m = int((_ref_dates.dt.month <= _m).sum())
-        _shares.append(_ref_through_m / _ref_total)
-    if not _shares or min(_shares) <= 0:
-        return None
-    # Proper median (average of middle two for even count, middle for odd) —
-    # pandas Series.median() handles both. The naive `sorted(_shares)[len//2]`
-    # returned the max when len=2, which collapsed the central estimate
-    # onto the upper bound of the range.
-    _median_share = float(pd.Series(_shares).median())
-    _proj_mid = int(round(_ytd / _median_share))
-    _proj_high = int(round(_ytd / min(_shares)))  # smallest historical share = highest implied total
-    _proj_low = int(round(_ytd / max(_shares)))   # largest historical share = lowest implied total
-    return {
-        "ytd": _ytd,
-        "projected_low": max(_proj_low, _ytd),  # can't be less than what we've seen
-        "projected_mid": max(_proj_mid, _ytd),
-        "projected_high": max(_proj_high, _ytd),
-        "n_reference_years": min_reference_years,
-        "current_month": _m,
-        "current_year": _y,
-    }
-
-
 def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     fig = px.bar(
         df_plot, x=x, y=y, height=height,
@@ -7137,55 +7061,6 @@ with tab_deepdive:
             }
             _axis_col = _axis_map[_color_axis_choice]
 
-            # ── Year-end projection toggle (inline, on-page) ──
-            # Per user feedback ("think about how and where add a
-            # projected trial numbers for the current (incomplete) year?
-            # extrapolating conservatively from the past couple years?
-            # should be toggleable and systematic, and be robustly
-            # designed and understandable", and later: "a toggle in the
-            # main site rather than sidebar would be better"). Sits
-            # inline above the annual chart — the only chart where the
-            # projection adds value (cumulative is already monotonic;
-            # heatmaps are cell-level). Off by default so default page
-            # load shows raw data.
-            _show_projection = st.toggle(
-                "Show year-end projection for the current (incomplete) year",
-                key="dd_time_show_projection",
-                help=(
-                    "Extrapolates the current year's trial-start count to "
-                    "end-of-year, using the past two complete years' "
-                    "month-by-month pattern. Conservative: shows a low / "
-                    "mid / high range based on each reference year's "
-                    "share-through-current-month, not a single number. "
-                    "Hidden when the current month is January (too "
-                    "little data) or the reference years are unavailable."
-                ),
-            )
-            # Compute projection once if toggled — the dict (or None) is
-            # passed into the two chart builders below as an overlay
-            # source. Per user feedback ("the projection should display
-            # on the relevant graphs, no? rather than just text?") the
-            # 3-metric tile + caption block that used to live here was
-            # replaced with on-chart overlays. The projection now reads
-            # as a visual marker on the year axis where it belongs.
-            _proj = None
-            if _show_projection and "StartDate" in df_filt.columns:
-                _proj = _project_current_year_starts(df_filt["StartDate"])
-                if _proj is None:
-                    st.caption(
-                        "Projection unavailable: too early in the year, "
-                        "or insufficient reference-year data."
-                    )
-                else:
-                    st.caption(
-                        f"**{_proj['current_year']} projection** — "
-                        f"YTD {_proj['ytd']:,} (months 1–{_proj['current_month']}); "
-                        f"projected end-of-year **{_proj['projected_mid']:,}** "
-                        f"(range {_proj['projected_low']:,}–{_proj['projected_high']:,}). "
-                        f"Method: YTD divided by past-{_proj['n_reference_years']}-years' "
-                        f"median month-{_proj['current_month']} share."
-                    )
-
             # ── Annual trial starts (selectable axis) ──
             _ts_a, _ts_b = st.columns(2)
             with _ts_a:
@@ -7193,41 +7068,6 @@ with tab_deepdive:
                 _annual_fig = _deepdive_timeline(
                     df_filt, group_col=_axis_col, height=320, top_n=6,
                 )
-                # Projection overlay (when toggle is on + projection is
-                # computable). Adds a separate trace with an error bar at
-                # the current-year x-position showing the TOTAL projected
-                # end-of-year count (mid + low/high range). Sits ABOVE
-                # the per-group lines visually since the total is larger.
-                if _proj is not None:
-                    _annual_fig.add_trace(go.Scatter(
-                        x=[_proj["current_year"]],
-                        y=[_proj["projected_mid"]],
-                        mode="markers",
-                        marker=dict(
-                            symbol="diamond-open",
-                            size=12,
-                            color="#0c4a6e",
-                            line=dict(width=2),
-                        ),
-                        error_y=dict(
-                            type="data",
-                            symmetric=False,
-                            array=[_proj["projected_high"] - _proj["projected_mid"]],
-                            arrayminus=[_proj["projected_mid"] - _proj["projected_low"]],
-                            color="#0c4a6e",
-                            width=8,
-                            thickness=2,
-                        ),
-                        name=f"Proj total {_proj['current_year']}",
-                        hovertemplate=(
-                            f"<b>{_proj['current_year']} EoY projection</b><br>"
-                            f"Mid: {_proj['projected_mid']:,}<br>"
-                            f"Range: {_proj['projected_low']:,}–{_proj['projected_high']:,}"
-                            f"<extra></extra>"
-                        ),
-                        showlegend=False,  # caption above carries the explanation
-                        cliponaxis=False,
-                    ))
                 _chart(
                     _annual_fig,
                     key=f"dd_time_starts_{_axis_col}",
@@ -7265,47 +7105,6 @@ with tab_deepdive:
                         yaxis_title="Cumulative trials started",
                         font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                     )
-                    # Cumulative projection: where will the cumulative
-                    # total be by end-of-year, given the projected
-                    # remaining starts? Adds a single diamond marker at
-                    # x=current_year with error bars showing the
-                    # uncertainty range. The existing solid line ends at
-                    # YTD-cumulative; the diamond sits above it.
-                    if _proj is not None and not _yearly.empty:
-                        _last_cum = int(_yearly["CumulativeTrials"].iloc[-1])
-                        _remaining_mid = _proj["projected_mid"] - _proj["ytd"]
-                        _eoy_cum_mid = _last_cum + max(_remaining_mid, 0)
-                        _eoy_cum_low = _last_cum + max(_proj["projected_low"] - _proj["ytd"], 0)
-                        _eoy_cum_high = _last_cum + max(_proj["projected_high"] - _proj["ytd"], 0)
-                        _cum_fig.add_trace(go.Scatter(
-                            x=[_proj["current_year"]],
-                            y=[_eoy_cum_mid],
-                            mode="markers",
-                            marker=dict(
-                                symbol="diamond-open",
-                                size=11,
-                                color="#0c4a6e",
-                                line=dict(width=2),
-                            ),
-                            error_y=dict(
-                                type="data",
-                                symmetric=False,
-                                array=[_eoy_cum_high - _eoy_cum_mid],
-                                arrayminus=[_eoy_cum_mid - _eoy_cum_low],
-                                color="#0c4a6e",
-                                width=6,
-                                thickness=1.5,
-                            ),
-                            name=f"Proj EoY {_proj['current_year']}",
-                            hovertemplate=(
-                                f"<b>{_proj['current_year']} cumulative (projected EoY)</b><br>"
-                                f"Mid: {_eoy_cum_mid:,}<br>"
-                                f"Range: {_eoy_cum_low:,}–{_eoy_cum_high:,}"
-                                f"<extra></extra>"
-                            ),
-                            showlegend=False,
-                            cliponaxis=False,
-                        ))
                     _chart(_cum_fig, key="dd_time_cumulative")
 
             # ── Year-over-year movers (moved from Overview, 2026-05-14) ──
@@ -7765,50 +7564,6 @@ with tab_pub:
     fig1_data = fig1_long.pivot(index="StartYear", columns="Group", values="Trials").fillna(0).astype(int).reset_index()
 
     if not fig1_long.empty:
-        # ── Year-end projection overlay (toggleable) ──
-        # Per user request ("same option also for figure 1? make it
-        # visually clear that they are projected values and display
-        # the actual value also"). Mirrors the Deep Dive → By time
-        # toggle but kept on a separate session_state key — the two
-        # contexts (publication figure vs interactive Deep Dive) stay
-        # independently controlled. Off by default so default page
-        # load shows a clean publication-style render.
-        _fig1_show_proj = st.toggle(
-            "Show year-end projection for the current (incomplete) year",
-            key="fig1_show_projection",
-            help=(
-                "Adds two markers at the current year: a filled "
-                "circle for the actual YTD count (top of the stack), "
-                "and an open diamond with error bars for the "
-                "projected end-of-year count (low / mid / high range "
-                "based on past-two-years' month-share pattern). "
-                "Hidden when too early in the year or reference-year "
-                "data is insufficient."
-            ),
-        )
-        _fig1_proj = None
-        if _fig1_show_proj and "StartDate" in df_filt.columns:
-            _fig1_proj = _project_current_year_starts(df_filt["StartDate"])
-            if _fig1_proj is None:
-                st.caption(
-                    "Projection unavailable: too early in the year, "
-                    "or insufficient reference-year data."
-                )
-            else:
-                st.caption(
-                    f"**{_fig1_proj['current_year']} projection** — "
-                    f"actual YTD **{_fig1_proj['ytd']:,}** "
-                    f"(months 1–{_fig1_proj['current_month']}); "
-                    f"projected end-of-year "
-                    f"**{_fig1_proj['projected_mid']:,}** "
-                    f"(range {_fig1_proj['projected_low']:,}"
-                    f"–{_fig1_proj['projected_high']:,}). "
-                    f"Method: YTD divided by past-"
-                    f"{_fig1_proj['n_reference_years']}-years' median "
-                    f"month-{_fig1_proj['current_month']} share. "
-                    "Markers appear at the right edge of the chart."
-                )
-
         # Stacking order: largest totals at the bottom, 'Other' / 'Unclassified' on top
         group_totals = fig1_long.groupby("Group")["Trials"].sum().sort_values(ascending=False)
         sink_labels = [g for g in ["Other", "Unclassified"] if g in group_totals.index]
@@ -7881,83 +7636,6 @@ with tab_pub:
                 font=dict(size=10, color=THEME["muted"]),
                 yanchor="bottom", xanchor="center",
             )
-
-        # Projection overlay markers — visually distinguish actual
-        # YTD (solid filled circle at top of stack) from projected
-        # EoY (open diamond + error bars sitting above it). Mirrors
-        # the Deep Dive overlay pattern.
-        if _fig1_proj is not None and _current_year in _pivot.index:
-            _actual_ytd = int(_pivot.loc[_current_year].sum())
-            # ACTUAL YTD — solid filled marker at top-of-stack
-            fig1.add_trace(go.Scatter(
-                x=[_fig1_proj["current_year"]],
-                y=[_actual_ytd],
-                mode="markers",
-                marker=dict(
-                    symbol="circle", size=11, color="#0c4a6e",
-                    line=dict(width=1.5, color="white"),
-                ),
-                name=f"Actual YTD {_fig1_proj['current_year']}",
-                hovertemplate=(
-                    f"<b>{_fig1_proj['current_year']} actual YTD</b><br>"
-                    f"{_actual_ytd:,} trials "
-                    f"(months 1–{_fig1_proj['current_month']})"
-                    "<extra></extra>"
-                ),
-                showlegend=False,
-                cliponaxis=False,
-            ))
-            # PROJECTED EoY — open diamond with asymmetric error bars
-            fig1.add_trace(go.Scatter(
-                x=[_fig1_proj["current_year"]],
-                y=[_fig1_proj["projected_mid"]],
-                mode="markers",
-                marker=dict(
-                    symbol="diamond-open", size=13,
-                    color="#0c4a6e", line=dict(width=2),
-                ),
-                error_y=dict(
-                    type="data", symmetric=False,
-                    array=[_fig1_proj["projected_high"]
-                           - _fig1_proj["projected_mid"]],
-                    arrayminus=[_fig1_proj["projected_mid"]
-                                - _fig1_proj["projected_low"]],
-                    color="#0c4a6e", width=8, thickness=2,
-                ),
-                name=f"Proj EoY {_fig1_proj['current_year']}",
-                hovertemplate=(
-                    f"<b>{_fig1_proj['current_year']} EoY projection</b><br>"
-                    f"Mid: {_fig1_proj['projected_mid']:,}<br>"
-                    f"Range: {_fig1_proj['projected_low']:,}"
-                    f"–{_fig1_proj['projected_high']:,}"
-                    "<extra></extra>"
-                ),
-                showlegend=False,
-                cliponaxis=False,
-            ))
-            # In-chart annotations for PNG/SVG export legibility —
-            # placed to the LEFT of each marker so they don't overflow
-            # the right edge of the plot area.
-            fig1.add_annotation(
-                x=_fig1_proj["current_year"] - 0.15, y=_actual_ytd,
-                text=f"Actual YTD: {_actual_ytd:,}",
-                showarrow=False,
-                font=dict(size=10, color="#0c4a6e"),
-                xanchor="right", yanchor="middle",
-            )
-            fig1.add_annotation(
-                x=_fig1_proj["current_year"] - 0.15,
-                y=_fig1_proj["projected_mid"],
-                text=(
-                    f"Projected EoY: {_fig1_proj['projected_mid']:,} "
-                    f"({_fig1_proj['projected_low']:,}"
-                    f"–{_fig1_proj['projected_high']:,})"
-                ),
-                showarrow=False,
-                font=dict(size=10, color="#0c4a6e"),
-                xanchor="right", yanchor="middle",
-            )
-
         _chart(fig1, key='fig1', width='stretch', config=PUB_EXPORT)
 
         # Key statistics — use yearly totals, restricted to the displayed year
