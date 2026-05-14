@@ -4160,39 +4160,14 @@ with m3:
         if _n_planned_trials else "No trials currently enrolling",
     )
 with m4:
+    # Short, single-line footer. The longer caveat (upper-bound nature
+    # of the number, EnrollmentType=ACTUAL confirmation sub-count, etc)
+    # was making the KPI strip visually noisy — moved to the Methods
+    # appendix where the methodology already lives.
     if _n_actual_trials:
-        # Footer caveats the number honestly: it's the sum of CT.gov
-        # EnrollmentCount across trials whose enrolment has closed. Most
-        # registrants update the count to real final values when
-        # enrolment closes, but not all do — so this is technically an
-        # upper bound. Where the registrant has explicitly flagged the
-        # value as "ACTUAL" via EnrollmentType, that's the definitive
-        # number. Surface that sub-count to let the user gauge how much
-        # of the headline is registrant-confirmed actual vs registrant-
-        # unconfirmed-but-enrolment-closed.
-        if "EnrollmentType" in df_filt.columns:
-            _et_filt = df_filt["EnrollmentType"].astype(str).str.upper()
-            _et_confirmed = _actual_mask & _et_filt.eq("ACTUAL")
-            _n_confirmed = int(_et_confirmed.sum())
-            _actual_foot = (
-                f"Across {_n_actual_trials:,} trials with closed enrolment "
-                f"(completed / active not recruiting / terminated). "
-                f"Of these, {_n_confirmed:,} are registrant-confirmed ACTUAL "
-                f"via CT.gov EnrollmentType — the rest have closed enrolment "
-                f"but their count may still reflect the original target."
-            )
-        else:
-            _actual_foot = (
-                f"Across {_n_actual_trials:,} trials with closed enrolment "
-                f"(completed / active not recruiting / terminated). "
-                f"Treat as an upper bound — not all registrants update "
-                f"EnrollmentCount to the real final number post-closure."
-            )
+        _actual_foot = f"Across {_n_actual_trials:,} closed-enrolment trials"
     else:
-        _actual_foot = (
-            "No trials have closed enrolment yet — early field. "
-            "Number grows as trials reach completion or active-not-recruiting."
-        )
+        _actual_foot = "No closed-enrolment trials yet (early field)"
     metric_card(
         "Actual enrollment",
         f"{_n_actual_pts:,}",
@@ -4596,12 +4571,10 @@ with tab_overview:
                 _ra = _ra[_ra["OverallStatus"] == "COMPLETED"]
 
             # Show every trial matching the timeframe + family + status
-            # filters, capped at 100 to keep the table scrollable but
-            # comprehensive. Default ("Past month") usually yields well
-            # below 100; "Past year" can yield more — the cap keeps the
-            # widget responsive. The table is scrollable so the reader
-            # sees all matches, not just the top 10.
-            _ra = _ra.sort_values("LastUpdatePostDate", ascending=False).head(100)
+            # filters — no row cap. Even the widest window ("Past year")
+            # yields at most a few hundred rows in a dataset of ~290
+            # trials, well within Streamlit's table widget budget.
+            _ra = _ra.sort_values("LastUpdatePostDate", ascending=False)
             if _ra.empty:
                 st.caption("No matching trials.")
             else:
@@ -4626,7 +4599,7 @@ with tab_overview:
                 st.caption(
                     f"{len(_ra_view)} trial(s) updated in the "
                     f"{_ra_timeframe.lower()}, matching the filter. "
-                    f"Sorted newest first; capped at 100."
+                    f"Sorted newest first."
                 )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
@@ -5266,19 +5239,11 @@ with tab_data:
             st.rerun()
     _zoom_active = _zoom_country != _ALL_COUNTRIES_LABEL
 
-    # ── Fullscreen toggle ───────────────────────────────────────────────
-    # The dataframe has a native fullscreen icon (top-right on hover)
-    # but it had been hidden by an `overflow: hidden` CSS rule — now
-    # fixed. The toggle below is the lighter-weight alternative:
-    # bumps table height from 460 → 900 px so more rows fit on screen
-    # without leaving the page. (Confidence filter that briefly lived
-    # here removed per user feedback; the sidebar's flt_confidence
-    # filter covers the same use case at the global level.)
-    _data_fullscreen = st.toggle(
-        "Expand table",
-        key="data_fullscreen",
-        help="Bumps the table to ~900 px height (default 460). For true edge-to-edge view, hover the table top-right for the native fullscreen icon.",
-    )
+    # Custom "Expand table" toggle removed 2026-05-15 per user feedback:
+    # the native Streamlit fullscreen icon (top-right of every dataframe,
+    # visible on hover) covers the use case after the overflow:hidden CSS
+    # clipping bug was fixed. Two affordances for the same thing was
+    # redundant.
 
     show_cols = [
         "NCTId",
@@ -5342,7 +5307,7 @@ with tab_data:
     _table_event = st.dataframe(
         table_df[show_cols],
         width='stretch',
-        height=900 if _data_fullscreen else 460,
+        height=460,
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
