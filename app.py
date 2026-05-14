@@ -2038,6 +2038,48 @@ st.markdown(
         display: none !important;
     }}
 
+    /* ── Radio-as-tabs (Deep Dive sub-nav) ────────────────────────────
+       Streamlit's st.tabs doesn't persist active tab across reruns.
+       We use st.radio with horizontal=True styled to look like tabs.
+       Scoped via the .dd-tabs-radio wrapper so other radios on the
+       page (e.g., Time-axis colour selector inside the By time tab)
+       keep their default Streamlit radio styling. */
+    .dd-tabs-radio + div div[data-testid="stRadio"] > div {{
+        flex-direction: row !important;
+        gap: 0 !important;
+        border-bottom: 1px solid {THEME["border"]};
+        margin-bottom: 0.6rem;
+    }}
+    .dd-tabs-radio + div div[data-testid="stRadio"] label {{
+        padding: 10px 18px !important;
+        margin: 0 !important;
+        border: none !important;
+        border-radius: 0 !important;
+        border-bottom: 2px solid transparent !important;
+        margin-bottom: -1px !important;
+        cursor: pointer;
+        transition: color 0.12s, border-color 0.12s;
+        font-size: var(--fs-base) !important;
+        font-weight: var(--fw-medium) !important;
+        letter-spacing: var(--tracking-normal) !important;
+        color: {THEME["muted"]} !important;
+        background: transparent !important;
+    }}
+    .dd-tabs-radio + div div[data-testid="stRadio"] label:hover {{
+        background: transparent !important;
+        color: {THEME["text"]} !important;
+    }}
+    /* Hide the radio circle — only the label text + underline read as a tab */
+    .dd-tabs-radio + div div[data-testid="stRadio"] label > div:first-child {{
+        display: none !important;
+    }}
+    /* Active option — underline + primary colour */
+    .dd-tabs-radio + div div[data-testid="stRadio"] label:has(input:checked) {{
+        color: {THEME["primary"]} !important;
+        font-weight: var(--fw-semibold) !important;
+        border-bottom-color: {THEME["primary"]} !important;
+    }}
+
     /* ── Data table ───────────────────────────────────────────────────── */
     div[data-testid="stDataFrame"] {{
         border: 1px solid {THEME["border"]};
@@ -5375,23 +5417,39 @@ with tab_deepdive:
                 _reset_focus_picks()
                 st.rerun()
 
-    # ── Sub-tab structure (post-consolidation, 2026-05-07) ──
-    # Compare is its own tab again per user feedback (it was briefly
-    # appended to By disease in the Phase 7 consolidation; restored
-    # 2026-05-07 — the comparator deserves dedicated real estate
-    # rather than scrolling past the disease drilldown to reach it).
-    # By product still appended below By target; specific-sponsor
-    # drilldown still appended below By sponsor type-aggregate.
-    (deep_sub_disease, deep_sub_target, deep_sub_sponsor,
-     deep_sub_geo, deep_sub_time, deep_sub_compare) = st.tabs([
+    # ── Sub-tab structure — stateful radio styled as tabs ────────────────
+    # Streamlit's native `st.tabs` does NOT persist the active tab across
+    # reruns. Every focus-picker change → rerun → bounce to tab 0
+    # ("By disease"), forcing the reader to re-click their way back. The
+    # fix is to replace `st.tabs` with a radio whose `key=` parameter
+    # gives it native session_state persistence, then style it via CSS
+    # to look like the underline-tabs we had before. The active tab is
+    # also written to query_params so the URL is shareable.
+    _DD_VIEWS = [
         "By disease", "By target", "By sponsor",
         "By geography", "By time", "Compare",
-    ])
-    # Aliases — render the appended blocks under the new home tab so
-    # the existing `with deep_sub_<alias>:` bodies don't need to be
-    # surgically re-indented. Streamlit appends content in source order.
-    deep_sub_product     = deep_sub_target    # By product → bottom of By target
-    deep_sub_sponsor_one = deep_sub_sponsor   # By sponsor (specific) → bottom of By sponsor
+    ]
+    # URL-bind: seed from query_params if a `dd_tab` value is present.
+    if "dd_active_view" not in st.session_state:
+        _qp_tab = st.query_params.get("dd_tab")
+        if isinstance(_qp_tab, list):
+            _qp_tab = _qp_tab[0] if _qp_tab else None
+        if _qp_tab in _DD_VIEWS:
+            st.session_state.dd_active_view = _qp_tab
+    st.markdown('<div class="dd-tabs-radio">', unsafe_allow_html=True)
+    _active = st.radio(
+        "Deep Dive view",
+        options=_DD_VIEWS,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="dd_active_view",
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+    # Sync to URL (skip default to keep clean URLs short).
+    if _active != "By disease":
+        st.query_params["dd_tab"] = _active
+    else:
+        st.query_params.pop("dd_tab", None)
 
     def _expand_disease_rows(df_in: pd.DataFrame) -> pd.DataFrame:
         """Explode trials with pipe-joined DiseaseEntities into one row per
@@ -5446,7 +5504,7 @@ with tab_deepdive:
         return pd.DataFrame(rows) if rows else pd.DataFrame()
 
     # ===== By disease =====
-    with deep_sub_disease:
+    if _active == "By disease":
         st.subheader("Disease-entity focus")
         st.markdown(
             f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
@@ -5673,7 +5731,7 @@ with tab_deepdive:
                         )
 
     # ===== By target (NEW; ported from onc commit 5e6553b, rheum-adapted) =====
-    with deep_sub_target:
+    if _active == "By target":
         st.subheader("Antigen target focus")
         st.markdown(
             f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
@@ -6030,7 +6088,12 @@ with tab_deepdive:
 
     # ===== By product (per-named-product; ported from onc commit f006d8e) =====
     # Phase 7 consolidation: appended below the By target tab content.
-    with deep_sub_product:
+    # Per-product pipeline view — folded into the By target tab. Was its
+    # own `with deep_sub_product:` block when the tabs used a Streamlit
+    # `st.tabs` alias; with the radio-as-tabs migration the block just
+    # becomes another `if _active == "By target":` chunk rendered after
+    # the antigen-focus content.
+    if _active == "By target":
         st.divider()
         st.subheader("Per-product pipeline view")
         st.markdown(
@@ -6208,7 +6271,7 @@ with tab_deepdive:
                     )
 
     # ===== By sponsor type =====
-    with deep_sub_sponsor:
+    if _active == "By sponsor":
         st.subheader("Landscape by sponsor type")
         st.markdown(
             f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
@@ -6371,7 +6434,7 @@ with tab_deepdive:
                     )
 
     # ===== By geography (NEW Phase 2) =====
-    with deep_sub_geo:
+    if _active == "By geography":
         st.subheader("Geographic landscape")
         st.markdown(
             f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
@@ -6545,7 +6608,7 @@ with tab_deepdive:
                         )
 
     # ===== By time (NEW Phase 2) =====
-    with deep_sub_time:
+    if _active == "By time":
         st.subheader("Temporal landscape")
         st.markdown(
             f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
@@ -6793,7 +6856,10 @@ with tab_deepdive:
     # ===== By sponsor (specific sponsor drilldown — Phase 3) =====
     # Phase 7 consolidation: appended below the By sponsor type-aggregate
     # content; both share the same tab.
-    with deep_sub_sponsor_one:
+    # Specific-sponsor portfolio — folded into the By sponsor tab (same
+    # pattern as the per-product block under By target). Renders after
+    # the sponsor-type aggregate content.
+    if _active == "By sponsor":
         st.divider()
         st.subheader("Specific-sponsor portfolio")
         st.markdown(
@@ -6958,7 +7024,7 @@ with tab_deepdive:
                     )
 
     # ===== Compare (side-by-side disease/target — own sub-tab) =====
-    with deep_sub_compare:
+    if _active == "Compare":
         st.subheader("Side-by-side comparator")
         st.markdown(
             f'<p style="font-size: 13px; color: {THEME["text"]}; margin-top: -0.5rem;">'
