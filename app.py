@@ -4651,8 +4651,26 @@ with tab_geo:
             help="Trials enrolling sites in exactly one country",
         )
 
+    # ── Country focus picker at top (2026-05-15 restructure) ──
+    # Same picker-on-top / landscape-default pattern as the Deep Dive
+    # sub-tabs. Default "—" → global view (world map, leaderboard,
+    # heatmaps). Pick a country → swap to that country's drilldown
+    # (top diseases / antigens / site map / city table). The user
+    # picks ONCE at the top; the rest of the tab adapts. Previously
+    # the picker was buried mid-page below "Sites by city".
+    _countries_avail = _countries_by_activity()
+    if _countries_avail:
+        selected_country = st.selectbox(
+            "Focus on a country",
+            options=["—"] + _countries_avail,
+            key="sites_country",
+            help="Default '—' shows the global view (world map + country leaderboard + cross-country heatmaps). Pick a country to swap to its drilldown — site map, city table, top diseases, top antigens.",
+        )
+    else:
+        selected_country = "—"
+
     countries_long = split_pipe_values(df_filt["Countries"])
-    if countries_long:
+    if countries_long and selected_country == "—":
         country_df = pd.DataFrame({"Country": countries_long})
         country_counts = (
             country_df["Country"]
@@ -4819,26 +4837,15 @@ with tab_geo:
                     ),
                     key="map_country_phase_stack",
                 )
-    else:
+    elif not countries_long:
         st.info("No country data in the current filter selection.")
+    # When selected_country != "—" the global block above is skipped;
+    # the per-country drilldown below renders instead. No "Sites by
+    # city" subheader anymore — the country picker at the top is the
+    # entry point.
 
-    st.subheader("Sites by city")
-
-    _countries_avail = _countries_by_activity()
-    if not _countries_avail:
-        st.info("No open or recruiting study sites in the current filter selection.")
-    else:
-        _default = "Germany" if "Germany" in _countries_avail else _countries_avail[0]
-        _prev = st.session_state.get("sites_country", _default)
-        _default_idx = _countries_avail.index(_prev) if _prev in _countries_avail else 0
-        selected_country = st.selectbox(
-            "Country",
-            options=_countries_avail,
-            index=_default_idx,
-            key="sites_country",
-            help="Pick any country with at least one open or recruiting site in the current filter.",
-        )
-
+    if selected_country != "—" and _countries_avail:
+        st.markdown(f"##### {selected_country} — country focus")
         country_open_sites, country_study_view = _country_study_view(selected_country)
 
         if country_open_sites.empty:
@@ -5471,98 +5478,50 @@ with tab_deepdive:
         unsafe_allow_html=True,
     )
 
-    # ── Active-state strip (chips + reset button) ──────────────────────
-    # Stage-1 UX restructure (DEEP_DIVE_UX_ANALYSIS.md). Two goals:
-    #   1. Make the sidebar filter state VISIBLE while exploring Deep
-    #      Dive — readers were forgetting which filters were active
-    #      and misinterpreting sparse charts as "the field is small".
-    #   2. Make the per-tab drilldown picks ("focused on SLE / CD19 /
-    #      Germany") visible at-glance, and one-click resettable.
+    # ── Active sidebar-filter strip ──────────────────────────────────
+    # Shows which sidebar filters are currently narrowing the data, so
+    # the reader doesn't misinterpret sparse charts as "the field is
+    # small" when in fact three filters are on. Only sidebar filters
+    # cross-cut every chart — Deep Dive focus pickers (disease / target /
+    # etc.) are TAB-LOCAL: picking SLE on the By disease tab doesn't
+    # affect what By target shows. So focus picks aren't included here;
+    # they're visible on their own tab's picker row instead. Per user
+    # feedback (2026-05-15): "there's no cross-tab filtering ... is the
+    # focus display tab and reset actually necessary?" — answer was no.
     #
-    # The strip only renders when something non-default is active —
-    # a clean default view has no chip strip, no visual noise.
+    # The strip only renders when at least one sidebar filter is
+    # narrowed below "all selected".
     _sidebar_chips: list[str] = []
     for _sk, _opts in _sync_opt_map.items():
         _val = st.session_state.get(_sk)
         if _val is not None and set(_val) != set(_opts):
             _label = _sk.replace("flt_", "").replace("_", " ").title()
-            # Cap displayed values at 3 + suffix to avoid huge chips
             _shown = list(_val)[:3]
             _suffix = f" +{len(_val) - 3}" if len(_val) > 3 else ""
             _sidebar_chips.append(f"{_label}: {', '.join(_shown)}{_suffix}")
-    _focus_chips: list[str] = []
-    _focus_labels = {
-        "dd_disease_pick":     "Disease",
-        "dd_target_pick":      "Target",
-        "dd_sponsor_pick":     "Sponsor type",
-        "dd_sponsor_one_pick": "Sponsor",
-        "dd_geo_country_pick": "Country",
-    }
-    _focus_sentinels = {"—", "(any — show landscape)", "", None}
-    for _k, _lbl in _focus_labels.items():
-        _v = st.session_state.get(_k)
-        if _v not in _focus_sentinels:
-            # Specific-sponsor picker stores "Sponsor (N trials)" labels —
-            # strip the count parenthetical for display.
-            _v_display = (
-                _v.rsplit("  (", 1)[0]
-                if _k == "dd_sponsor_one_pick" and "  (" in str(_v)
-                else _v
+    if _sidebar_chips:
+        _PREFIX_STYLE = (
+            'display: inline-block; font-size: 9px; '
+            'font-weight: 600; letter-spacing: 0.08em; '
+            'text-transform: uppercase; '
+            'padding: 2px 6px; margin-right: 6px; border-radius: 3px; '
+            'vertical-align: middle;'
+        )
+        _chip_html_parts = [
+            '<div style="background: #f8fafc; border-left: 3px solid #0284c7; '
+            'padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;">'
+        ]
+        for _c in _sidebar_chips:
+            _chip_html_parts.append(
+                f'<span style="display: inline-block; padding: 2px 10px 2px 4px; '
+                f'margin: 0 6px 4px 0; background: #f0f9ff; '
+                f'color: #0c4a6e; border-radius: 3px; font-size: 12px; '
+                f'border: 1px solid #bae6fd; vertical-align: middle;">'
+                f'<span style="{_PREFIX_STYLE} background: #0284c7; color: white;">Filter</span>'
+                f'{_c}</span>'
             )
-            _focus_chips.append(f"{_lbl}: {_v_display}")
-    if _sidebar_chips or _focus_chips:
-        # Style: subtle slate-50 background with a left accent bar so the
-        # strip reads as a STATUS BAR (one logical element, not just free-
-        # floating chips). The left bar's colour signals state class:
-        # amber when focus is active (Deep Dive drilldown), sky-blue
-        # otherwise (sidebar filters only).
-        _accent_color = "#f59e0b" if _focus_chips else "#0284c7"
-        # Chip styling — no emoji (NEJM-style discipline). Category is
-        # signaled by a tiny uppercase prefix ("FILTER" / "FOCUS") plus
-        # a category-coloured dot on the left of each chip; the chip
-        # background uses a very subtle tint of the same colour rather
-        # than the loud amber/sky from the prior emoji-based design.
-        _strip_col_chips, _strip_col_btn = st.columns([0.85, 0.15])
-        with _strip_col_chips:
-            _chip_html_parts = [
-                f'<div style="background: #f8fafc; border-left: 3px solid {_accent_color}; '
-                f'padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;">'
-            ]
-            _PREFIX_STYLE = (
-                'display: inline-block; font-size: 9px; '
-                'font-weight: 600; letter-spacing: 0.08em; '
-                'text-transform: uppercase; '
-                'padding: 2px 6px; margin-right: 6px; border-radius: 3px; '
-                'vertical-align: middle;'
-            )
-            for _c in _sidebar_chips:
-                _chip_html_parts.append(
-                    f'<span style="display: inline-block; padding: 2px 10px 2px 4px; '
-                    f'margin: 0 6px 4px 0; background: #f0f9ff; '
-                    f'color: #0c4a6e; border-radius: 3px; font-size: 12px; '
-                    f'border: 1px solid #bae6fd; vertical-align: middle;">'
-                    f'<span style="{_PREFIX_STYLE} background: #0284c7; color: white;">Filter</span>'
-                    f'{_c}</span>'
-                )
-            for _c in _focus_chips:
-                _chip_html_parts.append(
-                    f'<span style="display: inline-block; padding: 2px 10px 2px 4px; '
-                    f'margin: 0 6px 4px 0; background: #fffbeb; '
-                    f'color: #78350f; border-radius: 3px; font-size: 12px; '
-                    f'border: 1px solid #fde68a; vertical-align: middle;">'
-                    f'<span style="{_PREFIX_STYLE} background: #b45309; color: white;">Focus</span>'
-                    f'{_c}</span>'
-                )
-            _chip_html_parts.append('</div>')
-            st.markdown(
-                "".join(_chip_html_parts),
-                unsafe_allow_html=True,
-            )
-        with _strip_col_btn:
-            if _focus_chips and st.button("Reset focus", key="dd_reset_focus",
-                                          help="Clear all Deep Dive drilldown picks (does not affect sidebar filters)"):
-                _reset_focus_picks()
-                st.rerun()
+        _chip_html_parts.append('</div>')
+        st.markdown("".join(_chip_html_parts), unsafe_allow_html=True)
 
     # ── Sub-tab structure — stateful radio styled as tabs ────────────────
     # Streamlit's native `st.tabs` does NOT persist the active tab across
