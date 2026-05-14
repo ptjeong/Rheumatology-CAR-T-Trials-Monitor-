@@ -2633,27 +2633,87 @@ def _deepdive_timeline(
     )
     fig.update_traces(line=dict(width=2.0), marker=dict(size=6))
 
-    # Build end-of-line labels. Truncate long names (institutional
-    # sponsors run 60+ chars) to 28 chars + ellipsis so they don't
-    # overflow the right margin. The full name remains in the
-    # hover-tooltip (Plotly default).
-    annotations = []
+    # ── End-of-line labels with anti-overlap + leader lines ─────────────
+    # The naive "label at (last_x, last_y) with xshift=8" approach (commit
+    # 212eda0) collided when multiple lines ended at the same year with
+    # similar y-values — e.g. "Tongji Hospital" and "IASO Pharmaceuticals"
+    # both ending at 2025 ≈14 trials. The FT / Economist pattern is to
+    # anchor every label to a single right-edge column (so labels stack
+    # vertically rather than at each line's actual y) and run a simple
+    # de-overlap pass that nudges labels apart by a minimum data-unit
+    # gap. A thin dotted leader line connects each line's actual endpoint
+    # to its shifted label so the reader can still match line to label.
+    endpoints: list[dict] = []
     for grp in counts["_Group"].unique():
         sub = counts[counts["_Group"] == grp].sort_values("StartYear")
         if sub.empty:
             continue
-        last_x = sub["StartYear"].iloc[-1]
-        last_y = sub["Trials"].iloc[-1]
-        label = grp if len(grp) <= 28 else grp[:25] + "…"
+        endpoints.append({
+            "group": grp,
+            "label": grp if len(grp) <= 28 else grp[:25] + "…",
+            "color": color_map.get(grp, "#0c4a6e"),
+            "x_end": float(sub["StartYear"].iloc[-1]),
+            "y_end": float(sub["Trials"].iloc[-1]),
+        })
+
+    # Compute the de-overlap parameters in DATA coordinates. We don't
+    # know the rendered pixel height at figure-construction time, so we
+    # use a fraction of the y-range as the per-label slot (heuristic:
+    # 7% of y_max — enough for a 10-px font at chart heights 280-360 px).
+    y_max = float(counts["Trials"].max()) if not counts.empty else 1.0
+    min_gap = max(y_max * 0.07, 0.5)
+    # Label column x: just past the rightmost data point so the leader
+    # lines all extend rightward (not leftward into the chart area).
+    x_max = float(counts["StartYear"].max())
+    label_x = x_max + 0.15
+
+    # Two-pass de-overlap. Pass 1 (bottom-up): for each label sorted by
+    # y_end ascending, push up if it's closer than min_gap to the
+    # previous (lower) label. Pass 2 (top-down, only if pass 1 caused
+    # the top label to exceed y_max): redistribute to evenly-spaced
+    # positions across the full y_range. Pass 2 is the safety valve for
+    # the degenerate case of N labels all tied at the same y_end.
+    endpoints.sort(key=lambda e: e["y_end"])
+    adjusted_y: list[float] = []
+    for i, ep in enumerate(endpoints):
+        if i == 0:
+            adjusted_y.append(ep["y_end"])
+        else:
+            adjusted_y.append(max(ep["y_end"], adjusted_y[i - 1] + min_gap))
+    if adjusted_y and adjusted_y[-1] > y_max * 1.05:
+        # Compress: evenly-space labels across [0, y_max] so the top one
+        # doesn't escape the chart's visible y range.
+        n = len(endpoints)
+        if n > 1:
+            adjusted_y = [y_max * i / (n - 1) for i in range(n)]
+        else:
+            adjusted_y = [endpoints[0]["y_end"]]
+
+    annotations: list[dict] = []
+    shapes: list[dict] = []
+    for ep, y_adj in zip(endpoints, adjusted_y):
         annotations.append(dict(
-            x=last_x, y=last_y, text=label, showarrow=False,
+            x=label_x, y=y_adj, text=ep["label"], showarrow=False,
             xanchor="left", yanchor="middle",
-            xshift=8,   # 8 px right of the last marker
+            xshift=4,
             font=dict(
                 family=FONT_FAMILY, size=10,
-                color=color_map.get(grp, "#0c4a6e"),
+                color=ep["color"],
             ),
         ))
+        # Only draw a leader line if the label moved meaningfully —
+        # avoids visual noise for lines that didn't collide. Threshold:
+        # half a slot's worth of vertical shift.
+        if abs(y_adj - ep["y_end"]) > min_gap * 0.4:
+            shapes.append(dict(
+                type="line",
+                xref="x", yref="y",
+                x0=ep["x_end"], y0=ep["y_end"],
+                x1=label_x, y1=y_adj,
+                line=dict(color=ep["color"], width=0.7, dash="dot"),
+                opacity=0.55,
+                layer="below",
+            ))
 
     fig.update_layout(
         # Right margin generous so end-of-line labels have room
@@ -2665,6 +2725,7 @@ def _deepdive_timeline(
         yaxis_title="Trials",
         showlegend=False,
         annotations=annotations,
+        shapes=shapes,
         font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
     )
     return fig
