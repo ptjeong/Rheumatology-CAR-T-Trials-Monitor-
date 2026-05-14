@@ -1645,6 +1645,18 @@ TABLE_HEIGHT_DEFAULT = 360   # default st.dataframe height when not auto-sized
 HAIRLINE = THEME["border"]   # alias for visual separators
 FONT_FAMILY = "Inter, -apple-system, sans-serif"
 
+# Canonical "actively enrolling" status set. Single source of truth so
+# the "Open / recruiting" tile count and the "Planned enrollment"
+# trial-count footer agree (they used to differ — 232 vs 239 — because
+# one used {RECRUITING, NOT_YET_RECRUITING} and the other added
+# ENROLLING_BY_INVITATION + SUSPENDED). SUSPENDED is excluded because
+# suspended trials have PAUSED enrolment — they're not "actively
+# enrolling" in any useful sense. ENROLLING_BY_INVITATION is included
+# because the trial IS recruiting, just selectively.
+OPEN_STATUSES = frozenset({
+    "RECRUITING", "NOT_YET_RECRUITING", "ENROLLING_BY_INVITATION",
+})
+
 # Canonical CT.gov country name → ISO-3 mapping.  Plotly's `locationmode="country names"`
 # is deprecated, so choropleths are rendered with ISO-3 codes; unknown names are dropped
 # with a warning rather than silently mis-plotted.
@@ -3403,6 +3415,41 @@ def _empty_state_panel(sync_opt_map: dict[str, list[str]], *, caller_id: str) ->
                 st.rerun()
 
 
+def _section_question(question: str, methodology: str | None = None) -> None:
+    """Render a section's orientation line: bold one-line question +
+    optional small "?" icon whose hover tooltip reveals the longer
+    methodology paragraph.
+
+    Replaces the previous two-line pattern (bold-question markdown +
+    visible st.caption methodology) per user feedback that the
+    methodology text made the hero areas "too busy". The information
+    is preserved — just hidden behind a hover affordance like every
+    other tooltip in the dashboard. Uses the native HTML title attr
+    so it works on Firefox / Safari / Chrome without any extra JS.
+    """
+    if methodology:
+        # HTML title attribute is plain-text only (no markdown).
+        # Escape double quotes so the attribute string stays valid.
+        _tooltip_text = methodology.replace('"', '&quot;').replace("\n", " ")
+        _icon = (
+            f'<span title="{_tooltip_text}" '
+            f'style="display: inline-block; margin-left: 6px; '
+            f'width: 16px; height: 16px; line-height: 14px; '
+            f'text-align: center; border-radius: 50%; '
+            f'background: {THEME["surf3"]}; color: {THEME["muted"]}; '
+            f'font-size: 10px; font-weight: 700; cursor: help; '
+            f'vertical-align: middle; border: 1px solid {THEME["border"]};">?</span>'
+        )
+    else:
+        _icon = ""
+    st.markdown(
+        f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; '
+        f'margin-top: -0.5rem; margin-bottom: 0.85rem;">'
+        f'<b>{question}</b>{_icon}</p>',
+        unsafe_allow_html=True,
+    )
+
+
 if st.sidebar.button("Reset filters", width='stretch'):
     for _k in _FILTER_KEYS:
         st.session_state.pop(_k, None)
@@ -3967,7 +4014,7 @@ def _get_geo_sites() -> pd.DataFrame:
 
 
 total_trials = len(df_filt)
-recruiting_trials = int(df_filt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())
+recruiting_trials = int(df_filt["OverallStatus"].isin(OPEN_STATUSES).sum())
 _tc_for_top = df_filt.loc[~df_filt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"].dropna()
 top_target = _tc_for_top.value_counts().idxmax() if not _tc_for_top.empty else "—"
 _enroll_count = pd.to_numeric(df_filt["EnrollmentCount"], errors="coerce")
@@ -3996,16 +4043,17 @@ median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
 #              TERMINATED — these trials are NOT recruiting any new
 #              patients regardless of what the type flag says).
 #   PLANNED  = enrollment is still open → use EnrollmentCount as the
-#              target (RECRUITING / NOT_YET_RECRUITING /
-#              ENROLLING_BY_INVITATION / SUSPENDED).
-#   Other statuses (WITHDRAWN / UNKNOWN) don't count toward either —
-#   no reliable signal.
+#              target (the OPEN_STATUSES set: RECRUITING /
+#              NOT_YET_RECRUITING / ENROLLING_BY_INVITATION).
+#   Other statuses (SUSPENDED / WITHDRAWN / UNKNOWN) don't count toward
+#   either — no reliable signal. SUSPENDED specifically used to be in
+#   the planned bucket (2026-05-15 commit aligned it to OPEN_STATUSES
+#   instead so the "Open / recruiting" tile count and the planned-
+#   enrollment trial count match exactly).
 _actual_status = {"COMPLETED", "ACTIVE_NOT_RECRUITING", "TERMINATED"}
-_planned_status = {"RECRUITING", "NOT_YET_RECRUITING",
-                   "ENROLLING_BY_INVITATION", "SUSPENDED"}
 _status_series = df_filt["OverallStatus"].astype(str).str.upper()
 _actual_mask = _status_series.isin(_actual_status) & _enroll_count.notna()
-_planned_mask = _status_series.isin(_planned_status) & _enroll_count.notna()
+_planned_mask = _status_series.isin(OPEN_STATUSES) & _enroll_count.notna()
 _n_actual_pts = int(_enroll_count[_actual_mask].sum()) if _actual_mask.any() else 0
 _n_actual_trials = int(_actual_mask.sum())
 _n_planned_pts = int(_enroll_count[_planned_mask].sum()) if _planned_mask.any() else 0
@@ -4019,7 +4067,7 @@ m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
     metric_card("Filtered trials", total_trials, "Trials matching current filters")
 with m2:
-    metric_card("Open / recruiting", recruiting_trials, "Recruiting or not yet recruiting")
+    metric_card("Open / recruiting", recruiting_trials, "Recruiting, not yet recruiting, or enrolling by invitation")
 with m3:
     metric_card(
         "Planned enrollment",
@@ -4453,7 +4501,7 @@ with tab_overview:
             if _ra_fam != "All families" and "DiseaseFamily" in _ra.columns:
                 _ra = _ra[_ra["DiseaseFamily"] == _ra_fam]
             if _ra_status == "Open / recruiting":
-                _ra = _ra[_ra["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"])]
+                _ra = _ra[_ra["OverallStatus"].isin(OPEN_STATUSES)]
             elif _ra_status == "Active / not recruiting":
                 _ra = _ra[_ra["OverallStatus"] == "ACTIVE_NOT_RECRUITING"]
             elif _ra_status == "Completed":
@@ -4558,11 +4606,16 @@ with tab_overview:
 
 with tab_geo:
     st.subheader("Global studies by country")
-    st.markdown(
-        f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-        "<b>Where is each trial being run, and how does activity spread "
-        "across regions and individual countries?</b></p>",
-        unsafe_allow_html=True,
+    _section_question(
+        "Where is each trial being run, and how does activity spread "
+        "across regions and individual countries?",
+        methodology=(
+            "Country-level slicing: world map (choropleth + open-site overlay), "
+            "country leaderboard, country × disease + phase composition heatmaps, "
+            "and a drill-into-one country view with site-level detail. Countries "
+            "are exploded from the pipe-joined Countries field — a single trial "
+            "enrolling in 4 countries appears in 4 rows."
+        ),
     )
 
     # Regional aggregates strip (6 tiles: Asia / Europe / NA / LA /
@@ -5044,18 +5097,16 @@ with tab_geo:
 
 with tab_data:
     st.subheader("Trial table")
-    st.markdown(
-        f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-        "<b>Find a specific trial — searchable, filterable, with row-click "
-        "drilldown to the full record.</b></p>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Type-ahead search runs over NCT ID, title, sponsor, disease, "
-        "target, and product name. Country zoom narrows to trials with "
-        "≥1 active site in the chosen country and shows that country's "
-        "city + site-status detail in place of the default Countries "
-        "column. Sidebar filters apply on top of the search."
+    _section_question(
+        "Find a specific trial — searchable, filterable, with row-click "
+        "drilldown to the full record.",
+        methodology=(
+            "Type-ahead search runs over NCT ID, title, sponsor, disease, "
+            "target, and product name. Country zoom narrows to trials with "
+            "≥1 active site in the chosen country and shows that country's "
+            "city + site-status detail in place of the default Countries "
+            "column. Sidebar filters apply on top of the search."
+        ),
     )
 
     # Search + country zoom side-by-side.  Country zoom filters the main
@@ -5560,11 +5611,15 @@ with tab_deepdive:
     # ===== By disease =====
     if _active == "By disease":
         st.subheader("Disease-entity focus")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>Which indications have the most activity, and which "
-            "antigens are being tried in each?</b></p>",
-            unsafe_allow_html=True,
+        _section_question(
+            "Which indications have the most activity, and which "
+            "antigens are being tried in each?",
+            methodology=(
+                "Top-12 disease aggregate at the top; pick a disease to swap "
+                "the landscape (Disease × Antigen heatmap + Phase composition "
+                "+ Trial age) for that disease's drilldown (sponsors, products, "
+                "countries, phase mix, full trial list)."
+            ),
         )
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_disease")
@@ -5577,7 +5632,7 @@ with tab_deepdive:
                     dd_df.groupby("_Disease")
                     .agg(
                         Trials=("NCTId", "nunique"),
-                        Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
+                        Open=("OverallStatus", lambda s: int(s.isin(OPEN_STATUSES).sum())),
                         Sponsors=("LeadSponsor", "nunique"),
                         TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
                         MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
@@ -5685,7 +5740,7 @@ with tab_deepdive:
                     c1.metric("Trials", len(sub))
                     c2.metric(
                         "Open / recruiting",
-                        int(sub["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                        int(sub["OverallStatus"].isin(OPEN_STATUSES).sum()),
                     )
                     _enr = pd.to_numeric(sub["EnrollmentCount"], errors="coerce")
                     c3.metric("Total target enrollment", f"{int(_enr.fillna(0).sum()):,}",
@@ -5801,16 +5856,16 @@ with tab_deepdive:
     # ===== By target (NEW; ported from onc commit 5e6553b, rheum-adapted) =====
     if _active == "By target":
         st.subheader("Antigen target focus")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>Which antigens dominate, in which diseases, and how "
-            "have they emerged over time?</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Pick an antigen to see how its pipeline spreads across diseases, "
-            "phases, modalities, and sponsors. Same row-click drilldown as the "
-            "other Deep-Dive sub-tabs."
+        _section_question(
+            "Which antigens dominate, in which diseases, and how "
+            "have they emerged over time?",
+            methodology=(
+                "Pick an antigen to see how its pipeline spreads across "
+                "diseases, phases, modalities, and sponsors. Same row-click "
+                "drilldown as the other Deep-Dive sub-tabs. The modality "
+                "picker applies as an additional filter on top of the "
+                "antigen pick."
+            ),
         )
 
         # Antigen options — full closed vocab from the snapshot, EXCLUDING
@@ -6371,18 +6426,16 @@ with tab_deepdive:
     # under `if _active == "By target":`; now stands alone.
     if _active == "By product":
         st.subheader("Per-product pipeline view")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>Where is each named CAR-T product in its development "
-            "pipeline, and which sponsors / indications does it span?</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Each row is one named CAR-T product (KYV-101, CABA-201, ADI-001, "
-            "CNTY-101, …). Shows the product's portfolio across the filtered "
-            "dataset: number of trials, primary target, modality, furthest "
-            "phase, sponsor, indications. Click a row → see that product's "
-            "trials, click a trial for the full record."
+        _section_question(
+            "Where is each named CAR-T product in its development "
+            "pipeline, and which sponsors / indications does it span?",
+            methodology=(
+                "Each row is one named CAR-T product (KYV-101, CABA-201, "
+                "ADI-001, CNTY-101, …). Shows the product's portfolio: "
+                "number of trials, primary target, modality, furthest "
+                "phase, sponsor, indications. Click a row → see that "
+                "product's trials, click a trial for the full record."
+            ),
         )
 
         prod_df = df_filt.dropna(subset=["ProductName"]).copy() if "ProductName" in df_filt.columns else pd.DataFrame()
@@ -6678,16 +6731,16 @@ with tab_deepdive:
     # ===== By sponsor type =====
     if _active == "By sponsor":
         st.subheader("Landscape by sponsor type")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>Who's sponsoring trials, how concentrated is each "
-            "indication, and what's any single sponsor's portfolio?</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Aggregates the filtered dataset by sponsor type "
-            "(Industry / Academic / Government / Other). Drill into any "
-            "bucket to see its top sponsors, antigen targets, and product mix."
+        _section_question(
+            "Who's sponsoring trials, how concentrated is each "
+            "indication, and what's any single sponsor's portfolio?",
+            methodology=(
+                "Two pickers at the top: sponsor type (Industry / Academic / "
+                "Government / Other) and a specific named sponsor. Specific "
+                "takes priority. With neither picked you see the cross-type "
+                "landscape (aggregate table + type × disease heatmap + phase "
+                "composition)."
+            ),
         )
 
         # Defensive fallback: older cached state may lack SponsorType.
@@ -6712,7 +6765,7 @@ with tab_deepdive:
                 df_filt.groupby("SponsorType")
                 .agg(
                     Trials=("NCTId", "nunique"),
-                    Open=("OverallStatus", lambda s: int(s.isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum())),
+                    Open=("OverallStatus", lambda s: int(s.isin(OPEN_STATUSES).sum())),
                     Sponsors=("LeadSponsor", "nunique"),
                     TotalEnrolled=("EnrollmentCount", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0).sum())),
                     MedianEnrollment=("EnrollmentCount", lambda s: pd.to_numeric(s, errors="coerce").median()),
@@ -6794,7 +6847,7 @@ with tab_deepdive:
                 )
                 _sm4.metric(
                     "Open / recruiting",
-                    int(spt["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                    int(spt["OverallStatus"].isin(OPEN_STATUSES).sum()),
                 )
                 _spy = pd.to_numeric(spt["StartYear"], errors="coerce")
                 if _spy.notna().any():
@@ -7007,20 +7060,18 @@ with tab_deepdive:
     # ===== By time (NEW Phase 2) =====
     if _active == "By time":
         st.subheader("Temporal landscape")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>How is the field growing, by what metric, and how do "
-            "recent cohorts mature?</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Annual trial-start dynamics with selectable colour axis "
-            "(disease, target, sponsor type, family). Cumulative active "
-            "trials shows the running total of started trials at each "
-            "year. Cohort comparison surfaces start-year × current-phase "
-            "patterns — late-cohort trials concentrating in early phases "
-            "is expected; mature cohorts spreading across Phase II / III "
-            "signals real pipeline progression."
+        _section_question(
+            "How is the field growing, by what metric, and how do "
+            "recent cohorts mature?",
+            methodology=(
+                "Annual trial-start dynamics with selectable colour axis "
+                "(disease, target, sponsor type, family). Cumulative active "
+                "trials shows the running total at each year. Cohort × "
+                "phase heatmap surfaces start-year × current-phase patterns: "
+                "late-cohort trials concentrating in early phases is "
+                "expected; mature cohorts spreading across Phase II / III "
+                "signals real pipeline progression."
+            ),
         )
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_time")
@@ -7331,19 +7382,17 @@ with tab_deepdive:
     # ===== Compare (side-by-side disease/target — own sub-tab) =====
     if _active == "Compare":
         st.subheader("Side-by-side comparator")
-        st.markdown(
-            f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; margin-top: -0.5rem;">'
-            "<b>Pick any two diseases or antigens — see them side-by-"
-            "side as matched mini-dashboards.</b></p>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Pick two diseases or two antigens; the dashboard renders "
-            "matched mini-panels (trial counts, phase distribution, "
-            "sponsor-type split, target/disease mix, annual trend). "
-            "Useful for benchmark questions like 'is autoimmune-CAR-T "
-            "moving toward CD19 or BCMA?' or 'how does SLE compare to "
-            "SSc in pipeline maturity?'."
+        _section_question(
+            "Pick any two diseases or antigens — see them side-by-"
+            "side as matched mini-dashboards.",
+            methodology=(
+                "Pick two diseases or two antigens; the dashboard renders "
+                "matched mini-panels (trial counts, phase distribution, "
+                "sponsor-type split, target/disease mix, annual trend). "
+                "Useful for benchmark questions like 'is autoimmune-CAR-T "
+                "moving toward CD19 or BCMA?' or 'how does SLE compare to "
+                "SSc in pipeline maturity?'."
+            ),
         )
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_compare")
@@ -7396,7 +7445,7 @@ with tab_deepdive:
                         _ma.metric("Trials", f"{len(df_slice):,}")
                         _mb.metric(
                             "Open",
-                            int(df_slice["OverallStatus"].isin(["RECRUITING", "NOT_YET_RECRUITING"]).sum()),
+                            int(df_slice["OverallStatus"].isin(OPEN_STATUSES).sum()),
                         )
                         _mc.metric(
                             "Sponsors",
