@@ -4565,76 +4565,17 @@ with tab_geo:
         unsafe_allow_html=True,
     )
 
-    # ── Phase 5: Regional aggregates strip ──────────────────────────
-    # Maps each ISO country into one of five world regions so a reader
-    # sees Asia / Europe / North America / Latin America / RoW totals
-    # without parsing the country leaderboard. Region mapping is
-    # conservative (ISO-3166 region codes minus a few common aliases).
-    _REGIONS = {
-        "China": "Asia", "Japan": "Asia", "South Korea": "Asia",
-        "Korea, Republic of": "Asia", "Taiwan": "Asia",
-        "Hong Kong": "Asia", "Singapore": "Asia", "India": "Asia",
-        "Thailand": "Asia", "Malaysia": "Asia", "Vietnam": "Asia",
-        "Philippines": "Asia", "Indonesia": "Asia", "Israel": "Asia",
-        "Turkey": "Asia",
-        "United States": "North America", "Canada": "North America",
-        "Mexico": "Latin America", "Brazil": "Latin America",
-        "Argentina": "Latin America", "Chile": "Latin America",
-        "Colombia": "Latin America", "Peru": "Latin America",
-        "Australia": "Oceania", "New Zealand": "Oceania",
-    }
-    _EU_COUNTRIES = {
-        "Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus",
-        "Czechia", "Czech Republic", "Denmark", "Estonia", "Finland",
-        "France", "Germany", "Greece", "Hungary", "Ireland", "Italy",
-        "Latvia", "Lithuania", "Luxembourg", "Malta", "Netherlands",
-        "Poland", "Portugal", "Romania", "Slovakia", "Slovenia",
-        "Spain", "Sweden",
-        "United Kingdom", "Switzerland", "Norway", "Iceland",
-    }
-
-    def _country_to_region(c: str) -> str:
-        if c in _REGIONS:
-            return _REGIONS[c]
-        if c in _EU_COUNTRIES:
-            return "Europe"
-        return "Other"
+    # Regional aggregates strip (6 tiles: Asia / Europe / NA / LA /
+    # Oceania / Other) was removed 2026-05-15 per user feedback ("remove
+    # the region; I feel it makes the top section too busy"). Same data
+    # is recoverable from the country leaderboard + the world-map
+    # choropleth below, so no information is lost — just one fewer
+    # row of stat tiles competing with the headline 3-metric row.
 
     if not df_filt.empty:
-        _region_counter: dict[str, set[str]] = {
-            "Asia": set(), "Europe": set(), "North America": set(),
-            "Latin America": set(), "Oceania": set(), "Other": set(),
-        }
-        for _, _r in df_filt.iterrows():
-            cs = str(_r.get("Countries") or "").split("|")
-            _seen_regions = set()
-            for c in cs:
-                c = c.strip()
-                if not c:
-                    continue
-                _seen_regions.add(_country_to_region(c))
-            for reg in _seen_regions:
-                _region_counter[reg].add(_r.get("NCTId"))
-        _reg_cols = st.columns(6)
-        _reg_palette = {
-            "Asia":           "#0c4a6e",
-            "Europe":         "#0369a1",
-            "North America":  "#0284c7",
-            "Latin America":  "#7c3aed",
-            "Oceania":        "#0d9488",
-            "Other":          "#94a3b8",
-        }
-        for _col, _reg in zip(_reg_cols, [
-            "Asia", "Europe", "North America", "Latin America", "Oceania", "Other"
-        ]):
-            _col.metric(
-                _reg, f"{len(_region_counter[_reg]):,}",
-                help=f"Distinct trials with at least one site in {_reg}",
-            )
-
-        # ── Trial-level geography stats (folded in from the former Deep
-        # Dive → By geography sub-tab, 2026-05-15). Three tile second row
-        # showing dataset-wide country diversity.
+        # ── Trial-level geography stats (formerly Deep Dive → By
+        # geography, folded in 2026-05-15). Three tiles showing dataset-
+        # wide country diversity.
         _multi_mask = (
             df_filt["Countries"].fillna("").astype(str)
             .apply(lambda s: len([c for c in s.split("|") if c.strip()]) >= 2)
