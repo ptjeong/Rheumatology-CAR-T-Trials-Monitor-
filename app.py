@@ -6268,18 +6268,78 @@ with tab_deepdive:
                 )
 
             # ── Sponsor activity over time (top 10 sponsors) ──
+            # Was a 10-line spaghetti chart. With most cells in the 1-3
+            # range, year-over-year fluctuations are statistical noise and
+            # the line crossings made it impossible to read any single
+            # sponsor's trajectory. Heatmap shows the same data legibly:
+            # each cell carries its count, rows scan as one sponsor's
+            # activity-over-time, columns scan as "who was busy in year Y".
             st.markdown("**Top sponsors — annual trial starts**")
             _sp_top = (
                 df_filt["LeadSponsor"].dropna().value_counts().head(10).index.tolist()
             )
             _sp_in = df_filt[df_filt["LeadSponsor"].isin(_sp_top)].copy()
+            _sp_in["StartYear"] = pd.to_numeric(_sp_in["StartYear"], errors="coerce")
+            _sp_in = _sp_in.dropna(subset=["StartYear"])
+            _sp_in = _sp_in[_sp_in["StartYear"] <= _today_year()]
             if not _sp_in.empty:
-                _chart(
-                    _deepdive_timeline(
-                        _sp_in, group_col="LeadSponsor", height=340, top_n=10,
-                    ),
-                    key="dd_time_sponsor_activity",
+                _sp_in["StartYear"] = _sp_in["StartYear"].astype(int)
+                _sp_pivot = (
+                    _sp_in.groupby(["LeadSponsor", "StartYear"]).size()
+                    .unstack(fill_value=0)
+                    .reindex(_sp_top)  # preserve top-10 order
+                    .fillna(0).astype(int)
                 )
+                # Sort columns ascending so years read left-to-right
+                _sp_pivot = _sp_pivot.reindex(sorted(_sp_pivot.columns), axis=1)
+                # Truncate long sponsor names for the y-axis tick labels
+                _sp_y_labels = [
+                    (s if len(s) <= 28 else s[:25] + "…")
+                    for s in _sp_pivot.index
+                ]
+                _sp_annotations = [
+                    dict(
+                        x=year, y=sp, text=str(val),
+                        showarrow=False, xref="x", yref="y",
+                        font=dict(
+                            family=FONT_FAMILY, size=10,
+                            color="#f8fafc" if val >= _sp_pivot.values.max() * 0.55 else "#0f172a",
+                        ),
+                    )
+                    for sp, row in zip(_sp_y_labels, _sp_pivot.values)
+                    for year, val in zip(_sp_pivot.columns, row)
+                    if val > 0
+                ]
+                _sp_fig = go.Figure(go.Heatmap(
+                    x=_sp_pivot.columns.tolist(),
+                    y=_sp_y_labels,
+                    z=_sp_pivot.values,
+                    colorscale=[
+                        [0.0, "#f1f5f9"],
+                        [0.15, "#cbd5e1"],
+                        [0.45, "#7dd3fc"],
+                        [0.75, "#0284c7"],
+                        [1.0, "#0c4a6e"],
+                    ],
+                    showscale=False,
+                    hovertemplate=(
+                        "<b>%{y}</b><br>%{x}: %{z} trial(s)<extra></extra>"
+                    ),
+                    xgap=2, ygap=2,
+                ))
+                _sp_fig.update_layout(
+                    height=max(280, len(_sp_top) * 32 + 80),
+                    margin=dict(l=12, r=12, t=8, b=40),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(
+                        tickmode="linear", dtick=1, tickformat="d",
+                        side="bottom", showgrid=False,
+                    ),
+                    yaxis=dict(autorange="reversed", showgrid=False),
+                    annotations=_sp_annotations,
+                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                )
+                _chart(_sp_fig, key="dd_time_sponsor_activity")
 
             # ── Phase-progression heatmap (start-year × current phase) ──
             # Was a Sankey, but the crossing flow bands made it too busy
