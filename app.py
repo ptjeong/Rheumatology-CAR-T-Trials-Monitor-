@@ -2754,10 +2754,16 @@ def _deepdive_timeline(
                 layer="below",
             ))
 
+    # Pin the x-axis to the data range. Without an explicit range,
+    # Plotly's auto-fit expands the axis to include every annotation's
+    # text width — long labels at `x_max + 0.15` (e.g. "Other immune-
+    # mediated") pulled the visible axis out to ~2030 even when data
+    # ended at 2026, drawing fictitious tick marks. The 180 px right
+    # margin gives the labels somewhere to live OUTSIDE the plotting
+    # area; the explicit range prevents Plotly from re-absorbing the
+    # margin to fit them.
+    x_min = float(counts["StartYear"].min())
     fig.update_layout(
-        # Right margin generous so end-of-line labels have room
-        # (was l=12 r=12 b=160 with bottom legend; now b=40 since
-        # legend is gone, r=180 for label space).
         margin=dict(l=12, r=180, t=8, b=40),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis_title=None,
@@ -2766,6 +2772,13 @@ def _deepdive_timeline(
         annotations=annotations,
         shapes=shapes,
         font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+        xaxis=dict(
+            range=[x_min - 0.5, x_max + 0.5],
+            tickmode="linear",
+            dtick=1,
+            tickformat="d",
+            showgrid=False,
+        ),
     )
     return fig
 
