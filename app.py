@@ -2059,7 +2059,9 @@ st.markdown(
     div[data-testid="stDataFrame"] {{
         border: 1px solid {THEME["border"]};
         border-radius: 2px;
-        overflow: hidden;
+        /* overflow: hidden was here — clipped the native Streamlit
+           fullscreen icon that renders top-right on hover. Removed
+           2026-05-15 so the icon is visible again. */
         background: {THEME["surface"]};
     }}
 
@@ -3416,36 +3418,22 @@ def _empty_state_panel(sync_opt_map: dict[str, list[str]], *, caller_id: str) ->
 
 
 def _section_question(question: str, methodology: str | None = None) -> None:
-    """Render a section's orientation line: bold one-line question +
-    optional small "?" icon whose hover tooltip reveals the longer
-    methodology paragraph.
+    """Render a section's orientation line as a bold one-line question.
 
-    Replaces the previous two-line pattern (bold-question markdown +
-    visible st.caption methodology) per user feedback that the
-    methodology text made the hero areas "too busy". The information
-    is preserved — just hidden behind a hover affordance like every
-    other tooltip in the dashboard. Uses the native HTML title attr
-    so it works on Firefox / Safari / Chrome without any extra JS.
+    The optional `methodology` parameter is accepted for back-compat
+    with existing call sites but is intentionally NOT rendered — the
+    previous "?" tooltip icon added visual noise without obvious
+    function (per user feedback: "what's up with the random question
+    icon? it's in all captions ... remove if it's there without
+    function"). For trustworthy methodology documentation, the
+    Methods tab is the canonical home; the hero line stays a single
+    short question.
     """
-    if methodology:
-        # HTML title attribute is plain-text only (no markdown).
-        # Escape double quotes so the attribute string stays valid.
-        _tooltip_text = methodology.replace('"', '&quot;').replace("\n", " ")
-        _icon = (
-            f'<span title="{_tooltip_text}" '
-            f'style="display: inline-block; margin-left: 6px; '
-            f'width: 16px; height: 16px; line-height: 14px; '
-            f'text-align: center; border-radius: 50%; '
-            f'background: {THEME["surf3"]}; color: {THEME["muted"]}; '
-            f'font-size: 10px; font-weight: 700; cursor: help; '
-            f'vertical-align: middle; border: 1px solid {THEME["border"]};">?</span>'
-        )
-    else:
-        _icon = ""
+    del methodology  # accepted for API back-compat, no-op rendered.
     st.markdown(
         f'<p style="font-size: var(--fs-sm); color: {THEME["text"]}; '
         f'margin-top: -0.5rem; margin-bottom: 0.85rem;">'
-        f'<b>{question}</b>{_icon}</p>',
+        f'<b>{question}</b></p>',
         unsafe_allow_html=True,
     )
 
@@ -4456,12 +4444,16 @@ with tab_overview:
             # most-common interaction ("what changed recently?") is one
             # click away. Pills > selectbox here because options are few
             # (5) and the answer is usually visible at-glance.
+            # "All time" was previously here but it doesn't fit a
+            # "Recently updated" panel — when you don't bound the time
+            # window, you're not really asking "what changed recently",
+            # you're just asking "what's the dataset". Removed per user
+            # feedback 2026-05-15.
             _TIMEFRAME_DAYS = {
                 "Past week":     7,
                 "Past month":    30,
                 "Past 3 months": 90,
                 "Past year":     365,
-                "All time":      None,
             }
             _ra_timeframe = st.pills(
                 "Updated within",
@@ -4507,7 +4499,13 @@ with tab_overview:
             elif _ra_status == "Completed":
                 _ra = _ra[_ra["OverallStatus"] == "COMPLETED"]
 
-            _ra = _ra.sort_values("LastUpdatePostDate", ascending=False).head(10)
+            # Show every trial matching the timeframe + family + status
+            # filters, capped at 100 to keep the table scrollable but
+            # comprehensive. Default ("Past month") usually yields well
+            # below 100; "Past year" can yield more — the cap keeps the
+            # widget responsive. The table is scrollable so the reader
+            # sees all matches, not just the top 10.
+            _ra = _ra.sort_values("LastUpdatePostDate", ascending=False).head(100)
             if _ra.empty:
                 st.caption("No matching trials.")
             else:
@@ -4515,14 +4513,9 @@ with tab_overview:
                                 "TargetCategory", "LastUpdatePostDate"]].copy()
                 _ra_view["LastUpdatePostDate"] = _ra_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
                 # No string-pre-truncation: Streamlit's table renders
-                # full text on hover when the column overflows. The
-                # previous str[:60] cut destroyed hover-recovery and
-                # left readers seeing "A Study of Healthy Donor CD19-
-                # Targeted Allogeneic CA…" with no way to recover the
-                # rest. Column is width="large" + a help tooltip so
-                # narrow viewports still get a discoverable affordance.
+                # full text on hover when the column overflows.
                 st.dataframe(
-                    _ra_view, width="stretch", hide_index=True, height=240,
+                    _ra_view, width="stretch", hide_index=True, height=480,
                     column_config={
                         "NCTId":              st.column_config.TextColumn("NCT", width="small"),
                         "BriefTitle":         st.column_config.TextColumn(
@@ -4535,8 +4528,9 @@ with tab_overview:
                     },
                 )
                 st.caption(
-                    f"Top {len(_ra_view)} most-recently-updated trials "
-                    f"({_ra_timeframe.lower()}, matching the filter)."
+                    f"{len(_ra_view)} trial(s) updated in the "
+                    f"{_ra_timeframe.lower()}, matching the filter. "
+                    f"Sorted newest first; capped at 100."
                 )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
@@ -5176,38 +5170,19 @@ with tab_data:
             st.rerun()
     _zoom_active = _zoom_country != _ALL_COUNTRIES_LABEL
 
-    # ── Row 2: classification-confidence filter + fullscreen toggle ──
-    # Per user feedback ("add a filtering option for the data trial
-    # table for the classifications? and the option for a full-screen
-    # view?"). Confidence pills sit inline with the search row so the
-    # most-common "show me only high-confidence classifications" query
-    # is one click away. The fullscreen toggle bumps the table height
-    # from 460 → 900 px so the reader can scan more rows without
-    # losing the rest of the page chrome (the dataframe also has its
-    # own native fullscreen icon on hover for true edge-to-edge view).
-    _c_conf, _c_full, _spacer_r2 = st.columns([0.55, 0.30, 0.15])
-    with _c_conf:
-        if "ClassificationConfidence" in df_filt.columns:
-            _conf_present = sorted({
-                str(v) for v in df_filt["ClassificationConfidence"].dropna()
-            })
-            _data_conf_pick = st.pills(
-                "Classification confidence",
-                options=_conf_present,
-                selection_mode="multi",
-                default=_conf_present,
-                key="data_conf_filter",
-                label_visibility="collapsed",
-            ) or _conf_present
-        else:
-            _data_conf_pick = None
-    with _c_full:
-        st.markdown('<div style="height: 32px"></div>', unsafe_allow_html=True)
-        _data_fullscreen = st.toggle(
-            "Full-screen table",
-            key="data_fullscreen",
-            help="Bumps the table to ~900 px height (vs the default 460) so more rows are visible at once. Use the dataframe's native fullscreen icon (top-right on hover) for true edge-to-edge view.",
-        )
+    # ── Fullscreen toggle ───────────────────────────────────────────────
+    # The dataframe has a native fullscreen icon (top-right on hover)
+    # but it had been hidden by an `overflow: hidden` CSS rule — now
+    # fixed. The toggle below is the lighter-weight alternative:
+    # bumps table height from 460 → 900 px so more rows fit on screen
+    # without leaving the page. (Confidence filter that briefly lived
+    # here removed per user feedback; the sidebar's flt_confidence
+    # filter covers the same use case at the global level.)
+    _data_fullscreen = st.toggle(
+        "Expand table",
+        key="data_fullscreen",
+        help="Bumps the table to ~900 px height (default 460). For true edge-to-edge view, hover the table top-right for the native fullscreen icon.",
+    )
 
     show_cols = [
         "NCTId",
@@ -5262,18 +5237,6 @@ with tab_data:
         table_df = table_df[mask]
         st.caption(f"Search '{search_q}' · {len(table_df)} of {len(df_filt)} filtered trials match")
 
-    # Apply the inline confidence filter (Row 2 pills above).
-    if _data_conf_pick is not None and "ClassificationConfidence" in table_df.columns:
-        # When the user has narrowed below the full set of present
-        # confidences (e.g., picked only "high"), restrict.
-        if set(_data_conf_pick) != set(_conf_present):
-            table_df = table_df[
-                table_df["ClassificationConfidence"].astype(str).isin(_data_conf_pick)
-            ]
-            st.caption(
-                f"Confidence filter: {', '.join(_data_conf_pick)} · "
-                f"{len(table_df)} matching trials."
-            )
 
     # Inline 🚩 prefix on flagged trials' BriefTitle (idempotent; no-op when
     # _load_active_flags() returns {}, e.g. offline / rate-limited / no flags).
@@ -5578,7 +5541,7 @@ with tab_deepdive:
     # to look like the underline-tabs we had before. The active tab is
     # also written to query_params so the URL is shareable.
     _DD_VIEWS = [
-        "By disease", "By target", "By product", "By sponsor",
+        "By disease", "By antigen", "By product", "By sponsor",
         "By time", "Compare",
     ]
     # URL-bind: seed from query_params if a `dd_tab` value is present.
@@ -5586,6 +5549,10 @@ with tab_deepdive:
         _qp_tab = st.query_params.get("dd_tab")
         if isinstance(_qp_tab, list):
             _qp_tab = _qp_tab[0] if _qp_tab else None
+        # Back-compat: an old bookmark `?dd_tab=By target` should land
+        # on the renamed "By antigen" sub-tab.
+        if _qp_tab == "By target":
+            _qp_tab = "By antigen"
         if _qp_tab in _DD_VIEWS:
             st.session_state.dd_active_view = _qp_tab
     # st.pills is a native Streamlit widget (1.39+) designed exactly for
@@ -5859,7 +5826,7 @@ with tab_deepdive:
                         )
 
     # ===== By target (NEW; ported from onc commit 5e6553b, rheum-adapted) =====
-    if _active == "By target":
+    if _active == "By antigen":
         st.subheader("Antigen target focus")
         _section_question(
             "Which antigens dominate, in which diseases, and how "
@@ -6435,7 +6402,7 @@ with tab_deepdive:
     # "the by product tab should actually be a separate deep dive as it
     # covers different ground than the by target focus, and makes the by
     # target too busy". Was previously rendered as an appended block
-    # under `if _active == "By target":`; now stands alone.
+    # under `if _active == "By antigen":`; now stands alone.
     if _active == "By product":
         st.subheader("Per-product pipeline view")
         _section_question(
@@ -8664,20 +8631,13 @@ with tab_pub:
     # where the field is saturated, where it's experimenting, and which
     # combinations remain unstudied — the white cells are the field's
     # research agenda.
-    st.markdown(
-        '<strong style="color: #0b1220;">8 — Antigen × Modality maturity '
-        'matrix</strong>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">'
-        "Antigen × modality counts. Colour: <em>log(n+1)</em> so single-"
-        "trial cells stay legible next to 80+-trial cells. Cell "
-        'annotation "<strong>n</strong>·<em>P-label</em>" = trial count · '
-        "most-advanced phase (P1 / P1/2 / P2 / EP1). White cells = "
-        "unstudied combinations. Catch-all targets (Other_or_unknown, "
-        "CAR-T_unspecified) excluded.</p>",
-        unsafe_allow_html=True,
+    _pub_header(
+        "8",
+        "Antigen × Modality maturity matrix",
+        "Each cell = trial count for that antigen × modality. Colour: "
+        "log(n+1) so single-trial cells stay legible alongside 80+-trial "
+        "cells. Annotation reads n·P-label (count · most-advanced phase). "
+        "White cells = unstudied. Catch-all targets excluded.",
     )
 
     _hidden_targets = {"Other_or_unknown", "CAR-T_unspecified"}
@@ -8850,19 +8810,13 @@ with tab_pub:
     # joined column) — CT.gov gives a flat Conditions list per trial;
     # mapping that to disease entities for cross-tabulation requires
     # the closed-vocab taxonomy.
-    st.markdown(
-        '<strong style="color: #0b1220;">9 — Basket co-occurrence: which '
-        'disease pairs cluster in basket trials</strong>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">'
+    _pub_header(
+        "9",
+        "Basket co-occurrence: which disease pairs cluster in basket trials",
         "Basket trials only. Each cell counts trials enrolling both "
         "diseases; upper triangle only (A,B = B,A). Sorted by basket-"
         "participation count — dense upper-left = the hottest "
-        "co-occurrence cluster. Sentinel labels (Basket/Multidisease, "
-        "Unclassified, Other immune-mediated) excluded.</p>",
-        unsafe_allow_html=True,
+        "co-occurrence cluster.",
     )
 
     _basket_df = df_filt[df_filt["TrialDesign"] == "Basket/Multidisease"]
@@ -9010,17 +8964,12 @@ with tab_pub:
     # The figure pairs naturally with Fig 5 (disease distribution) — Fig 5
     # shows where activity exists; Fig 10 shows whether children are
     # included.
-    st.markdown(
-        '<strong style="color: #0b1220;">10 — Paediatric coverage gap '
-        'by disease entity</strong>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">'
+    _pub_header(
+        "10",
+        "Paediatric coverage gap by disease entity",
         "Age-group share per disease (top 15 by trials). Diseases at 0% "
         "paediatric / paed+adult are clinical blind spots: adult activity "
-        "exists, but no trial enrols children.</p>",
-        unsafe_allow_html=True,
+        "exists, but no trial enrols children.",
     )
     if "AgeGroup" not in df_filt.columns or df_filt.empty:
         st.info("AgeGroup data not present in this snapshot.")
@@ -9103,16 +9052,11 @@ with tab_pub:
     # are run by the top 3 lead sponsors? High share (>60%) = concentrated
     # field controlled by a small number of sponsors; low share (<30%) =
     # diffuse competition with many entrants.
-    st.markdown(
-        '<strong style="color: #0b1220;">11 — Sponsor concentration '
-        '(top-3 lead-sponsor share) by disease</strong>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p class="small-note" style="color:{THEME["muted"]}">'
+    _pub_header(
+        "11",
+        "Sponsor concentration (top-3 lead-sponsor share) by disease",
         "Top-3 lead-sponsor share per disease (≥3 trials). >60% = "
-        "concentrated field; <30% = diffuse competition.</p>",
-        unsafe_allow_html=True,
+        "concentrated field; <30% = diffuse competition.",
     )
     if df_filt.empty:
         _empty_state_panel(_sync_opt_map, caller_id="fig11")
