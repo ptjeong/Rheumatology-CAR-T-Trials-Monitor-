@@ -6616,11 +6616,18 @@ with tab_pub:
     # ------------------------------------------------------------------
     years_raw = pd.to_numeric(df_filt["StartYear"], errors="coerce").dropna().astype(int)
     _FIG1_LEADING_MIN = 3
+    # Cap the visible x-axis at today's calendar year. Some industry trials
+    # have a StartYear set 6-18 months in the future (e.g. NCT entries
+    # registered in 2026 with a planned 2027 first-patient-in date); without
+    # this cap the chart shows a near-zero 2027 column that tells the reader
+    # nothing except "future date exists in the data". The full data is
+    # still in the CSV download — only the visual axis is clipped.
+    _today_year = pd.Timestamp.now().year
     if len(years_raw):
         _yearly_raw = years_raw.value_counts().sort_index()
         _above_raw = _yearly_raw[_yearly_raw >= _FIG1_LEADING_MIN]
         _yr_display_min = int(_above_raw.index.min()) if not _above_raw.empty else int(_yearly_raw.index.min())
-        _yr_display_max = int(_yearly_raw.index.max())
+        _yr_display_max = min(int(_yearly_raw.index.max()), _today_year)
     else:
         _yr_display_min = _yr_display_max = None
     _pub_header(
@@ -6750,8 +6757,14 @@ with tab_pub:
 
         # Key statistics — use yearly totals, restricted to the displayed year
         # window so the CAGR baseline matches what the reader actually sees.
+        # Also exclude planned-future-year rows (StartYear > today's year) so
+        # the "Year range" / CAGR don't claim trials from 2027 when only a
+        # handful of planned-future entries exist.
         totals_by_year = (
-            fig1_long[fig1_long["StartYear"] >= _axis_start]
+            fig1_long[
+                (fig1_long["StartYear"] >= _axis_start)
+                & (fig1_long["StartYear"] <= _axis_end)
+            ]
             .groupby("StartYear")["Trials"].sum().reset_index()
         )
         total_t = len(df_filt)
