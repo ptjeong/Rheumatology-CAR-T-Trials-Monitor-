@@ -5937,88 +5937,13 @@ with tab_deepdive:
                             key="dd_disease_phase_stack",
                         )
 
-                    # ── Open-trial age watchlist ──
-                    # Replaces the prior status-stratified box plot, which
-                    # was hard to read at the per-status N here and
-                    # buried the actionable insight. The useful question
-                    # is "which OPEN trials are stalling?", so we surface
-                    # the age-bucket distribution of open trials plus a
-                    # focused list of ≥3-year-old open trials.
-                    st.markdown("**Open-trial age — fresh vs stalled**")
-                    st.caption(
-                        "Years since trial start for OPEN trials only "
-                        "(Recruiting / Not yet recruiting / By "
-                        "invitation). Trials ≥3 y old in an open state "
-                        "are flagged as potentially stalled enrolment."
-                    )
-                    _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
-                    _age_in["StartYear"] = _age_in["StartYearNumeric"]
-                    _age_in = _age_in.dropna(subset=["StartYear"])
-                    _age_in = _age_in[_age_in["StartYear"] <= _today_year()]
-                    _age_in["TrialAge"] = _today_year() - _age_in["StartYear"].astype(int)
-                    _open_age = _age_in[_age_in["OverallStatus"].isin(OPEN_STATUSES)].copy()
-                    if not _open_age.empty:
-                        _BUCKETS = ["<1 y (fresh)", "1–2 y", "2–3 y", "≥3 y (stalled?)"]
-
-                        def _bucket(_a: int) -> str:
-                            if _a < 1: return _BUCKETS[0]
-                            if _a < 2: return _BUCKETS[1]
-                            if _a < 3: return _BUCKETS[2]
-                            return _BUCKETS[3]
-                        _open_age["AgeBucket"] = _open_age["TrialAge"].apply(_bucket)
-                        _bcnt = _open_age["AgeBucket"].value_counts().reindex(_BUCKETS, fill_value=0)
-                        # Stacked vertically (was a 0.45 / 0.55 column split
-                        # that left the stalled-trial table too narrow for
-                        # its Title column — titles truncated mid-word and
-                        # Status / Years / Sponsor columns auto-hid). The
-                        # bucket sparkbar is 4 short rows; fits fine in a
-                        # thin top band while the table gets full width
-                        # for the wide-content columns.
-                        _render_sparkbar_panel(
-                            [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
-                            color="#0c4a6e",
-                        )
-                        _stalled = _open_age[_open_age["TrialAge"] >= 3].sort_values(
-                            "TrialAge", ascending=False
-                        )
-                        if _stalled.empty:
-                            st.caption(
-                                "All open trials are <3 y old — "
-                                "landscape is fresh."
-                            )
-                        else:
-                            _sd = _stalled[[c for c in (
-                                "NCTId", "BriefTitle", "_Disease",
-                                "PhaseLabel", "OverallStatus",
-                                "TrialAge", "LeadSponsor",
-                            ) if c in _stalled.columns]].copy()
-                            if "OverallStatus" in _sd.columns:
-                                _sd["OverallStatus"] = _sd["OverallStatus"].map(STATUS_DISPLAY).fillna(_sd["OverallStatus"])
-                            _sd = _sd.rename(columns={
-                                "_Disease": "Disease",
-                                "PhaseLabel": "Phase",
-                                "OverallStatus": "Status",
-                                "TrialAge": "Years",
-                                "LeadSponsor": "Sponsor",
-                            })
-                            st.markdown(
-                                f"**{len(_stalled)} open trial"
-                                f"{'s' if len(_stalled) != 1 else ''} "
-                                "≥3 y since start**"
-                            )
-                            st.dataframe(
-                                _sd, width='stretch', hide_index=True,
-                                height=min(320, 38 + 36 * len(_sd)),
-                                column_config={
-                                    "NCTId": st.column_config.TextColumn("NCT", width="small"),
-                                    "BriefTitle": st.column_config.TextColumn("Title", width="large"),
-                                    "Disease": st.column_config.TextColumn("Disease", width="small"),
-                                    "Phase": st.column_config.TextColumn("Phase", width="small"),
-                                    "Status": st.column_config.TextColumn("Status", width="small"),
-                                    "Years": st.column_config.NumberColumn("Yrs", width="small", format="%d"),
-                                    "Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
-                                },
-                            )
+                    # The "Open-trial age" panel previously lived here
+                    # (disease landscape) but was conceptually a
+                    # temporal question. Moved to the By time tab
+                    # 2026-05-15 per user feedback, and rebuilt there
+                    # with a per-bucket pills picker so the trial
+                    # table can be filtered to any age band (not just
+                    # the ≥3 y stalled bucket).
 
                 else:
                     # ── Focused view: drilldown for the picked disease ──
@@ -7794,6 +7719,100 @@ with tab_deepdive:
                     annotations=_annotations,
                 )
                 _chart(_hm_fig, key="dd_time_phase_heatmap")
+
+            # ── Open-trial age — fresh vs stalled ──
+            # Moved here from the By disease landscape 2026-05-15: the
+            # question ("how old are our currently-open trials?") is
+            # inherently temporal and belongs in the By time tab.
+            # Rebuilt with a pills picker over the four age buckets so
+            # the trial table below filters to the selected bucket —
+            # previous version always pinned to ≥3 y (stalled), which
+            # locked the user out of inspecting fresher cohorts.
+            st.markdown("##### Open-trial age — fresh vs stalled")
+            st.caption(
+                "Years since trial start for OPEN trials only "
+                "(Recruiting / Not yet recruiting / By invitation). "
+                "Trials ≥3 y old in an open state are flagged as "
+                "potentially stalled enrolment."
+            )
+            _age_in = df_filt.drop_duplicates(subset=["NCTId"]).copy()
+            _age_in["StartYear"] = _age_in["StartYearNumeric"]
+            _age_in = _age_in.dropna(subset=["StartYear"])
+            _age_in = _age_in[_age_in["StartYear"] <= _today_year()]
+            _age_in["TrialAge"] = _today_year() - _age_in["StartYear"].astype(int)
+            _open_age = _age_in[_age_in["OverallStatus"].isin(OPEN_STATUSES)].copy()
+            if not _open_age.empty:
+                _BUCKETS = ["<1 y (fresh)", "1–2 y", "2–3 y", "≥3 y (stalled?)"]
+
+                def _bucket(_a: int) -> str:
+                    if _a < 1: return _BUCKETS[0]
+                    if _a < 2: return _BUCKETS[1]
+                    if _a < 3: return _BUCKETS[2]
+                    return _BUCKETS[3]
+                _open_age["AgeBucket"] = _open_age["TrialAge"].apply(_bucket)
+                _bcnt = _open_age["AgeBucket"].value_counts().reindex(_BUCKETS, fill_value=0)
+
+                _render_sparkbar_panel(
+                    [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
+                    color="#0c4a6e",
+                )
+
+                _bucket_options = [b for b in _BUCKETS if int(_bcnt[b]) > 0]
+                if _bucket_options:
+                    # Default to ≥3 y (the actionable case) if any
+                    # stalled trials exist; otherwise the largest
+                    # non-empty bucket.
+                    _default_bucket = (
+                        "≥3 y (stalled?)" if int(_bcnt["≥3 y (stalled?)"]) > 0
+                        else max(_bucket_options, key=lambda b: int(_bcnt[b]))
+                    )
+                    _picked_bucket = st.pills(
+                        "Show trials in age bucket",
+                        options=_bucket_options,
+                        default=_default_bucket,
+                        selection_mode="single",
+                        key="dd_time_age_bucket",
+                        label_visibility="collapsed",
+                    ) or _default_bucket
+
+                    _bucket_trials = _open_age[
+                        _open_age["AgeBucket"] == _picked_bucket
+                    ].sort_values("TrialAge", ascending=False)
+                    if not _bucket_trials.empty:
+                        _bt = _bucket_trials[[c for c in (
+                            "NCTId", "BriefTitle", "DiseaseEntity",
+                            "PhaseLabel", "OverallStatus",
+                            "TrialAge", "LeadSponsor",
+                        ) if c in _bucket_trials.columns]].copy()
+                        if "OverallStatus" in _bt.columns:
+                            _bt["OverallStatus"] = _bt["OverallStatus"].map(STATUS_DISPLAY).fillna(_bt["OverallStatus"])
+                        _bt = _bt.rename(columns={
+                            "DiseaseEntity": "Disease",
+                            "PhaseLabel": "Phase",
+                            "OverallStatus": "Status",
+                            "TrialAge": "Years",
+                            "LeadSponsor": "Sponsor",
+                        })
+                        st.markdown(
+                            f"**{len(_bucket_trials)} open trial"
+                            f"{'s' if len(_bucket_trials) != 1 else ''} "
+                            f"in *{_picked_bucket}*** since start"
+                        )
+                        st.dataframe(
+                            _bt, width='stretch', hide_index=True,
+                            height=min(420, 38 + 36 * len(_bt)),
+                            column_config={
+                                "NCTId":   st.column_config.TextColumn("NCT", width="small"),
+                                "BriefTitle": st.column_config.TextColumn("Title", width="large"),
+                                "Disease": st.column_config.TextColumn("Disease", width="small"),
+                                "Phase":   st.column_config.TextColumn("Phase", width="small"),
+                                "Status":  st.column_config.TextColumn("Status", width="small"),
+                                "Years":   st.column_config.NumberColumn("Yrs", width="small", format="%d"),
+                                "Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
+                            },
+                        )
+            else:
+                st.caption("No open trials in the current filter selection.")
 
     # The separate "Specific-sponsor portfolio" block that previously
     # lived here was consolidated into the main `if _active == "By
