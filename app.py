@@ -2279,6 +2279,8 @@ st.markdown(
     .meta-small {{
         color: {THEME["muted"]};
         font-weight: 400;
+        font-size: var(--fs-xs);
+        letter-spacing: 0;
     }}
     /* Don't double-stroke the auto h3 border on figure headers */
     .pub-fig-header + div h3,
@@ -6036,7 +6038,7 @@ with tab_deepdive:
                         detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
                     detail, _dd_cols = _attach_flag_column(detail, _dd_cols)
                     st.markdown(
-                        f"### Trials — **{pick}** "
+                        f"##### Trials — **{pick}** "
                         f"<span class='meta-small'>"
                         f"({len(detail)} trial{'s' if len(detail) != 1 else ''} · click any row for full details)</span>",
                         unsafe_allow_html=True,
@@ -6592,7 +6594,7 @@ with tab_deepdive:
 
                 # Trial list with row-click → drilldown
                 st.markdown(
-                    f"### Trials — **{_focus_label}** "
+                    f"##### Trials — **{_focus_label}** "
                     f"<span class='meta-small'>"
                     f"({_n} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
@@ -6935,7 +6937,7 @@ with tab_deepdive:
 
                 # ── Trial table with row-click → drilldown ──
                 st.markdown(
-                    f"### Trials for **{_picked_product}** "
+                    f"##### Trials for **{_picked_product}** "
                     f"<span class='meta-small'>"
                     f"({_n_pt} trial{'s' if _n_pt != 1 else ''} · click any row for full details)</span>",
                     unsafe_allow_html=True,
@@ -7216,7 +7218,7 @@ with tab_deepdive:
                     )
                 # Sponsor's full trial list
                 st.markdown(
-                    f"### Trials led by **{sponsor_pick}** "
+                    f"##### Trials led by **{sponsor_pick}** "
                     f"<span class='meta-small'>"
                     f"({len(spt)} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
@@ -7409,7 +7411,7 @@ with tab_deepdive:
                 ) if c in _sp_trials.columns]
                 _sp_trials, _sp_cols = _attach_flag_column(_sp_trials, _sp_cols)
                 st.markdown(
-                    f"### Trials in **{pick}** sponsor bucket "
+                    f"##### Trials in **{pick}** sponsor bucket "
                     f"<span class='meta-small'>"
                     f"({len(_sp_trials)} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
