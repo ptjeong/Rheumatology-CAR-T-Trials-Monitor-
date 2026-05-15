@@ -2725,10 +2725,17 @@ def _deepdive_phase_stack(
 def _deepdive_timeline(
     df_in: pd.DataFrame, *, group_col: str,
     height: int | None = None, top_n: int = 6,
+    cumulative: bool = False,
 ) -> go.Figure:
-    """Annual trial-start line chart sliced by `group_col`. Lines for the
-    top-N groups (by total trials) plus an "Other" rollup. Years before
-    the first ≥1-trial year for any group are trimmed."""
+    """Annual (or cumulative) trial-start line chart sliced by `group_col`.
+
+    Lines for the top-N groups (by total trials) plus an "Other"
+    rollup. Years before the first ≥1-trial year for any group are
+    trimmed. When `cumulative=True`, each line shows the running
+    total of trials started by that year — useful when annual counts
+    are sparse (e.g. a 4-trial sponsor over 7 years) and the year-on-
+    year deltas are small but the cumulative growth tells the story.
+    """
     if df_in.empty or "StartYear" not in df_in.columns or group_col not in df_in.columns:
         return go.Figure()
     df = df_in.copy()
@@ -2749,6 +2756,20 @@ def _deepdive_timeline(
     counts = (
         df.groupby(["StartYear", "_Group"]).size().reset_index(name="Trials")
     )
+    if cumulative:
+        # Pivot, reindex to a contiguous year range, fill missing-year
+        # cells with 0, cumsum within each group, melt back. This is
+        # how a cumulative line stays at its previous value across
+        # years with no new trials, instead of dropping out.
+        _yr_lo = int(counts["StartYear"].min())
+        _yr_hi = int(counts["StartYear"].max())
+        _all_years = list(range(_yr_lo, _yr_hi + 1))
+        counts = (
+            counts.pivot(index="StartYear", columns="_Group", values="Trials")
+            .reindex(_all_years).fillna(0).cumsum().astype(int)
+            .reset_index()
+            .melt(id_vars="StartYear", var_name="_Group", value_name="Trials")
+        )
     # Distinct-hue rotational palette. The previous version used
     # ENTITY_COLORS (which clusters all rheum entities into the same
     # sky-blue family for sunburst cohesion); for line charts that
@@ -4560,6 +4581,102 @@ with tab_overview:
                     f"{len(_ra_view)} trial(s) updated in the "
                     f"{_ra_timeframe.lower()}, matching the filter. "
                     f"Sorted newest first."
+                )
+        else:
+            st.caption("LastUpdatePostDate not in this snapshot.")
+
+        st.divider()
+
+        # ── Recently completed trials ─────────────────────────────────
+        # Separate from "Recently updated" because closures are a
+        # different kind of signal: pharma readers care about who's
+        # got results to publish, who terminated early, and what the
+        # historical pipeline looks like — the latter needing an
+        # "All time" option that didn't fit the updates panel.
+        # Sort is by LastUpdatePostDate because the snapshot doesn't
+        # carry a CT.gov CompletionDate field yet; it's a fair proxy
+        # (a completed trial's last update is typically the closure
+        # record).
+        st.markdown("##### Recently completed trials")
+        if "LastUpdatePostDate" in df_filt.columns:
+            _RC_TIMEFRAMES = {
+                "Past year":     365,
+                "Past 2 years":  730,
+                "Past 5 years":  1825,
+                "All time":      None,
+            }
+            _rc_tf = st.pills(
+                "Completed within",
+                options=list(_RC_TIMEFRAMES.keys()),
+                selection_mode="single",
+                default="Past year",
+                key="overview_completed_timeframe",
+                label_visibility="collapsed",
+            ) or "Past year"
+
+            _rc_f1, _rc_f2 = st.columns(2)
+            with _rc_f1:
+                _rc_fam_opts = ["All families"] + sorted(
+                    df_filt["DiseaseFamily"].dropna().unique().tolist()
+                ) if "DiseaseFamily" in df_filt.columns else ["All families"]
+                _rc_fam = st.selectbox(
+                    "Family", _rc_fam_opts, key="overview_completed_fam",
+                    label_visibility="collapsed",
+                )
+            with _rc_f2:
+                _rc_status_opts = {
+                    "Completed only":          ["COMPLETED"],
+                    "Completed + terminated":  ["COMPLETED", "TERMINATED"],
+                    "All closures":            ["COMPLETED", "TERMINATED",
+                                                "WITHDRAWN", "SUSPENDED"],
+                }
+                _rc_status_choice = st.selectbox(
+                    "Closure type", list(_rc_status_opts.keys()),
+                    key="overview_completed_status",
+                    label_visibility="collapsed",
+                )
+                _rc_statuses = _rc_status_opts[_rc_status_choice]
+
+            _rc = df_filt.copy()
+            _rc["LastUpdatePostDate"] = pd.to_datetime(_rc["LastUpdatePostDate"], errors="coerce")
+            _rc = _rc.dropna(subset=["LastUpdatePostDate"])
+            _rc = _rc[_rc["OverallStatus"].isin(_rc_statuses)]
+            _rc_days = _RC_TIMEFRAMES.get(_rc_tf)
+            if _rc_days is not None:
+                _cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=_rc_days)
+                _rc = _rc[_rc["LastUpdatePostDate"] >= _cutoff.tz_localize(None)]
+            if _rc_fam != "All families" and "DiseaseFamily" in _rc.columns:
+                _rc = _rc[_rc["DiseaseFamily"] == _rc_fam]
+            _rc = _rc.sort_values("LastUpdatePostDate", ascending=False)
+            if _rc.empty:
+                st.caption("No matching trials.")
+            else:
+                _rc_view = _rc[[
+                    "NCTId", "BriefTitle", "DiseaseEntity",
+                    "TargetCategory", "OverallStatus", "LastUpdatePostDate",
+                ]].copy()
+                _rc_view["OverallStatus"] = _rc_view["OverallStatus"].map(STATUS_DISPLAY).fillna(_rc_view["OverallStatus"])
+                _rc_view["LastUpdatePostDate"] = _rc_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
+                st.dataframe(
+                    _rc_view, width="stretch", hide_index=True,
+                    height=min(480, 60 + 36 * len(_rc_view)),
+                    column_config={
+                        "NCTId":              st.column_config.TextColumn("NCT", width="small"),
+                        "BriefTitle":         st.column_config.TextColumn(
+                            "Title", width="large",
+                            help="Hover any cell to see the full title.",
+                        ),
+                        "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
+                        "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
+                        "OverallStatus":      st.column_config.TextColumn("Closure", width="small"),
+                        "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
+                    },
+                )
+                st.caption(
+                    f"{len(_rc_view)} trial(s) with closure status in the "
+                    f"{_rc_tf.lower()}, matching the filter. Sort proxy: "
+                    "LastUpdatePostDate (CT.gov CompletionDate not in "
+                    "this snapshot yet)."
                 )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
@@ -7037,11 +7154,18 @@ with tab_deepdive:
                             key=f"dd_sponsor_one_phase_{sponsor_pick}",
                         )
                 with _spB:
-                    st.markdown("**Annual trial starts**")
+                    st.markdown("**Cumulative trial starts by disease**")
+                    st.caption(
+                        "Running total of trials this sponsor has started "
+                        "each year, split by disease. Better than per-year "
+                        "counts for small sponsors — a 4-trial portfolio "
+                        "over 7 years has near-flat annual lines but a "
+                        "visible cumulative growth pattern."
+                    )
                     _chart(
                         _deepdive_timeline(
                             spt, group_col="DiseaseEntity",
-                            height=240, top_n=5,
+                            height=240, top_n=5, cumulative=True,
                         ),
                         key=f"dd_sponsor_one_timeline_{sponsor_pick}",
                     )
