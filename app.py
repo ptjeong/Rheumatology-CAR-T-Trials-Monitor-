@@ -6034,7 +6034,7 @@ with tab_deepdive:
                     # ── Details row (compact sparkbar lists for scan) ──
                     _tgt = (
                         sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                        .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+                        .fillna("Unspecified").value_counts().rename_axis("Target").reset_index(name="Trials")
                     )
                     _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
                     cA, cB = st.columns(2)
@@ -6616,7 +6616,7 @@ with tab_deepdive:
                 with _ch1:
                     st.markdown("**Disease entity breakdown**")
                     _ents = (
-                        focus["DiseaseEntity"].fillna("Unknown")
+                        focus["DiseaseEntity"].fillna("Unspecified")
                         .value_counts().head(10)
                         .rename_axis("Entity").reset_index(name="Trials")
                     )
@@ -6715,7 +6715,7 @@ with tab_deepdive:
                 with _spk1:
                     st.markdown("**Modality split**")
                     _mods = (
-                        focus.get("Modality", pd.Series(dtype=str)).fillna("Unknown")
+                        focus.get("Modality", pd.Series(dtype=str)).fillna("Unspecified")
                         .value_counts().head(8)
                     )
                     if not _mods.empty:
@@ -6729,7 +6729,7 @@ with tab_deepdive:
                 with _spk2:
                     st.markdown("**Disease family**")
                     _fam = (
-                        focus.get("DiseaseFamily", pd.Series(dtype=str)).fillna("Unknown")
+                        focus.get("DiseaseFamily", pd.Series(dtype=str)).fillna("Unspecified")
                         .value_counts().head(8)
                     )
                     if not _fam.empty:
@@ -7331,7 +7331,7 @@ with tab_deepdive:
                 with _st_a:
                     st.markdown("**Diseases**")
                     _sdi = (
-                        spt["DiseaseEntity"].fillna("Unknown").value_counts().head(8)
+                        spt["DiseaseEntity"].fillna("Unspecified").value_counts().head(8)
                         .rename_axis("Disease").reset_index(name="Trials")
                     )
                     if not _sdi.empty:
@@ -7346,7 +7346,7 @@ with tab_deepdive:
                     st.markdown("**Antigen targets**")
                     _stg = (
                         spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                        .fillna("Unknown").value_counts().head(8)
+                        .fillna("Unspecified").value_counts().head(8)
                         .rename_axis("Target").reset_index(name="Trials")
                     )
                     if not _stg.empty:
@@ -7965,6 +7965,24 @@ with tab_deepdive:
                         _n_a, _n_b = len(_slice_a), len(_slice_b)
                         _open_a = int(_slice_a["OverallStatus"].isin(OPEN_STATUSES).sum())
                         _open_b = int(_slice_b["OverallStatus"].isin(OPEN_STATUSES).sum())
+
+                        # Lopsided-pair caveat: when one side is >10×
+                        # the other, the small side's slice is sub-
+                        # significant — paired bars can be misread as
+                        # "A is much bigger" when really B's data is
+                        # just too sparse to compare against
+                        # (DEBUG_REVIEW... T4.4).
+                        _n_big, _n_small = max(_n_a, _n_b), min(_n_a, _n_b)
+                        if _n_small > 0 and _n_big / _n_small > 10:
+                            _small_side = _pick_a if _n_a < _n_b else _pick_b
+                            st.caption(
+                                f"⚠ Magnitude gap: **{_pick_a}** has "
+                                f"{_n_a} trial{'s' if _n_a != 1 else ''}, "
+                                f"**{_pick_b}** has {_n_b}. Sparkbar bars "
+                                f"and proportions on the {_small_side} "
+                                "side are based on a small N and may not "
+                                "be representative."
+                            )
 
                         def _kv_block(label: str, a: int, b: int) -> str:
                             return (
