@@ -599,6 +599,13 @@ def _exclude_by_indication(row: dict) -> bool:
 
 _TARGET_FALLBACK_LABELS = {"CAR-T_unspecified", "Other_or_unknown"}
 
+# Bare-token detection regexes for short antigen codes whose plain
+# substring match collides with longer codes (cd7 ⊂ cd70, cd6 ⊂ cd60).
+# The negative lookahead `(?![0-9])` is what stops the collision; the
+# negative lookbehind `(?<![a-z0-9])` keeps "kcd7" from matching "cd7".
+_CD7_TOKEN = re.compile(r"(?<![a-z0-9])cd7(?![0-9])")
+_CD6_TOKEN = re.compile(r"(?<![a-z0-9])cd6(?![0-9])")
+
 
 def _assign_target(row: dict) -> tuple[str, str]:
     """Return (target_category, source).
@@ -650,50 +657,52 @@ def _assign_target(row: dict) -> tuple[str, str]:
     has_baff_r = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["BAFF-R"])
     # "cd19/20" notation (e.g. "universal CD19/20 CAR-T") — slash is preserved by normalizer
     has_cd20 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD20"]) or ("cd20" in text) or ("cd19/20" in text)
+    # CD22 added 2026-05-15 — previously silently dropped, causing
+    # triple-target trials like BZE2204 (CD19/CD22/BCMA) to label as
+    # CD19/BCMA dual.
+    has_cd22 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD22"]) or ("cd22" in text)
     has_cd70 = _contains_any(text, CAR_SPECIFIC_TARGET_TERMS["CD70"]) or ("cd70" in text)
-    has_cd6 = "cd6" in text
-    has_cd7 = "cd7" in text
+    # Word-boundary detection for the short CD6 / CD7 tokens — bare
+    # `"cd7" in text` was matching "cd70" as a substring, causing
+    # CHT105 ("anti-CD19/70 CAR-T") and ALLO-329 trials to falsely
+    # surface CD7 in their target label. Same protection for CD6
+    # (would otherwise match cd60, cd63, etc. if those ever appear).
+    has_cd6 = bool(_CD6_TOKEN.search(text))
+    has_cd7 = bool(_CD7_TOKEN.search(text))
+
+    # Collect detected antigens in canonical order. Replaces the
+    # previous hardcoded if-chain that handled only specific dual
+    # combinations (CD19+BCMA, CD19+CD20, CD19+BAFF, BCMA+CD70). The
+    # chain dropped any 3rd antigen on the floor — e.g. NCT07174843
+    # (BZE2204 CD19/CD22/BCMA) silently became "CD19/BCMA dual". The
+    # collect-then-format pattern scales: adding a new antigen is
+    # one line, and triple+ target combinations get explicit labels
+    # via _format_target_label.
+    _detected: list[str] = []
+    if has_cd19:                          _detected.append("CD19")
+    if has_cd20:                          _detected.append("CD20")
+    if has_cd22:                          _detected.append("CD22")
+    if has_bcma:                          _detected.append("BCMA")
+    if has_cd70:                          _detected.append("CD70")
+    if has_baff_r:                        _detected.append("BAFF-R")
+    elif has_baff:                        _detected.append("BAFF")  # BAFF-R supersedes BAFF
+    if has_cd6:                           _detected.append("CD6")
+    if has_cd7:                           _detected.append("CD7")
 
     if has_car_nk:
-        if has_cd19 and has_bcma:
-            return "CD19/BCMA dual", "explicit_marker"
-        if has_cd19:
-            return "CD19", "explicit_marker"
+        if _detected:
+            return _format_target_label(_detected), "explicit_marker"
         return "CAR-NK", "explicit_marker"
-
     if has_caar_t:
         return "CAAR-T", "explicit_marker"
     if has_car_treg:
         if has_cd6:
             return "CD6", "explicit_marker"
         return "CAR-Treg", "explicit_marker"
-    if has_bcma and has_cd70:
-        return "BCMA/CD70 dual", "explicit_marker"
-    if has_cd19 and has_bcma:
-        return "CD19/BCMA dual", "explicit_marker"
-    if has_cd19 and has_cd20:
-        return "CD19/CD20 dual", "explicit_marker"
-    if has_cd19 and has_baff:
-        return "CD19/BAFF dual", "explicit_marker"
-    if has_cd19:
-        return "CD19", "explicit_marker"
-    if has_bcma:
-        return "BCMA", "explicit_marker"
-    # Ligand-CAR: BAFF-CAR → BAFF-R (ahead of the bare-baff fall-through
-    # so LMY-920-style trials route to the precise receptor instead of
-    # the "BAFF" ligand label or CAR-T_unspecified).
-    if has_baff_r:
-        return "BAFF-R", "explicit_marker"
-    if has_cd20:
-        return "CD20", "explicit_marker"
-    if has_cd70:
-        return "CD70", "explicit_marker"
-    if has_baff:
-        return "BAFF", "explicit_marker"
-    if has_cd6:
-        return "CD6", "explicit_marker"
-    if has_cd7:
-        return "CD7", "explicit_marker"
+
+    if _detected:
+        return _format_target_label(_detected), "explicit_marker"
+
     # (Named-product lookup moved to the top of this function — see
     # the priority-order docstring. Reaching this point means the text
     # has neither a recognised explicit antigen marker nor a known
@@ -701,6 +710,31 @@ def _assign_target(row: dict) -> tuple[str, str]:
     if _contains_any(text, CAR_CORE_TERMS):
         return "CAR-T_unspecified", "car_core_fallback"
     return "Other_or_unknown", "unknown"
+
+
+def _format_target_label(antigens: list[str]) -> str:
+    """Format a list of detected antigens into a TargetCategory label.
+
+    Conventions chosen for backward compatibility with existing dual
+    labels (which use the "X/Y dual" suffix). Order in the input list
+    determines the order in the label — callers pass antigens in
+    canonical detection order so labels are stable.
+
+      1 antigen   → "CD19"
+      2 antigens  → "CD19/BCMA dual"
+      3 antigens  → "CD19/CD22/BCMA triple"
+      4+          → "CD19/CD20/CD22/BCMA multi"
+    """
+    if not antigens:
+        return ""
+    if len(antigens) == 1:
+        return antigens[0]
+    joined = "/".join(antigens)
+    if len(antigens) == 2:
+        return f"{joined} dual"
+    if len(antigens) == 3:
+        return f"{joined} triple"
+    return f"{joined} multi"
 
 
 def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[str, str]:

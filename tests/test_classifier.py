@@ -107,6 +107,60 @@ class TestTargetAssignment:
         assert target == "CD19"
         assert source == "named_product"
 
+    def test_cd22_alone(self):
+        # CD22 was silently unsupported before 2026-05-15 — bare CD22
+        # CAR-T trials fell through to CAR-T_unspecified.
+        target, source = _assign_target(self._row(
+            BriefTitle="Anti-CD22 CAR-T for refractory autoimmune disease",
+            BriefSummary="autologous anti-CD22 CAR T-cell therapy",
+        ))
+        assert target == "CD22"
+        assert source == "explicit_marker"
+
+    def test_triple_target_cd19_cd22_bcma(self):
+        # Regression: NCT07174843 (BZE2204). The old hardcoded
+        # if-chain matched has_cd19+has_bcma first and returned
+        # "CD19/BCMA dual" — silently dropping CD22.
+        target, source = _assign_target(self._row(
+            BriefTitle="CD19/CD22/BCMA CAR-T cells (BZE2204) in autoimmune diseases",
+            Interventions="CD19/CD22/BCMA CAR-T cells",
+        ))
+        assert target == "CD19/CD22/BCMA triple"
+        assert source == "explicit_marker"
+
+    def test_cd19_cd70_dual_was_unsupported(self):
+        # Regression: NCT07085104 (ALLO-329, "anti-CD19, anti-CD70
+        # dual CAR"). The old chain had no has_cd19+has_cd70 branch
+        # so these trials dropped to just "CD19".
+        target, source = _assign_target(self._row(
+            BriefSummary="allogeneic anti-CD19, anti-CD70 dual chimeric antigen receptor",
+        ))
+        assert target == "CD19/CD70 dual"
+        assert source == "explicit_marker"
+
+    def test_cd20_bcma_dual_was_unsupported(self):
+        # Regression: NCT06249438 (C-CAR168, "bi-specific CAR-T
+        # therapy targeting CD20 and BCMA"). The old chain had no
+        # has_cd20+has_bcma branch — these dropped to "BCMA" via
+        # the single-target fallback.
+        target, source = _assign_target(self._row(
+            BriefSummary="autologous bi-specific CAR-T therapy targeting CD20 and BCMA",
+        ))
+        assert target == "CD20/BCMA dual"
+        assert source == "explicit_marker"
+
+    def test_cd7_does_not_match_cd70_substring(self):
+        # Regression: bare `"cd7" in text` matched the "cd7" inside
+        # "cd70" → CHT105 ("anti-CD19/70 CAR-T") and ALLO-329
+        # produced a spurious "CD7" in their label. Word-boundary
+        # regex now blocks the substring collision.
+        target, source = _assign_target(self._row(
+            BriefTitle="Anti-CD19/CD70 CAR-T for autoimmune disease",
+            Interventions="anti-CD19/70 CAR T cells",
+        ))
+        assert target == "CD19/CD70 dual"
+        assert source == "explicit_marker"
+
     def test_named_product_wins_over_comedication_marker(self):
         # Regression: NCT06384976 (KYSA-7) — KYV-101 CD19 CAR-T given
         # alongside an anti-CD20 monoclonal antibody as comedication in

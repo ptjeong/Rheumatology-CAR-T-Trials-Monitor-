@@ -288,6 +288,13 @@ CAR_SPECIFIC_TARGET_TERMS = {
         "cd20-directed",
         "cd20 targeted",
     ],
+    "CD22": [
+        "cd22",
+        "anti-cd22",
+        "cd22-directed",
+        "cd22 targeted",
+        "cd22-targeted",
+    ],
     "CD70": [
         "cd70",
         "anti-cd70",
@@ -680,11 +687,12 @@ NAMED_PRODUCTS: dict[str, dict] = {
     },
     "lcar-aio": {
         "aliases": ["lcar-aio"],
-        "target": "CD19/CD20 dual", "type": "Autologous", "platform": "CAR-T",
+        "target": "CD19/CD20/CD22 triple", "type": "Autologous", "platform": "CAR-T",
         "sponsor": "LegendBio (Union Hospital)",
         "notes": (
             "NCT06653556 (SLE): 'LCAR-AIO T cells'; NCT05292898/NCT05318963 describe "
-            "'triple-targeted CD19/CD20/CD22'. Mapped here to CD19/CD20 dual as closest fit. "
+            "'triple-targeted CD19/CD20/CD22'. Restored to canonical triple-target "
+            "now that the classifier supports multi-target labels. "
             "*Added from prior Unspecified target.*"
         ),
     },
@@ -763,9 +771,14 @@ NAMED_PRODUCTS: dict[str, dict] = {
     # ── BAFF ───────────────────────────────────────────────────────────────
     "lmy-920": {
         "aliases": ["lmy-920", "lmy920"],
-        "target": "BAFF", "type": "Autologous", "platform": "CAR-T",
+        "target": "BAFF-R", "type": "Autologous", "platform": "CAR-T",
         "sponsor": "Luminary Therapeutics",
-        "notes": "BAFF-ligand autologous CAR-T (SLE, NHL).",
+        "notes": (
+            "BAFF-ligand-based autologous CAR-T (SLE, NHL). Construct's "
+            "binding domain is BAFF; therapeutic receptor on B cells is "
+            "BAFF-R — recorded per the ligand-CAR convention used by "
+            "the explicit_marker layer (see CAR_SPECIFIC_TARGET_TERMS)."
+        ),
     },
 
     # ── CAR-Treg ──────────────────────────────────────────────────────────
@@ -854,9 +867,13 @@ NAMED_PRODUCTS: dict[str, dict] = {
     # ── Allogeneic iNKT ───────────────────────────────────────────────────
     "gt719": {
         "aliases": ["gt719"],
-        "target": "CAR-T_unspecified", "type": "Allogeneic/Off-the-shelf", "platform": "CAR-iNKT",
+        "target": "CD19", "type": "Allogeneic/Off-the-shelf", "platform": "CAR-iNKT",
         "sponsor": "Grit Biotechnology",
-        "notes": "Universal iNKT cell-based construct.",
+        "notes": (
+            "Universal iNKT cell-based construct; NCT07389499 brief title "
+            "is 'GT719 Universal Cell Injection' and the intervention "
+            "string explicitly names 'CD19-targeted iNKT Cell Injection'."
+        ),
     },
 }
 
