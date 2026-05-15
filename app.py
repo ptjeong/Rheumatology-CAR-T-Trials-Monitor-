@@ -5706,37 +5706,87 @@ with tab_deepdive:
                             key="dd_disease_phase_stack",
                         )
 
-                    # ── Trial age by status (kept) ──
-                    # Sibling sections "Competitive intensity (top-3 sponsor
-                    # share)" and "Age-group coverage by disease" were
-                    # removed 2026-05-07 per user feedback. The trial-age
-                    # box plot stays — it's the most actionable of the
-                    # three for spotting stalled vs active recruiting.
-                    st.markdown("**Trial age by status (years since start)**")
+                    # ── Open-trial age watchlist ──
+                    # Replaces the prior status-stratified box plot, which
+                    # was hard to read at the per-status N here and
+                    # buried the actionable insight. The useful question
+                    # is "which OPEN trials are stalling?", so we surface
+                    # the age-bucket distribution of open trials plus a
+                    # focused list of ≥3-year-old open trials.
+                    st.markdown("**Open-trial age — fresh vs stalled**")
                     st.caption(
-                        "Boxes show the distribution of years since each "
-                        "trial's start year, stratified by current status. "
-                        "Long Recruiting whiskers (≥3 y) flag stalled "
-                        "enrolment; long Active whiskers flag delayed "
-                        "completion."
+                        "Years since trial start for OPEN trials only "
+                        "(Recruiting / Not yet recruiting / By "
+                        "invitation). Trials ≥3 y old in an open state "
+                        "are flagged as potentially stalled enrolment."
                     )
                     _age_in = dd_df.drop_duplicates(subset=["NCTId"]).copy()
                     _age_in["StartYear"] = pd.to_numeric(_age_in["StartYear"], errors="coerce")
                     _age_in = _age_in.dropna(subset=["StartYear"])
-                    # Clip planned-future starts: a trial that hasn't started
-                    # yet has a negative "TrialAge" which would smear the
-                    # OverallStatus boxes leftward.
                     _age_in = _age_in[_age_in["StartYear"] <= _today_year()]
                     _age_in["TrialAge"] = _today_year() - _age_in["StartYear"].astype(int)
-                    if not _age_in.empty:
-                        _chart(
-                            _deepdive_box(
-                                _age_in, group_col="OverallStatus",
-                                value_col="TrialAge",
-                                height=300, top_n=6,
-                            ),
-                            key="dd_disease_trial_age",
-                        )
+                    _open_age = _age_in[_age_in["OverallStatus"].isin(OPEN_STATUSES)].copy()
+                    if not _open_age.empty:
+                        _BUCKETS = ["<1 y (fresh)", "1–2 y", "2–3 y", "≥3 y (stalled?)"]
+
+                        def _bucket(_a: int) -> str:
+                            if _a < 1: return _BUCKETS[0]
+                            if _a < 2: return _BUCKETS[1]
+                            if _a < 3: return _BUCKETS[2]
+                            return _BUCKETS[3]
+                        _open_age["AgeBucket"] = _open_age["TrialAge"].apply(_bucket)
+                        _bcnt = _open_age["AgeBucket"].value_counts().reindex(_BUCKETS, fill_value=0)
+                        _ba, _bb = st.columns([0.45, 0.55])
+                        with _ba:
+                            st.markdown(
+                                _topn_sparkbar_html(
+                                    [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
+                                    color="#0c4a6e",
+                                ),
+                                unsafe_allow_html=True,
+                            )
+                        with _bb:
+                            _stalled = _open_age[_open_age["TrialAge"] >= 3].sort_values(
+                                "TrialAge", ascending=False
+                            )
+                            if _stalled.empty:
+                                st.caption(
+                                    "✓ All open trials are <3 y old — "
+                                    "landscape is fresh."
+                                )
+                            else:
+                                _sd = _stalled[[c for c in (
+                                    "NCTId", "BriefTitle", "_Disease",
+                                    "PhaseLabel", "OverallStatus",
+                                    "TrialAge", "LeadSponsor",
+                                ) if c in _stalled.columns]].copy()
+                                if "OverallStatus" in _sd.columns:
+                                    _sd["OverallStatus"] = _sd["OverallStatus"].map(STATUS_DISPLAY).fillna(_sd["OverallStatus"])
+                                _sd = _sd.rename(columns={
+                                    "_Disease": "Disease",
+                                    "PhaseLabel": "Phase",
+                                    "OverallStatus": "Status",
+                                    "TrialAge": "Years",
+                                    "LeadSponsor": "Sponsor",
+                                })
+                                st.markdown(
+                                    f"**{len(_stalled)} open trial"
+                                    f"{'s' if len(_stalled) != 1 else ''} "
+                                    "≥3 y since start**"
+                                )
+                                st.dataframe(
+                                    _sd, width='stretch', hide_index=True,
+                                    height=min(260, 38 + 36 * len(_sd)),
+                                    column_config={
+                                        "NCTId": st.column_config.TextColumn("NCT", width="small"),
+                                        "BriefTitle": st.column_config.TextColumn("Title", width="large"),
+                                        "Disease": st.column_config.TextColumn("Disease", width="small"),
+                                        "Phase": st.column_config.TextColumn("Phase", width="small"),
+                                        "Status": st.column_config.TextColumn("Status", width="small"),
+                                        "Years": st.column_config.NumberColumn("Yrs", width="small", format="%d"),
+                                        "Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
+                                    },
+                                )
 
                 else:
                     # ── Focused view: drilldown for the picked disease ──
@@ -5752,24 +5802,26 @@ with tab_deepdive:
                               help="Sum of CT.gov EnrollmentCount values for this disease — planned for ongoing trials, actual for completed.")
                     c4.metric("Median target enrollment", int(_enr.median()) if _enr.notna().any() else 0)
 
-                    _tgt = (
-                        sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                        .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
-                    )
-                    _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
-                    cA, cB = st.columns(2)
-                    with cA:
-                        st.markdown("**Antigen targets**")
-                        st.dataframe(_tgt, width='stretch', hide_index=True,
-                                     column_config=_mini_count_cols("Target"))
-                    with cB:
-                        st.markdown("**Product types**")
-                        st.dataframe(_prod, width='stretch', hide_index=True,
-                                     column_config=_mini_count_cols("Product"))
-
-                    # ── Phase 1 additions: per-disease drill-in figures ──
+                    # ── Charts row (visual gestalt first) ──
                     _dz1, _dz2, _dz3 = st.columns(3)
                     with _dz1:
+                        st.markdown("**Phase mix**")
+                        _phase_counts = (
+                            sub.assign(PhaseLabel=sub.get("PhaseLabel", sub["Phase"]))
+                            .groupby("PhaseLabel").size().reset_index(name="Trials")
+                        )
+                        _phase_counts["PhaseLabel"] = pd.Categorical(
+                            _phase_counts["PhaseLabel"],
+                            categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_phase_counts["PhaseLabel"])],
+                            ordered=True,
+                        )
+                        _phase_counts = _phase_counts.sort_values("PhaseLabel")
+                        if not _phase_counts.empty:
+                            _chart(
+                                make_bar(_phase_counts, "PhaseLabel", "Trials", height=240),
+                                key=f"dd_disease_phase_{pick}",
+                            )
+                    with _dz2:
                         st.markdown("**Sponsor-type split**")
                         if "SponsorType" in sub.columns:
                             _sp_donut_df = (
@@ -5789,7 +5841,7 @@ with tab_deepdive:
                                 ),
                                 key=f"dd_disease_sponsor_donut_{pick}",
                             )
-                    with _dz2:
+                    with _dz3:
                         st.markdown("**Top countries**")
                         _country_long = []
                         for cs in sub["Countries"].dropna():
@@ -5808,22 +5860,33 @@ with tab_deepdive:
                             )
                         else:
                             st.caption("No country data.")
-                    with _dz3:
-                        st.markdown("**Phase mix**")
-                        _phase_counts = (
-                            sub.assign(PhaseLabel=sub.get("PhaseLabel", sub["Phase"]))
-                            .groupby("PhaseLabel").size().reset_index(name="Trials")
-                        )
-                        _phase_counts["PhaseLabel"] = pd.Categorical(
-                            _phase_counts["PhaseLabel"],
-                            categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_phase_counts["PhaseLabel"])],
-                            ordered=True,
-                        )
-                        _phase_counts = _phase_counts.sort_values("PhaseLabel")
-                        if not _phase_counts.empty:
-                            _chart(
-                                make_bar(_phase_counts, "PhaseLabel", "Trials", height=240),
-                                key=f"dd_disease_phase_{pick}",
+
+                    # ── Details row (compact sparkbar lists for scan) ──
+                    _tgt = (
+                        sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                        .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+                    )
+                    _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
+                    cA, cB = st.columns(2)
+                    with cA:
+                        st.markdown("**Antigen targets**")
+                        if not _tgt.empty:
+                            st.markdown(
+                                _topn_sparkbar_html(list(zip(
+                                    _tgt["Target"].astype(str),
+                                    _tgt["Trials"].astype(int),
+                                ))),
+                                unsafe_allow_html=True,
+                            )
+                    with cB:
+                        st.markdown("**Product types**")
+                        if not _prod.empty:
+                            st.markdown(
+                                _topn_sparkbar_html(list(zip(
+                                    _prod["Product"].astype(str),
+                                    _prod["Trials"].astype(int),
+                                ))),
+                                unsafe_allow_html=True,
                             )
 
                     _dd_cols = [c for c in (
@@ -6854,12 +6917,12 @@ with tab_deepdive:
                 _sm1, _sm2, _sm3, _sm4 = st.columns(4)
                 _sm1.metric("Trials led", f"{len(spt):,}")
                 _sm2.metric(
-                    "Distinct diseases",
-                    f"{spt['DiseaseEntity'].dropna().nunique():,}",
+                    "Distinct products",
+                    f"{spt['ProductName'].dropna().nunique():,}" if "ProductName" in spt.columns else "—",
                 )
                 _sm3.metric(
-                    "Distinct targets",
-                    f"{spt.loc[~spt['TargetCategory'].isin(_PLATFORM_LABELS | {'Other_or_unknown'}), 'TargetCategory'].nunique():,}",
+                    "Distinct diseases",
+                    f"{spt['DiseaseEntity'].dropna().nunique():,}",
                 )
                 _sm4.metric(
                     "Open / recruiting",
@@ -6874,7 +6937,8 @@ with tab_deepdive:
                         f"sponsor type: *{spt['SponsorType'].mode().iloc[0] if not spt['SponsorType'].mode().empty else '—'}* · "
                         f"first trial: **{_sm_first}** · most recent: **{_sm_last}**"
                     )
-                # 4-panel breakdown
+
+                # ── Charts row (visual gestalt) ──
                 _spA, _spB = st.columns(2)
                 with _spA:
                     st.markdown("**Phase distribution**")
@@ -6890,27 +6954,10 @@ with tab_deepdive:
                     _pcts = _pcts.sort_values("PhaseLabel")
                     if not _pcts.empty:
                         _chart(
-                            make_bar(_pcts, "PhaseLabel", "Trials", height=220),
+                            make_bar(_pcts, "PhaseLabel", "Trials", height=240),
                             key=f"dd_sponsor_one_phase_{sponsor_pick}",
                         )
-                    st.markdown("**Antigen targets**")
-                    _stg = (
-                        spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                        .fillna("Unknown").value_counts().head(8)
-                        .rename_axis("Target").reset_index(name="Trials")
-                    )
-                    if not _stg.empty:
-                        st.dataframe(_stg, width='stretch', hide_index=True,
-                                     column_config=_mini_count_cols("Target"))
                 with _spB:
-                    st.markdown("**Disease coverage**")
-                    _sdi = (
-                        spt["DiseaseEntity"].fillna("Unknown").value_counts().head(8)
-                        .rename_axis("Disease").reset_index(name="Trials")
-                    )
-                    if not _sdi.empty:
-                        st.dataframe(_sdi, width='stretch', hide_index=True,
-                                     column_config=_mini_count_cols("Disease"))
                     st.markdown("**Annual trial starts**")
                     _chart(
                         _deepdive_timeline(
@@ -6919,6 +6966,98 @@ with tab_deepdive:
                         ),
                         key=f"dd_sponsor_one_timeline_{sponsor_pick}",
                     )
+
+                # ── Product portfolio table (the pharma-intel centrepiece) ──
+                # One row per ProductName: modality, antigen, diseases
+                # covered, phases active, trial count, open trials, and
+                # the run of years. This is the "what are they pushing,
+                # where, at what stage?" view that competitor-intel
+                # readers want at-a-glance.
+                if "ProductName" in spt.columns:
+                    st.markdown("##### Product portfolio")
+                    st.caption(
+                        "One row per named product (CT.gov "
+                        "InterventionName → resolved alias). Trials "
+                        "without an inferred product name are bucketed "
+                        "as “(unnamed)”."
+                    )
+                    _pf = spt.copy()
+                    _pf["ProductName"] = _pf["ProductName"].fillna("(unnamed)")
+                    _pf_rows = []
+                    for _prod_name, _g in _pf.groupby("ProductName", dropna=False):
+                        _diseases = sorted(_g["DiseaseEntity"].dropna().unique().tolist())
+                        _antigens = sorted(_g.loc[
+                            ~_g["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"}),
+                            "TargetCategory",
+                        ].dropna().unique().tolist())
+                        _modalities = sorted(_g["ProductType"].dropna().unique().tolist())
+                        _phase_sorted = _g.dropna(subset=["PhaseLabel"]).sort_values("PhaseOrdered")
+                        _phases = _phase_sorted["PhaseLabel"].drop_duplicates().tolist()
+                        _years = pd.to_numeric(_g["StartYear"], errors="coerce")
+                        if _years.notna().any():
+                            _ymin, _ymax = int(_years.min()), int(_years.max())
+                            _yrange = f"{_ymin}–{_ymax}" if _ymin != _ymax else f"{_ymin}"
+                        else:
+                            _yrange = "—"
+                        _pf_rows.append({
+                            "Product": _prod_name,
+                            "Modality": ", ".join(_modalities) if _modalities else "—",
+                            "Antigen": ", ".join(_antigens) if _antigens else "—",
+                            "Diseases": ", ".join(_diseases) if _diseases else "—",
+                            "Phases": ", ".join(_phases) if _phases else "—",
+                            "Trials": len(_g),
+                            "Open": int(_g["OverallStatus"].isin(OPEN_STATUSES).sum()),
+                            "Years": _yrange,
+                        })
+                    _pf_df = pd.DataFrame(_pf_rows).sort_values(
+                        ["Trials", "Open"], ascending=[False, False],
+                    ).reset_index(drop=True)
+                    st.dataframe(
+                        _pf_df, width='stretch', hide_index=True,
+                        height=min(380, 50 + 36 * len(_pf_df)),
+                        column_config={
+                            "Product":  st.column_config.TextColumn("Product",  width="medium"),
+                            "Modality": st.column_config.TextColumn("Modality", width="small"),
+                            "Antigen":  st.column_config.TextColumn("Antigen",  width="small"),
+                            "Diseases": st.column_config.TextColumn("Diseases", width="large"),
+                            "Phases":   st.column_config.TextColumn("Phases",   width="medium"),
+                            "Trials":   st.column_config.NumberColumn("Trials", width="small", format="%d"),
+                            "Open":     st.column_config.NumberColumn("Open",   width="small", format="%d"),
+                            "Years":    st.column_config.TextColumn("Years",    width="small"),
+                        },
+                    )
+
+                # ── Aggregate sparkbar lists (compact context) ──
+                _st_a, _st_b = st.columns(2)
+                with _st_a:
+                    st.markdown("**Diseases**")
+                    _sdi = (
+                        spt["DiseaseEntity"].fillna("Unknown").value_counts().head(8)
+                        .rename_axis("Disease").reset_index(name="Trials")
+                    )
+                    if not _sdi.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _sdi["Disease"].astype(str),
+                                _sdi["Trials"].astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
+                with _st_b:
+                    st.markdown("**Antigen targets**")
+                    _stg = (
+                        spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                        .fillna("Unknown").value_counts().head(8)
+                        .rename_axis("Target").reset_index(name="Trials")
+                    )
+                    if not _stg.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _stg["Target"].astype(str),
+                                _stg["Trials"].astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
                 # Sponsor's full trial list
                 st.markdown(
                     f"### Trials led by **{sponsor_pick}** "
@@ -6935,12 +7074,16 @@ with tab_deepdive:
                     _spt_show["Phase"] = _spt_show["PhaseLabel"].fillna(_spt_show["Phase"])
                 _spt_show["OverallStatus"] = _spt_show["OverallStatus"].map(
                     STATUS_DISPLAY).fillna(_spt_show["OverallStatus"])
+                # Sort by Product → Phase → StartYear so the trial list
+                # mirrors the product-portfolio table above and trials
+                # cluster naturally by product family.
                 _spt_show = _spt_show.sort_values(
-                    ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
+                    ["ProductName", "PhaseOrdered", "StartYear", "NCTId"],
+                    na_position="last",
                 ).reset_index(drop=True)
                 _spt_cols = [c for c in (
                     "NCTId", "NCTLink", "BriefTitle",
-                    "DiseaseEntity", "TrialDesign",
+                    "ProductName", "DiseaseEntity", "TrialDesign",
                     "TargetCategory", "ProductType", "Phase",
                     "OverallStatus", "StartYear", "Countries",
                 ) if c in _spt_show.columns]
