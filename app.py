@@ -3545,6 +3545,40 @@ def _empty_state_panel(sync_opt_map: dict[str, list[str]], *, caller_id: str) ->
                 st.rerun()
 
 
+def _section_anchor(name: str) -> None:
+    """Emit a named anchor for an in-tab jump-link target."""
+    st.markdown(f'<a name="{name}"></a>', unsafe_allow_html=True)
+
+
+def _render_section_toc(items: list[tuple[str, str]]) -> None:
+    """Render a compact horizontal jump-link bar.
+
+    `items` is a list of (label, anchor_name) — each renders as a
+    link to the corresponding `_section_anchor` further down the
+    page. Used at the top of long Deep Dive focused views to give
+    the reader scroll-relief on multi-section pages.
+    """
+    if not items:
+        return
+    _links = " · ".join(
+        f'<a href="#{anchor}" style="color:{THEME["primary"]}; '
+        f'text-decoration:none; font-weight:500;">{label}</a>'
+        for label, anchor in items
+    )
+    st.markdown(
+        f'<div style="font-size: var(--fs-sm); padding: 7px 12px;'
+        f' border-left: 3px solid {THEME["primary"]};'
+        f' background: {THEME["surf2"]};'
+        f' margin: 4px 0 14px;">'
+        f'<span style="color:{THEME["muted"]}; font-weight: 600;'
+        f' text-transform: uppercase; letter-spacing: 0.06em;'
+        f' font-size: var(--fs-micro); margin-right: 10px;">Jump to:</span>'
+        f'{_links}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _section_question(question: str) -> None:
     """Render a section's orientation line as a bold one-line question.
 
@@ -5865,6 +5899,14 @@ with tab_deepdive:
                               help="Sum of CT.gov EnrollmentCount values for this disease — planned for ongoing trials, actual for completed.")
                     c4.metric("Median target enrollment", int(_enr.median()) if _enr.notna().any() else 0)
 
+                    # In-tab TOC.
+                    _render_section_toc([
+                        ("Charts",    "dz-charts"),
+                        ("Details",   "dz-details"),
+                        ("Trial list", "dz-trials"),
+                    ])
+
+                    _section_anchor("dz-charts")
                     # ── Charts row (visual gestalt first) ──
                     _dz1, _dz2, _dz3 = st.columns(3)
                     with _dz1:
@@ -5924,6 +5966,7 @@ with tab_deepdive:
                         else:
                             st.caption("No country data.")
 
+                    _section_anchor("dz-details")
                     # ── Details row (compact sparkbar lists for scan) ──
                     _tgt = (
                         sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
@@ -5962,6 +6005,7 @@ with tab_deepdive:
                     if "OverallStatus" in detail.columns:
                         detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
                     detail, _dd_cols = _attach_flag_column(detail, _dd_cols)
+                    _section_anchor("dz-trials")
                     st.markdown(
                         f"### Trials — **{pick}** "
                         f"<span class='meta-small'>"
@@ -6422,6 +6466,15 @@ with tab_deepdive:
                     st.metric("Distinct products", f"{_distinct_products:,}",
                               help="Named CAR-T products (CT.gov InterventionName → resolved alias) targeting this antigen.")
 
+                # In-tab TOC — skip-link bar for the long focused view.
+                _render_section_toc([
+                    ("Charts",          "ag-charts"),
+                    ("Products",        "ag-products"),
+                    ("Coverage",        "ag-coverage"),
+                    ("Trial list",      "ag-trials"),
+                ])
+
+                _section_anchor("ag-charts")
                 # ── Charts row (3-col): Disease entities | Phase | Annual ──
                 # Was a 2×2 grid mixing charts and small tables; now one
                 # clean row of 3 charts gives the visual gestalt, with
@@ -6467,6 +6520,7 @@ with tab_deepdive:
                         key=f"dd_target_timeline_{_focus_token}",
                     )
 
+                _section_anchor("ag-products")
                 # ── Product portfolio table — the pharma-intel centrepiece ──
                 # Same pattern as the sponsor-focused view, but pivoted
                 # to "which products use this antigen?". Row = product;
@@ -6523,6 +6577,7 @@ with tab_deepdive:
                         },
                     )
 
+                _section_anchor("ag-coverage")
                 # ── Sparkbar lists row (3-col): Modality | Family | Top sponsors ──
                 _spk1, _spk2, _spk3 = st.columns(3)
                 with _spk1:
@@ -6570,6 +6625,7 @@ with tab_deepdive:
                             unsafe_allow_html=True,
                         )
 
+                _section_anchor("ag-trials")
                 # Trial list with row-click → drilldown
                 st.markdown(
                     f"### Trials — **{_focus_label}** "
@@ -7057,6 +7113,15 @@ with tab_deepdive:
                         f"first trial: **{_sm_first}** · most recent: **{_sm_last}**"
                     )
 
+                # In-tab TOC.
+                _render_section_toc([
+                    ("Charts",         "sp-charts"),
+                    ("Portfolio",      "sp-portfolio"),
+                    ("Diseases / antigens", "sp-coverage"),
+                    ("Trial list",     "sp-trials"),
+                ])
+
+                _section_anchor("sp-charts")
                 # ── Charts row (visual gestalt) ──
                 _spA, _spB = st.columns(2)
                 with _spA:
@@ -7086,6 +7151,7 @@ with tab_deepdive:
                         key=f"dd_sponsor_one_timeline_{sponsor_pick}",
                     )
 
+                _section_anchor("sp-portfolio")
                 # ── Product portfolio table (the pharma-intel centrepiece) ──
                 # One row per ProductName: modality, antigen, diseases
                 # covered, phases active, trial count, open trials, and
@@ -7146,6 +7212,7 @@ with tab_deepdive:
                         },
                     )
 
+                _section_anchor("sp-coverage")
                 # ── Aggregate sparkbar lists (compact context) ──
                 _st_a, _st_b = st.columns(2)
                 with _st_a:
@@ -7177,6 +7244,7 @@ with tab_deepdive:
                             ))),
                             unsafe_allow_html=True,
                         )
+                _section_anchor("sp-trials")
                 # Sponsor's full trial list
                 st.markdown(
                     f"### Trials led by **{sponsor_pick}** "
