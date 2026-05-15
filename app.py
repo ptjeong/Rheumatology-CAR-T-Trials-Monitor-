@@ -4152,49 +4152,29 @@ median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
 # and showed "0 actual" even when 23 trials had clearly finished
 # enrolling. Switching to status-based classification is more honest:
 #
-#   ACTUAL   = CT.gov's EnrollmentType=ACTUAL flag — verified final
-#              accrual that the sponsor has explicitly marked closed.
-#              Status-based heuristic was tried earlier (count any
-#              COMPLETED / ACTIVE_NOT_RECRUITING / TERMINATED trial)
-#              but overclaimed by ~5× in rheum: a TERMINATED trial's
-#              EnrollmentCount is usually still the planned TARGET,
-#              not actual accrual. Per user feedback 2026-05-15:
-#              "only 3 trials actually completed, the rest withdrawn
-#              or suspended" — the heuristic was bundling target
-#              numbers into the actual tile and misleading readers.
-#   PLANNED  = enrollment is still open → use EnrollmentCount as the
-#              target (the OPEN_STATUSES set: RECRUITING /
-#              NOT_YET_RECRUITING / ENROLLING_BY_INVITATION).
-#   Other statuses (SUSPENDED / WITHDRAWN / UNKNOWN) don't count toward
-#   either — no reliable signal. SUSPENDED specifically used to be in
-#   the planned bucket (2026-05-15 commit aligned it to OPEN_STATUSES
-#   instead so the "Open / recruiting" tile count and the planned-
-#   enrollment trial count match exactly).
+# "Actual enrollment" KPI removed 2026-05-15. Two earlier attempts:
+#   1. Status-based heuristic (sum EnrollmentCount across COMPLETED /
+#      ACTIVE_NOT_RECRUITING / TERMINATED): overclaimed by ~5× —
+#      most TERMINATED/ANR trials' EnrollmentCount is still the
+#      planned TARGET, not actual accrual.
+#   2. Strict EnrollmentType=ACTUAL: only 23 trials in 290 have the
+#      verified-actual flag (CT.gov updates lag months-to-years
+#      after enrollment closes), so the headline number (~100) is
+#      far smaller than the field's real cumulative enrollment
+#      (estimated ~400). Both numbers misled readers in opposite
+#      directions, neither was honest enough to defend.
+# Conclusion: live-pipeline target ("Planned enrollment") is the only
+# defensible enrollment headline at the field's current maturity. A
+# small caption under the KPI strip surfaces the missing-actual
+# caveat for analytical readers.
 _status_series = df_filt["OverallStatus"].astype(str).str.upper()
-_enroll_type = (
-    df_filt["EnrollmentType"].astype(str).str.upper()
-    if "EnrollmentType" in df_filt.columns
-    else pd.Series("", index=df_filt.index)
-)
-_actual_mask = (_enroll_type == "ACTUAL") & _enroll_count.notna()
 _planned_mask = _status_series.isin(OPEN_STATUSES) & _enroll_count.notna()
-_n_actual_pts = int(_enroll_count[_actual_mask].sum()) if _actual_mask.any() else 0
-_n_actual_trials = int(_actual_mask.sum())
 _n_planned_pts = int(_enroll_count[_planned_mask].sum()) if _planned_mask.any() else 0
 _n_planned_trials = int(_planned_mask.sum())
 
-# Two-tile presentation of the enrollment split (planned vs actual).
-# For autoimmune CAR-T the planned tile is the big headline (the field
-# is mostly recruiting); the actual tile sits beside it with the
-# verified-actual accrual (EnrollmentType=ACTUAL). When there are no
-# trials with verified-actual accrual yet, the actual tile drops out
-# of the strip — better than showing "0" / "—" or worse, an
-# overclaiming heuristic.
-if _n_actual_trials > 0:
-    m1, m2, m3, m4, m5 = st.columns(5)
-else:
-    m1, m2, m3, m5 = st.columns(4)
-    m4 = None
+# 4-tile KPI strip. The "Actual enrollment" tile was dropped — see
+# the comment block above the mask calculation for the rationale.
+m1, m2, m3, m4 = st.columns(4)
 with m1:
     metric_card("Filtered trials", total_trials, "Trials matching current filters")
 with m2:
@@ -4206,15 +4186,23 @@ with m3:
         f"Target across {_n_planned_trials:,} trials still enrolling"
         if _n_planned_trials else "No trials currently enrolling",
     )
-if m4 is not None:
-    with m4:
-        metric_card(
-            "Actual enrollment",
-            f"{_n_actual_pts:,}",
-            f"Across {_n_actual_trials:,} trials with verified accrual (EnrollmentType=ACTUAL)",
-        )
-with m5:
+with m4:
     metric_card("Top target", top_target, "Most common target category")
+# Caveat for the analytical reader: CT.gov's EnrollmentType=ACTUAL
+# flag is reported with a multi-month lag, so the field's true
+# cumulative enrollment isn't reliably computable from the snapshot.
+# Sum-of-targets is the only defensible enrollment headline today.
+st.markdown(
+    f'<p class="small-note" style="color:{THEME["muted"]};'
+    ' margin-top: 0.2rem; margin-bottom: 0.6rem;">'
+    "Cumulative actual enrollment is not shown as a headline KPI — "
+    "CT.gov's <code>EnrollmentType=ACTUAL</code> flag has a long "
+    "reporting lag (most closed-enrolment trials still carry "
+    "estimated targets), so neither status-based nor flag-based "
+    "totals are defensibly accurate at this field maturity."
+    "</p>",
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     f"""
