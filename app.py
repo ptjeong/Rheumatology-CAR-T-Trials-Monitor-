@@ -1665,6 +1665,29 @@ OPEN_STATUSES = frozenset({
     "RECRUITING", "NOT_YET_RECRUITING", "ENROLLING_BY_INVITATION",
 })
 
+# Canonical column order for every Deep Dive trial-detail table.
+# Each focused view drops the column corresponding to its focus
+# axis (the focused value is redundant when every row is the same)
+# — see _trial_cols_for() below. Single source of truth, applied
+# across By disease / By antigen / By product / By sponsor focused
+# views so an NCT scanned across tabs shows the same column
+# neighbours each time (DEEP_DIVE_DESIGN_REVIEW_2026-05-15.md T3.6).
+_DEEP_DIVE_TRIAL_COLS = (
+    "NCTId", "NCTLink", "BriefTitle",
+    "DiseaseEntity", "DiseaseEntities", "TrialDesign",
+    "TargetCategory", "ProductName", "ProductType",
+    "Phase", "OverallStatus",
+    "StartYear", "Countries", "LeadSponsor",
+)
+
+
+def _trial_cols_for(df_cols: list[str], *, drop: set[str] | None = None) -> list[str]:
+    """Filter `_DEEP_DIVE_TRIAL_COLS` to columns present in `df_cols`,
+    minus an optional `drop` set (used by each focused view to omit
+    its focus-axis column from the trial table)."""
+    _drop = drop or set()
+    return [c for c in _DEEP_DIVE_TRIAL_COLS if c in df_cols and c not in _drop]
+
 # Canonical CT.gov country name → ISO-3 mapping.  Plotly's `locationmode="country names"`
 # is deprecated, so choropleths are rendered with ISO-3 codes; unknown names are dropped
 # with a warning rather than silently mis-plotted.
@@ -6089,10 +6112,12 @@ with tab_deepdive:
                             },
                         )
 
-                    _dd_cols = [c for c in (
-                        "NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
-                        "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries",
-                    ) if c in sub.columns]
+                    # Disease focused → drop DiseaseEntity / DiseaseEntities
+                    # (every row is the focused disease).
+                    _dd_cols = _trial_cols_for(
+                        list(sub.columns),
+                        drop={"DiseaseEntity", "DiseaseEntities"},
+                    )
                     detail = sub[_dd_cols].copy()
                     if "PhaseLabel" in sub.columns and "Phase" in detail.columns:
                         detail["Phase"] = sub["PhaseLabel"].values
@@ -6747,12 +6772,12 @@ with tab_deepdive:
                 _focus_sorted = _focus_show.sort_values(
                     ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
                 ).reset_index(drop=True)
-                _target_trial_cols = [c for c in (
-                    "NCTId", "NCTLink", "BriefTitle",
-                    "DiseaseEntity", "DiseaseEntities", "TrialDesign",
-                    "ProductType", "ProductName", "Phase",
-                    "OverallStatus", "StartYear", "Countries", "LeadSponsor",
-                ) if c in _focus_sorted.columns]
+                # Antigen focused → drop TargetCategory (focused value
+                # is the same on every row).
+                _target_trial_cols = _trial_cols_for(
+                    list(_focus_sorted.columns),
+                    drop={"TargetCategory"},
+                )
                 _focus_sorted, _target_trial_cols = _attach_flag_column(
                     _focus_sorted, _target_trial_cols
                 )
@@ -6847,6 +6872,17 @@ with tab_deepdive:
                     help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
                 )
 
+            # In-tab TOC for the scroll-heavy By product view —
+            # matches the disease / antigen / sponsor focused-view
+            # TOCs (DEEP_DIVE_DESIGN_REVIEW_2026-05-15.md T3.1).
+            _render_section_toc([
+                ("Pivot",     "pd-pivot"),
+                ("Landscape", "pd-landscape"),
+                ("Timeline",  "pd-timeline"),
+                ("Trials",    "pd-trials"),
+            ])
+
+            _section_anchor("pd-pivot")
             st.caption(
                 f"{len(pivot):,} named products · sorted by trial count · "
                 "click any row for that product's trial list."
@@ -6888,6 +6924,7 @@ with tab_deepdive:
             # carries median enrollment and year range; the only
             # visual pattern this landscape adds over that table is
             # the phase distribution gradient.
+            _section_anchor("pd-landscape")
             st.markdown("##### Product landscape — phase mix")
 
             # Top 10 by trial count. Sort by furthest phase reached
@@ -6986,6 +7023,7 @@ with tab_deepdive:
                     bargap=0.28,
                 )
                 _chart(_prod_phase_fig, key="dd_product_phase_single")
+            _section_anchor("pd-timeline")
             st.markdown("**Annual trial starts by product (top 6)**")
             _chart(
                 _deepdive_timeline(
@@ -7013,18 +7051,19 @@ with tab_deepdive:
                     ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
                 ).reset_index(drop=True)
 
+                _section_anchor("pd-trials")
                 st.markdown(
                     f"### Trials for **{_picked_product}** "
                     f"<span class='meta-small'>"
                     f"({len(_prod_trials)} trials · click any row for full details)</span>",
                     unsafe_allow_html=True,
                 )
-                _prod_trial_cols = [c for c in (
-                    "NCTId", "NCTLink", "BriefTitle",
-                    "DiseaseEntity", "DiseaseEntities", "TrialDesign",
-                    "TargetCategory", "Phase", "OverallStatus",
-                    "StartYear", "Countries", "LeadSponsor",
-                ) if c in _prod_trials.columns]
+                # Product focused → drop ProductName / ProductType
+                # (focused value is the same on every row).
+                _prod_trial_cols = _trial_cols_for(
+                    list(_prod_trials.columns),
+                    drop={"ProductName", "ProductType"},
+                )
                 _prod_trials, _prod_trial_cols = _attach_flag_column(
                     _prod_trials, _prod_trial_cols
                 )
@@ -7337,12 +7376,12 @@ with tab_deepdive:
                     ["ProductName", "PhaseOrdered", "StartYear", "NCTId"],
                     na_position="last",
                 ).reset_index(drop=True)
-                _spt_cols = [c for c in (
-                    "NCTId", "NCTLink", "BriefTitle",
-                    "ProductName", "DiseaseEntity", "TrialDesign",
-                    "TargetCategory", "ProductType", "Phase",
-                    "OverallStatus", "StartYear", "Countries",
-                ) if c in _spt_show.columns]
+                # Specific-sponsor focused → drop LeadSponsor (focused
+                # value is the same on every row).
+                _spt_cols = _trial_cols_for(
+                    list(_spt_show.columns),
+                    drop={"LeadSponsor"},
+                )
                 _spt_show, _spt_cols = _attach_flag_column(_spt_show, _spt_cols)
                 _spt_event = st.dataframe(
                     _spt_show[_spt_cols],
