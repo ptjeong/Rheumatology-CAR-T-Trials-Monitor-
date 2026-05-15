@@ -9812,19 +9812,42 @@ when ≥2 systemic entities were detected within the conditions field. Generic
 autoimmune phrases (e.g., "autoimmune diseases", "B-cell mediated autoimmune
 disorders", "paediatric B-cell related autoimmune diseases") — which typically
 reflect basket-eligible trial designs — were mapped to "Basket/Multidisease"
-rather than a specific entity.
+rather than a specific entity. Disease entities are then rolled up to one of
+four L1 families: Rheumatology (CTD / IA / Vasculitis), Neurologic autoimmune
+(MS / NMOSD / Myasthenia / CIDP / AIE / MOGAD / Stiff-person / Neurology-other),
+Other autoimmune (cGVHD / Autoimmune cytopenias / Glomerular / Endocrine /
+Dermatologic / etc.), and three basket sub-families (Rheumatology basket,
+Neurology basket, Multidisease basket).
 
-Target category. The primary antigen target was assigned from trial text using a
-priority-ordered ruleset. Cell-therapy platform types were identified first:
-CAR-NK constructs (terms: {", ".join(CAR_NK_TERMS)}), CAAR-T
-({", ".join(CAAR_T_TERMS)}), and CAR-Treg ({", ".join(CAR_TREG_TERMS)}).
-Specific antigen targets were then evaluated in order of specificity: dual
-BCMA/CD70, dual CD19/BCMA, dual CD19/CD20, dual CD19/BAFF (detected by
-co-presence of CD19 and BAFF terms), then single-target CD19, BCMA, CD20,
-CD70, BAFF, CD6, and CD7. Studies containing CAR-related terms but no
-identifiable antigen were labelled "CAR-T_unspecified". A named-product lookup
-table (NAMED_PRODUCT_TARGETS in config.py) was applied as a fallback for
-well-known products that omit antigen names from accessible study text fields.
+Target category. The antigen target was assigned by a layered rule system,
+applied in this priority order:
+  (1) Manual LLM override (`llm_overrides.json`) — used only for trials whose
+      text is genuinely ambiguous (e.g., dual-arm protocols testing two
+      mechanistically distinct products).
+  (2) Named-product lookup (`NAMED_PRODUCT_TARGETS` in config.py) — when the
+      trial text contains a known canonical CAR-T product alias (KYV-101,
+      CABA-201, CT1192, …), the product's documented antigen wins regardless
+      of other markers in the text. This priority avoids comedication
+      mentions (e.g., "Anti-CD20 mAB" given alongside a CD19 CAR-T) being
+      misread as dual-target CAR-Ts.
+  (3) Explicit text-pattern detection — CAR-NK constructs
+      ({", ".join(CAR_NK_TERMS)}), CAAR-T ({", ".join(CAAR_T_TERMS)}), and
+      CAR-Treg ({", ".join(CAR_TREG_TERMS)}) are identified first as
+      platforms. Antigen detection then runs over a closed vocabulary
+      (CD19, CD20, CD22, BCMA, CD70, BAFF-R / BAFF, CD6, CD7) using
+      construct-anchored phrasing patterns (`CAR_SPECIFIC_TARGET_TERMS`)
+      plus bare-token matches; word-boundary regex is used for short
+      tokens (CD6, CD7) to prevent substring collisions with longer codes
+      (cd7 ≠ cd70). All detected antigens are collected into a sorted
+      list and emitted as a multi-target label: 1 antigen → "CD19"; 2 →
+      "CD19/BCMA dual"; 3 → "CD19/CD22/BCMA triple"; 4+ → "… multi". The
+      collect-then-format pattern replaced an earlier hardcoded if-chain
+      that handled only specific dual pairs and silently dropped third
+      antigens; adding a new antigen to the system is now a single
+      config entry.
+  (4) CAR-core fallback — when CAR-related terms are present but no
+      antigen is identifiable, the trial is labelled "CAR-T_unspecified".
+  (5) Otherwise the trial is labelled "Other_or_unknown".
 Platform labels (CAR-NK, CAR-Treg, CAAR-T) are excluded from antigen-target
 frequency analyses, as these denote cell-therapy modalities rather than
 antigens. For the antigen-target landscape chart (Figure 6), the residual
@@ -9839,11 +9862,15 @@ Allogeneic markers included: allogeneic, off-the-shelf, universal CAR-T, UCART,
 healthy donor, donor-derived, umbilical cord blood, cord blood. In vivo markers
 included: in vivo CAR, circular RNA, lentiviral nanoparticle, mRNA-LNP. A named
 product lookup table (NAMED_PRODUCT_TYPES in config.py) was applied as a fallback
-when these generic markers were absent. Both lookup tables are updated iteratively
-via an LLM-assisted curation loop (validate.py) that submits borderline
-classifications to an independent language-model reviewer and writes structured
-corrections to llm_overrides.json, which is picked up automatically by the
-pipeline at load time.
+when these generic markers were absent. For trials whose platform is CAR-NK
+but text carries no explicit allogeneic marker, the product type defaults to
+"Allogeneic/Off-the-shelf" — CAR-NK products in autoimmune are predominantly
+allogeneic (donor- or iPSC-derived); the earlier default-to-Autologous rule
+mis-classified ~5 trials per snapshot. Manual LLM overrides
+(`llm_overrides.json`) take priority over the rule-based product type. The
+override file is small and intended only for trials whose text is genuinely
+ambiguous; routine borderline cases are surfaced in the curation-loop CSV
+export below for batch review.
 
 Cell therapy modality. Each trial was assigned to one of eight mechanistically
 distinct modality categories based on target category and product type:
@@ -9856,31 +9883,46 @@ distinct modality categories based on target category and product type:
   • CAAR-T — chimeric autoantibody receptor T cells
   • In vivo CAR — mRNA-LNP or other non-cellular in vivo CAR delivery systems
 
+Re-classification on load. The classifier (`_assign_target` and
+`_assign_product_type` in pipeline.py) is executed (i) at snapshot build time
+and (ii) again at every application load. The saved snapshot's TargetCategory,
+TargetSource, ProductType, and ProductTypeSource columns are advisory —
+overwritten in-memory whenever the rule-based classifier output differs from
+the saved value. This guarantees that code-level classifier improvements
+apply immediately without waiting for the nightly snapshot rebuild. The
+trade-off is that the canonical source of truth for a trial's classification
+is the code + raw data at view time, not the saved CSV. For frozen
+reproducibility, pin a snapshot date AND check out the code at that date —
+the pinned-snapshot feature on the sidebar still works because the classifier
+is deterministic for given code + input.
+
 Enrollment Analysis
 -------------------
-Enrollment counts were extracted from the CT.gov EnrollmentCount field.
-The Overview "Planned" vs "Actual" tile split is classified by OverallStatus,
-not by the CT.gov EnrollmentType flag — the latter is registrant-maintained
-and frequently stale (a completed trial whose registrant forgot to flip
-the flag from "ANTICIPATED" → "ACTUAL" still shows as planned even though
-the number is the real final accrual). Status-based classification:
+Two enrollment views are reported. The headline "Planned enrollment" KPI tile
+sums CT.gov `EnrollmentCount` across trials whose `OverallStatus` is in
+OPEN_STATUSES ({{RECRUITING, NOT_YET_RECRUITING, ENROLLING_BY_INVITATION}}) —
+this is the current pipeline target and is the only defensibly accurate
+field-level enrollment summary at this point in the field's maturity. Per-
+trial actual accrual is shown in the trial-detail drilldown where available.
 
-  "Actual"  : OverallStatus ∈ {{COMPLETED, ACTIVE_NOT_RECRUITING, TERMINATED}}
-              — enrolment is closed; EnrollmentCount = real accrual.
-  "Planned" : OverallStatus ∈ {{RECRUITING, NOT_YET_RECRUITING,
-              ENROLLING_BY_INVITATION, SUSPENDED}} — enrolment still open;
-              EnrollmentCount = target.
+A cumulative "Actual enrollment" headline tile was previously reported but
+removed (2026-05-15) after validation found no defensible definition: the
+status-based heuristic (sum across COMPLETED / ACTIVE_NOT_RECRUITING /
+TERMINATED) overclaimed by ~5× because TERMINATED and ACTIVE_NOT_RECRUITING
+trials' EnrollmentCount values are usually still the planned TARGET, not
+actual accrual; the strict `EnrollmentType=ACTUAL` flag underclaims by ~4×
+because CT.gov sponsors update the flag with a documented multi-month-to-
+year lag after enrollment closes. Neither number was defensibly accurate
+for the rheum CAR-T field's current stage (only ~3 trials are status=
+COMPLETED in the snapshot, only ~23 carry `EnrollmentType=ACTUAL`), so
+the tile was dropped rather than report a misleading headline.
 
-Other statuses (WITHDRAWN, UNKNOWN) contribute to neither bucket; no
-reliable enrolment signal there. EnrollmentType is still parsed and
-stored for downstream analyses but not used for the headline split.
-
-Non-numeric or missing EnrollmentCount values were excluded from enrollment
-analyses (Figure 4).
-Geographic classification:
-trials recruiting exclusively in China were labelled "China"; all others
-"Non-China" (based on the Countries field). Sponsor classification used a
-two-stage rule: (i) the primary signal was the ClinicalTrials.gov
+Geographic classification. Trials' Countries field is parsed as a pipe-
+delimited list. Trial × country counts and the world choropleth (Figure 3)
+are computed by exploding the field to one row per (trial × country) pair.
+Cross-tabulation of geography × sponsor type (Fig 4c) shows median planned
+enrollment and IQR (error bars). Sponsor classification used a two-stage
+rule: (i) the primary signal was the ClinicalTrials.gov
 `leadSponsor.class` field, mapping INDUSTRY→Industry, NIH / FED→Government,
 NETWORK→Academic, and INDIV→Academic (investigator-initiated trials run
 through academic centres); (ii) when the CT.gov class was OTHER, UNKNOWN, or
@@ -9893,20 +9935,81 @@ keywords (NIH, VA, DoD, Ministry of Health) were evaluated in priority order.
 Short alphabetic multi-token strings without organisational keywords —
 including those with medical-degree markers (M.D., Ph.D.) — were recognised
 as individual principal investigators and classified as Academic.
-Cross-tabulation of geography × sponsor type (Fig 4c) shows median planned
-enrollment and IQR (error bars) for each of the four strata.
 
 Data Processing
 ---------------
 All processing was performed in Python (pandas {pd.__version__}) using a custom
 ETL pipeline. Text normalisation included lowercasing, Unicode normalisation
 (e.g., "sjögren" → "sjogren"), and removal of non-alphanumeric characters. Term
-matching used whole-word boundary matching for short terms (≤3 characters) and
-substring matching for longer terms. Classification rules and term dictionaries
-are versioned in the accompanying config.py file and updated via structured
-curation loops applied to random samples of pipeline output; the curation-loop
-export, stratified validation sample, and inter-rater agreement (Cohen's κ)
-tooling are available at the bottom of this Methods & Appendix tab.
+matching used whole-word boundary matching for short antigen tokens (CD6, CD7)
+and substring matching for longer terms. Classification rules and term
+dictionaries are versioned in the accompanying config.py file and updated via
+two complementary mechanisms: (i) structured curation loops applied to random
+samples of pipeline output (`scripts/generate_validation_sample.py` builds the
+stratified sample; the curation-loop CSV export at the bottom of this tab
+flags trials with `Unclassified` / `Other_or_unknown` / `Unclear` axes for
+LLM- or human-assisted review and patching), and (ii) per-trial manual
+overrides written to `llm_overrides.json` for cases where the rule-based
+classifier produces a defensibly wrong answer (e.g., dual-arm protocols).
+Inter-rater agreement (Cohen's κ) tooling is provided by
+`scripts/compute_validation_kappa.py`; a validation-study sample with
+reviewer-blinded axes is at `validation_study/sample_v1.json`.
+
+Validation and Drift Monitoring
+-------------------------------
+Two automated audit scripts run against each snapshot:
+  • `scripts/audit_product_consistency.py` — flags trials of the same
+    named product (e.g., KYV-101, CABA-201) that have been classified to
+    different TargetCategory values across the snapshot. A clean run = 0
+    inconsistencies; non-zero output indicates either a classifier bug, a
+    new genuinely dual/triple-target product needing a NAMED_PRODUCT_TARGETS
+    update, or an intended divergence captured by `llm_overrides.json`.
+  • `scripts/audit_named_products.py` — flags trials whose TargetSource is
+    "named_product" or "car_core_fallback" (i.e., the resolution required a
+    fallback path); the worklist drives manual additions to
+    NAMED_PRODUCT_TARGETS.
+
+Pipeline-level unit tests ({{187 tests in current commit}}) lock canonical
+behaviour for every classifier rule, including the multi-target arity
+ladder, CD22 detection, CAR-NK Allo default, BAFF-R-supersedes-BAFF
+ordering, and the priority of named-product over explicit-marker. App-level
+behaviour is smoke-tested via `streamlit.testing.v1.AppTest`.
+
+Limitations
+-----------
+The following caveats apply to all analyses on this dashboard:
+  (a) Data source. ClinicalTrials.gov is a self-reported registry; sponsor
+      reporting completeness and timeliness vary. Trials registered only on
+      ChiCTR, EU-CTR, JapicCTI, or other national registries are not
+      captured unless dual-registered with NCT.
+  (b) Search recall vs precision. The keyword query maximises recall over a
+      broad CAR-construct vocabulary; trials registered without any of the
+      indexed CAR-related terms (extremely rare in modern registrations)
+      will be missed. The {n_indication}-term oncology exclusion list and
+      the {n_hard}-item manual hard-exclusion list together control
+      precision; false negatives (rheum CAR-T trials excluded by an
+      oncology keyword present incidentally) are reviewed quarterly.
+  (c) Classification subjectivity. Rule-based classification is
+      deterministic but imperfect for borderline cases — dual-arm
+      protocols, undisclosed antigens, comedication mentions, and
+      ambiguous platform terminology. The audit scripts and validation
+      sample surface these; per-trial overrides are recorded in
+      `llm_overrides.json` with rationale.
+  (d) Enrollment numbers. CT.gov's `EnrollmentType` flag has a multi-month
+      to multi-year reporting lag; reported "Planned enrollment" is a
+      target, not accrual. Per-trial actual accrual (where flagged
+      ACTUAL) is shown in the drilldown but not aggregated as a headline
+      KPI for the reasons described above.
+  (e) Geographic coverage. The Countries field reflects sponsor-declared
+      planned sites, not actual recruitment; a trial that registered
+      multi-country but activated only one site is counted under all
+      declared countries.
+  (f) Snapshot freshness. The dashboard supports live fetch from CT.gov
+      and pinned-snapshot reproducibility. The classifier is re-run on
+      every load against the current code, so a saved snapshot's
+      classifications may differ from what the dashboard renders if the
+      code has been updated. For absolute frozen reproducibility, pin a
+      snapshot AND check out the code at that date.
 
 Dataset Snapshot
 ----------------
