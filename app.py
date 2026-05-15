@@ -6754,171 +6754,184 @@ with tab_deepdive:
                 .sort_values("Trials", ascending=False)
             )
 
-            m1, m2, m3 = st.columns(3)
-            with m1:
-                st.metric("Named products", f"{len(pivot):,}", help="In the current filter")
-            with m2:
-                st.metric("Total trials", f"{int(pivot['Trials'].sum()):,}")
-            with m3:
-                st.metric(
-                    "Top product",
-                    pivot.iloc[0]["ProductName"] if not pivot.empty else "—",
-                    help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
-                )
+            # Focus resolution — click-to-focus on the per-product
+            # pivot below. No sidebar equivalent for product name
+            # (there's only flt_product for product TYPE), so the
+            # only way in is via click, and the only way out is the
+            # "← Back" button (no auto-focus from sidebar narrowing).
+            _product_focus = st.session_state.get("dd_product_focus")
+            product_choices = pivot["ProductName"].astype(str).tolist()
+            if _product_focus and _product_focus in product_choices:
+                _picked_product = _product_focus
+                _prod_from_click = True
+            else:
+                _picked_product = None
+                _prod_from_click = False
 
-            st.caption(
-                f"{len(pivot):,} named products · sorted by trial count · "
-                "click any row for that product's trial list."
-            )
-            _prod_event = st.dataframe(
-                pivot, width='stretch', height=460, hide_index=True,
-                on_select="rerun", selection_mode="single-row",
-                key="deep_product_pivot",
-                column_config={
-                    "ProductName":   st.column_config.TextColumn("Product", width="medium"),
-                    "Target":        st.column_config.TextColumn("Primary target", width="small"),
-                    "Modality":      st.column_config.TextColumn("Modality", width="small"),
-                    "ProductType":   st.column_config.TextColumn("Product type", width="small"),
-                    "FurthestPhase": st.column_config.TextColumn("Furthest phase", width="small"),
-                    "Sponsors":      st.column_config.NumberColumn("# Sponsors", width="small"),
-                    "Diseases":      st.column_config.TextColumn("Indications", width="medium"),
-                    "Countries":     st.column_config.TextColumn("Countries (top)", width="large"),
-                    "MedianEnroll":  st.column_config.NumberColumn("Median enrollment", width="small"),
-                },
-            )
-
-            st.download_button(
-                "Download per-product CSV",
-                data=_csv_with_provenance(pivot, "Per-product pipeline view"),
-                file_name="per_product_pipeline.csv",
-                mime="text/csv",
-            )
-
-            # ── Per-product landscape ──
-            # Single-panel phase composition (100% stacked horizontal
-            # bars, one row per product) with the per-product trial
-            # count rendered as a label just past the right edge of
-            # each bar. The earlier two-panel (phase composition +
-            # enrollment box plot) version failed for the box-plot
-            # half: most products have 1-3 trials, so each box was
-            # degenerate, and the wide [0, ~260] x-axis squished
-            # everything against the left. Dropped per user feedback
-            # 2026-05-15. The product portfolio table above already
-            # carries median enrollment and year range; the only
-            # visual pattern this landscape adds over that table is
-            # the phase distribution gradient.
-            st.markdown("##### Product landscape — phase mix")
-
-            # Top 10 by trial count. Sort by furthest phase reached
-            # (descending: most-advanced product at the top) so the
-            # eye reads "where in the pipeline" top → bottom rather
-            # than enrollment-size top → bottom.
-            _prod_counts_all = prod_df["ProductName"].value_counts()
-            _shared_prod_top = _prod_counts_all.head(10).index.tolist()
-            _phase_max_by_prod = {
-                _p: PHASE_ORDER.index(str(
-                    prod_df.loc[prod_df["ProductName"] == _p, "PhaseOrdered"].max()
-                )) if not prod_df.loc[prod_df["ProductName"] == _p, "PhaseOrdered"].dropna().empty else -1
-                for _p in _shared_prod_top
-            }
-            _shared_prod_ordered = sorted(
-                _shared_prod_top,
-                key=lambda p: (-_phase_max_by_prod.get(p, -1), -int(_prod_counts_all.get(p, 0)), p),
-            )
-
-            _phase_palette_p = {
-                "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
-                "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
-                "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
-                "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
-            }
-            _pp_in = prod_df.loc[
-                prod_df["ProductName"].isin(_shared_prod_ordered)
-            ].copy()
-            _pp_has_phase = (
-                not _pp_in.empty and "PhaseLabel" in _pp_in.columns
-                and bool(_shared_prod_ordered)
-            )
-            if _pp_has_phase:
-                _pp_counts = (
-                    _pp_in.groupby(["ProductName", "PhaseLabel"])
-                    .size().reset_index(name="Trials")
-                )
-                _pp_grp_tot = _pp_counts.groupby("ProductName")["Trials"].transform("sum")
-                _pp_counts["Pct"] = 100.0 * _pp_counts["Trials"] / _pp_grp_tot
-                _pp_label_order = [
-                    PHASE_LABELS[p] for p in PHASE_ORDER
-                    if PHASE_LABELS[p] in set(_pp_counts["PhaseLabel"])
-                ]
-
-                _prod_phase_fig = go.Figure()
-                for _phase_lbl in _pp_label_order:
-                    _sub = _pp_counts[_pp_counts["PhaseLabel"] == _phase_lbl]
-                    _sub_pivot = (
-                        _sub.set_index("ProductName")["Pct"]
-                        .reindex(_shared_prod_ordered, fill_value=0.0)
-                        .reset_index()
+            if _picked_product is None:
+                # ── Landscape view ──
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.metric("Named products", f"{len(pivot):,}", help="In the current filter")
+                with m2:
+                    st.metric("Total trials", f"{int(pivot['Trials'].sum()):,}")
+                with m3:
+                    st.metric(
+                        "Top product",
+                        pivot.iloc[0]["ProductName"] if not pivot.empty else "—",
+                        help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
                     )
-                    _prod_phase_fig.add_trace(
-                        go.Bar(
-                            x=_sub_pivot["Pct"],
-                            y=_sub_pivot["ProductName"],
-                            name=_phase_lbl,
-                            orientation="h",
-                            marker_color=_phase_palette_p.get(_phase_lbl, "#94a3b8"),
-                            marker_line_width=0,
-                            hovertemplate="<b>%{y}</b><br>" + _phase_lbl + ": %{x:.1f}%<extra></extra>",
+
+                st.caption(
+                    f"{len(pivot):,} named products · sorted by trial "
+                    "count · **click any row to drill in.**"
+                )
+                _prod_iter = st.session_state.get("dd_product_table_iter", 0)
+                _prod_event = st.dataframe(
+                    pivot, width='stretch', height=460, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"deep_product_pivot_{_prod_iter}",
+                    column_config={
+                        "ProductName":   st.column_config.TextColumn("Product", width="medium"),
+                        "Target":        st.column_config.TextColumn("Primary target", width="small"),
+                        "Modality":      st.column_config.TextColumn("Modality", width="small"),
+                        "ProductType":   st.column_config.TextColumn("Product type", width="small"),
+                        "FurthestPhase": st.column_config.TextColumn("Furthest phase", width="small"),
+                        "Sponsors":      st.column_config.NumberColumn("# Sponsors", width="small"),
+                        "Diseases":      st.column_config.TextColumn("Indications", width="medium"),
+                        "Countries":     st.column_config.TextColumn("Countries (top)", width="large"),
+                        "MedianEnroll":  st.column_config.NumberColumn("Median enrollment", width="small"),
+                    },
+                )
+                _prod_rows = (
+                    _prod_event.selection.rows
+                    if _prod_event and hasattr(_prod_event, "selection") else []
+                )
+                if _prod_rows:
+                    _picked = str(pivot.iloc[_prod_rows[0]]["ProductName"])
+                    if _picked in product_choices:
+                        st.session_state["dd_product_focus"] = _picked
+                        st.rerun()
+
+                st.download_button(
+                    "Download per-product CSV",
+                    data=_csv_with_provenance(pivot, "Per-product pipeline view"),
+                    file_name="per_product_pipeline.csv",
+                    mime="text/csv",
+                )
+
+                # ── Per-product landscape phase-mix chart ──
+                # Top 10 by trial count, sorted by furthest phase
+                # reached (most-advanced products on top). The
+                # per-product trial count appears as an annotation
+                # just past the right edge of each 100% bar.
+                st.markdown("##### Product landscape — phase mix")
+                _prod_counts_all = prod_df["ProductName"].value_counts()
+                _shared_prod_top = _prod_counts_all.head(10).index.tolist()
+                _phase_max_by_prod = {
+                    _p: PHASE_ORDER.index(str(
+                        prod_df.loc[prod_df["ProductName"] == _p, "PhaseOrdered"].max()
+                    )) if not prod_df.loc[prod_df["ProductName"] == _p, "PhaseOrdered"].dropna().empty else -1
+                    for _p in _shared_prod_top
+                }
+                _shared_prod_ordered = sorted(
+                    _shared_prod_top,
+                    key=lambda p: (-_phase_max_by_prod.get(p, -1), -int(_prod_counts_all.get(p, 0)), p),
+                )
+                _phase_palette_p = {
+                    "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
+                    "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
+                    "Phase II/III":  "#075985", "Phase III":     "#0c4a6e",
+                    "Phase IV":      "#082f49", "Unknown":       "#cbd5e1",
+                }
+                _pp_in = prod_df.loc[
+                    prod_df["ProductName"].isin(_shared_prod_ordered)
+                ].copy()
+                _pp_has_phase = (
+                    not _pp_in.empty and "PhaseLabel" in _pp_in.columns
+                    and bool(_shared_prod_ordered)
+                )
+                if _pp_has_phase:
+                    _pp_counts = (
+                        _pp_in.groupby(["ProductName", "PhaseLabel"])
+                        .size().reset_index(name="Trials")
+                    )
+                    _pp_grp_tot = _pp_counts.groupby("ProductName")["Trials"].transform("sum")
+                    _pp_counts["Pct"] = 100.0 * _pp_counts["Trials"] / _pp_grp_tot
+                    _pp_label_order = [
+                        PHASE_LABELS[p] for p in PHASE_ORDER
+                        if PHASE_LABELS[p] in set(_pp_counts["PhaseLabel"])
+                    ]
+                    _prod_phase_fig = go.Figure()
+                    for _phase_lbl in _pp_label_order:
+                        _sub = _pp_counts[_pp_counts["PhaseLabel"] == _phase_lbl]
+                        _sub_pivot = (
+                            _sub.set_index("ProductName")["Pct"]
+                            .reindex(_shared_prod_ordered, fill_value=0.0)
+                            .reset_index()
                         )
+                        _prod_phase_fig.add_trace(
+                            go.Bar(
+                                x=_sub_pivot["Pct"],
+                                y=_sub_pivot["ProductName"],
+                                name=_phase_lbl,
+                                orientation="h",
+                                marker_color=_phase_palette_p.get(_phase_lbl, "#94a3b8"),
+                                marker_line_width=0,
+                                hovertemplate="<b>%{y}</b><br>" + _phase_lbl + ": %{x:.1f}%<extra></extra>",
+                            )
+                        )
+                    for _p in _shared_prod_ordered:
+                        _n = int(_prod_counts_all.get(_p, 0))
+                        _prod_phase_fig.add_annotation(
+                            x=102, y=_p,
+                            text=f"<b>{_n}</b> trial{'s' if _n != 1 else ''}",
+                            showarrow=False, xanchor="left", yanchor="middle",
+                            font=dict(family=FONT_FAMILY, size=11, color=THEME["muted"]),
+                        )
+                    _prod_phase_fig.update_yaxes(
+                        title=None, showgrid=False,
+                        categoryorder="array",
+                        categoryarray=_shared_prod_ordered,
+                        autorange="reversed",
                     )
-                # Trial-count annotations sit just past the right edge of
-                # the 100% bar — collapses what used to be a whole
-                # right-panel chart into a single number per row.
-                for _p in _shared_prod_ordered:
-                    _n = int(_prod_counts_all.get(_p, 0))
-                    _prod_phase_fig.add_annotation(
-                        x=102, y=_p,
-                        text=f"<b>{_n}</b> trial{'s' if _n != 1 else ''}",
-                        showarrow=False, xanchor="left", yanchor="middle",
-                        font=dict(family=FONT_FAMILY, size=11, color=THEME["muted"]),
+                    _prod_phase_fig.update_xaxes(
+                        title_text="Phase mix (%)", range=[0, 130],
+                        tickvals=[0, 25, 50, 75, 100],
                     )
-                _prod_phase_fig.update_yaxes(
-                    title=None, showgrid=False,
-                    categoryorder="array",
-                    categoryarray=_shared_prod_ordered,
-                    autorange="reversed",
-                )
-                _prod_phase_fig.update_xaxes(
-                    title_text="Phase mix (%)", range=[0, 130],
-                    tickvals=[0, 25, 50, 75, 100],
-                )
-                _prod_phase_fig.update_layout(
-                    height=420,
-                    barmode="stack",
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=130, r=20, t=20, b=110),
-                    legend=dict(
-                        orientation="h", yanchor="top", y=-0.22, x=0,
-                        font=dict(family=FONT_FAMILY, size=10),
-                        title=dict(text=""),
-                    ),
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
-                    bargap=0.28,
-                )
-                _chart(_prod_phase_fig, key="dd_product_phase_single")
-            st.markdown("**Annual trial starts by product (top 6)**")
-            _chart(
-                _deepdive_timeline(
-                    prod_df, group_col="ProductName", height=300, top_n=6,
-                ),
-                key="dd_product_timeline",
-            )
+                    _prod_phase_fig.update_layout(
+                        height=420,
+                        barmode="stack",
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        margin=dict(l=130, r=20, t=20, b=110),
+                        legend=dict(
+                            orientation="h", yanchor="top", y=-0.22, x=0,
+                            font=dict(family=FONT_FAMILY, size=10),
+                            title=dict(text=""),
+                        ),
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                        bargap=0.28,
+                    )
+                    _chart(_prod_phase_fig, key="dd_product_phase_single")
 
-            _prod_rows = (
-                _prod_event.selection.rows
-                if _prod_event and hasattr(_prod_event, "selection") else []
-            )
-            if _prod_rows:
-                _picked_product = pivot.iloc[_prod_rows[0]]["ProductName"]
+                st.markdown("**Annual trial starts by product (top 6)**")
+                _chart(
+                    _deepdive_timeline(
+                        prod_df, group_col="ProductName", height=300, top_n=6,
+                    ),
+                    key="dd_product_timeline",
+                )
+
+            else:
+                # ── Focused view: drilldown for the picked product ──
+                if _prod_from_click:
+                    if st.button("← Back to landscape", key="dd_product_back",
+                                 help="Return to the cross-product landscape."):
+                        _iter_v = st.session_state.get("dd_product_table_iter", 0)
+                        st.session_state["dd_product_table_iter"] = _iter_v + 1
+                        st.session_state.pop("dd_product_focus", None)
+                        st.rerun()
+
                 _prod_trials = prod_df[prod_df["ProductName"] == _picked_product].copy()
                 if "NCTLink" not in _prod_trials.columns:
                     _prod_trials["NCTLink"] = _prod_trials["NCTId"].apply(
@@ -6932,10 +6945,76 @@ with tab_deepdive:
                     ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
                 ).reset_index(drop=True)
 
+                # ── KPI strip ──
+                _n_pt = len(_prod_trials)
+                _n_open_pt = int(_prod_trials["OverallStatus"].isin(
+                    {STATUS_DISPLAY.get(s, s) for s in OPEN_STATUSES} | OPEN_STATUSES
+                ).sum())
+                _n_sp_pt = int(_prod_trials["LeadSponsor"].dropna().nunique())
+                _enr_pt = int(
+                    pd.to_numeric(_prod_trials.get("EnrollmentCount", pd.Series(dtype=float)),
+                                  errors="coerce").fillna(0).sum()
+                )
+                _pm1, _pm2, _pm3, _pm4 = st.columns(4)
+                _pm1.metric("Trials", f"{_n_pt:,}")
+                _pm2.metric("Open / recruiting", f"{_n_open_pt:,}")
+                _pm3.metric("Distinct sponsors", f"{_n_sp_pt:,}")
+                _pm4.metric(
+                    "Planned enrolment (Σ)", f"{_enr_pt:,}",
+                    help="Sum of EnrollmentCount across this product's trials.",
+                )
+
+                # Header strip: target / modality / year range
+                _row0 = _prod_trials.iloc[0]
+                _years_pt = pd.to_numeric(_prod_trials.get("StartYearNumeric", pd.Series(dtype=float)),
+                                          errors="coerce").dropna()
+                _yrange_pt = (
+                    f"{int(_years_pt.min())}–{int(_years_pt.max())}"
+                    if not _years_pt.empty and int(_years_pt.min()) != int(_years_pt.max())
+                    else (f"{int(_years_pt.min())}" if not _years_pt.empty else "—")
+                )
+                st.caption(
+                    f"**{_picked_product}** · "
+                    f"target: *{_row0.get('TargetCategory', '—') or '—'}* · "
+                    f"modality: *{_row0.get('Modality', '—') or '—'}* · "
+                    f"years active: **{_yrange_pt}**"
+                )
+
+                # ── Charts row: Phase mix + Annual timeline by disease ──
+                _pcA, _pcB = st.columns(2)
+                with _pcA:
+                    st.markdown("**Phase distribution**")
+                    _render_phase_mix_panel(
+                        _prod_trials, key=f"dd_product_phase_{_picked_product}",
+                    )
+                with _pcB:
+                    st.markdown("**Annual trial starts (by indication)**")
+                    _chart(
+                        _deepdive_timeline(
+                            _prod_trials, group_col="DiseaseEntity",
+                            height=240, top_n=5,
+                        ),
+                        key=f"dd_product_timeline_{_picked_product}",
+                    )
+
+                # ── Coverage sparkbars: Sponsors + Diseases ──
+                _psA, _psB = st.columns(2)
+                with _psA:
+                    st.markdown("**Sponsors**")
+                    _render_sparkbar_panel(
+                        _prod_trials["LeadSponsor"].dropna().value_counts()
+                    )
+                with _psB:
+                    st.markdown("**Indications**")
+                    _render_sparkbar_panel(
+                        _prod_trials["DiseaseEntity"].dropna().value_counts()
+                    )
+
+                # ── Trial table with row-click → drilldown ──
                 st.markdown(
                     f"### Trials for **{_picked_product}** "
                     f"<span class='meta-small'>"
-                    f"({len(_prod_trials)} trials · click any row for full details)</span>",
+                    f"({_n_pt} trial{'s' if _n_pt != 1 else ''} · click any row for full details)</span>",
                     unsafe_allow_html=True,
                 )
                 # Product focused → drop ProductName / ProductType
