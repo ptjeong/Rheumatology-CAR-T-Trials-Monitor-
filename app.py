@@ -3690,38 +3690,6 @@ def _empty_state_panel(sync_opt_map: dict[str, list[str]], *, caller_id: str) ->
                 st.rerun()
 
 
-def _section_anchor(name: str) -> None:
-    """Emit a named anchor for an in-tab jump-link target."""
-    st.markdown(f'<a name="{name}"></a>', unsafe_allow_html=True)
-
-
-def _render_section_toc(items: list[tuple[str, str]]) -> None:
-    """Render a compact horizontal jump-link bar.
-
-    `items` is a list of (label, anchor_name) — each renders as a
-    link to the corresponding `_section_anchor` further down the
-    page. Used at the top of long Deep Dive focused views to give
-    the reader scroll-relief on multi-section pages.
-    """
-    if not items:
-        return
-    _links = " · ".join(
-        f'<a href="#{anchor}" style="color:{THEME["primary"]}; '
-        f'text-decoration:none; font-weight:500;">{label}</a>'
-        for label, anchor in items
-    )
-    st.markdown(
-        f'<div style="font-size: var(--fs-sm); padding: 7px 12px;'
-        f' border-left: 3px solid {THEME["primary"]};'
-        f' background: {THEME["surf2"]};'
-        f' margin: 4px 0 14px;">'
-        f'<span style="color:{THEME["muted"]}; font-weight: 600;'
-        f' text-transform: uppercase; letter-spacing: 0.06em;'
-        f' font-size: var(--fs-micro); margin-right: 10px;">Jump to:</span>'
-        f'{_links}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
 
 
 def _section_question(question: str) -> None:
@@ -5856,27 +5824,55 @@ with tab_deepdive:
                 )
                 agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
 
-                # Focus is now derived from the sidebar disease filter:
-                # when that filter is narrowed to a single disease, the
-                # tab renders the focused drilldown; otherwise it
-                # renders the landscape. The standalone focus picker +
-                # click-to-focus mechanism were retired 2026-05-15 —
-                # they duplicated work the sidebar filter already did.
+                # Focus resolution — single source of truth:
+                #   1. dd_disease_focus set by click on the landscape
+                #      table → render the focused drilldown (with a
+                #      "← Back" button).
+                #   2. Sidebar narrowed to 1 disease → auto-focus on
+                #      it (no Back button — sidebar is the way out).
+                #   3. Otherwise landscape.
+                # Click-to-focus writes a non-widget session-state key
+                # (so no Streamlit instantiation-order conflict). The
+                # standalone focus dropdown was retired 2026-05-15.
                 disease_choices = agg["Disease"].tolist()
-                pick = disease_choices[0] if len(disease_choices) == 1 else "—"
+                _focus = st.session_state.get("dd_disease_focus")
+                if _focus and _focus in disease_choices:
+                    pick = _focus
+                    _from_click = True
+                elif len(disease_choices) == 1:
+                    pick = disease_choices[0]
+                    _from_click = False
+                else:
+                    pick = "—"
+                    _from_click = False
 
                 if pick == "—":
                     # ── Landscape view ──
                     st.caption(
                         f"{len(agg)} diseases · sorted by trial count "
-                        "· narrow the sidebar **Disease entity** filter "
-                        "to one to drill into a single disease."
+                        "· **click any row to drill in.**"
                     )
-                    st.dataframe(
+                    # Dynamic key with an iter counter forces a fresh
+                    # widget mount when the user clicks "← Back" — that
+                    # way the dataframe's preserved selection from the
+                    # previous landscape session doesn't re-fire the
+                    # click-to-focus handler.
+                    _iter = st.session_state.get("dd_disease_table_iter", 0)
+                    _dl_event = st.dataframe(
                         agg, width='stretch', hide_index=True,
                         column_config=_landscape_table_cols("Disease", "Disease"),
-                        key="dd_disease_landscape_table",
+                        on_select="rerun", selection_mode="single-row",
+                        key=f"dd_disease_landscape_table_{_iter}",
                     )
+                    _dl_rows = (
+                        _dl_event.selection.rows
+                        if _dl_event and hasattr(_dl_event, "selection") else []
+                    )
+                    if _dl_rows:
+                        _picked_d = str(agg.iloc[_dl_rows[0]]["Disease"])
+                        if _picked_d in disease_choices:
+                            st.session_state["dd_disease_focus"] = _picked_d
+                            st.rerun()
 
                     # ── Phase 1 additions: landscape-level overview figures ──
                     st.markdown("##### Disease landscape — patterns at a glance")
@@ -5919,7 +5915,14 @@ with tab_deepdive:
                     # the ≥3 y stalled bucket).
 
                 else:
-                    # ── Focused view: drilldown for the single disease ──
+                    # ── Focused view: drilldown for the picked disease ──
+                    if _from_click:
+                        if st.button("← Back to landscape", key="dd_disease_back",
+                                     help="Return to the cross-disease landscape view."):
+                            _iter = st.session_state.get("dd_disease_table_iter", 0)
+                            st.session_state["dd_disease_table_iter"] = _iter + 1
+                            st.session_state.pop("dd_disease_focus", None)
+                            st.rerun()
                     sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Trials", len(sub))
@@ -5932,14 +5935,6 @@ with tab_deepdive:
                               help="Sum of CT.gov EnrollmentCount values for this disease — planned for ongoing trials, actual for completed.")
                     c4.metric("Median target enrollment", int(_enr.median()) if _enr.notna().any() else 0)
 
-                    # In-tab TOC.
-                    _render_section_toc([
-                        ("Charts",    "dz-charts"),
-                        ("Details",   "dz-details"),
-                        ("Trial list", "dz-trials"),
-                    ])
-
-                    _section_anchor("dz-charts")
                     # ── Charts row (visual gestalt first) ──
                     _dz1, _dz2, _dz3 = st.columns(3)
                     with _dz1:
@@ -5987,7 +5982,6 @@ with tab_deepdive:
                         else:
                             st.caption("No country data.")
 
-                    _section_anchor("dz-details")
                     # ── Details row (compact sparkbar lists for scan) ──
                     _tgt = (
                         sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
@@ -6072,7 +6066,6 @@ with tab_deepdive:
                     if "OverallStatus" in detail.columns:
                         detail["OverallStatus"] = detail["OverallStatus"].map(STATUS_DISPLAY).fillna(detail["OverallStatus"])
                     detail, _dd_cols = _attach_flag_column(detail, _dd_cols)
-                    _section_anchor("dz-trials")
                     st.markdown(
                         f"### Trials — **{pick}** "
                         f"<span class='meta-small'>"
@@ -6121,17 +6114,25 @@ with tab_deepdive:
             _antigens_only, key=lambda t: -_target_counts.get(t, 0)
         )
 
-        # Focus is now derived from the sidebar Antigen target +
-        # Modality filters: when either narrows the data to a single
-        # antigen or single modality, the focused view renders;
-        # otherwise it's the cross-antigen landscape. Standalone focus
-        # pickers + click-to-focus were retired 2026-05-15 — the
-        # sidebar already had the equivalent filters and the second
-        # mechanism was friction without payoff.
+        # Focus resolution (same pattern as By disease):
+        #   1. dd_target_focus set by clicking the antigen landscape
+        #      table → focused view + "← Back" button.
+        #   2. Sidebar narrows antigen / modality to one → auto-focus
+        #      (no Back — sidebar is the way out).
+        #   3. Otherwise landscape.
+        # Modality is sidebar-only (no click-to-focus); the focused
+        # view AND-combines whichever sidebar axes are at one value.
         _modality_options_dd = [m for m in _MODALITY_ORDER if m in set(df_filt["Modality"])]
-        target_pick = (
-            _target_options_sorted[0] if len(_target_options_sorted) == 1 else "—"
-        )
+        _target_focus_state = st.session_state.get("dd_target_focus")
+        if _target_focus_state and _target_focus_state in _target_options_sorted:
+            target_pick = _target_focus_state
+            _target_from_click = True
+        elif len(_target_options_sorted) == 1:
+            target_pick = _target_options_sorted[0]
+            _target_from_click = False
+        else:
+            target_pick = "—"
+            _target_from_click = False
         modality_pick = (
             _modality_options_dd[0] if len(_modality_options_dd) == 1 else "(any)"
         )
@@ -6393,7 +6394,7 @@ with tab_deepdive:
             st.markdown(
                 "**Top antigens by trial count** "
                 "<span class='meta-small'>"
-                "— pick a specific antigen above to drill in</span>",
+                "— click any row to drill in</span>",
                 unsafe_allow_html=True,
             )
             _top_n = 25
@@ -6413,7 +6414,8 @@ with tab_deepdive:
                 .sort_values("Trials", ascending=False)
                 .head(_top_n)
             )
-            st.dataframe(
+            _ag_iter = st.session_state.get("dd_target_table_iter", 0)
+            _ag_event = st.dataframe(
                 _landscape,
                 width="stretch", height=460, hide_index=True,
                 column_config={
@@ -6424,16 +6426,32 @@ with tab_deepdive:
                     "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
                     "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
                 },
-                key="dd_target_landscape_table",
+                on_select="rerun", selection_mode="single-row",
+                key=f"dd_target_landscape_table_{_ag_iter}",
             )
             st.caption(
-                f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
-                "Narrow the sidebar **Antigen target** filter to one to drill in."
+                f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens "
+                "· **click any row to drill in.**"
             )
+            _ag_rows = (
+                _ag_event.selection.rows
+                if _ag_event and hasattr(_ag_event, "selection") else []
+            )
+            if _ag_rows:
+                _picked_ag = str(_landscape.iloc[_ag_rows[0]]["TargetCategory"])
+                if _picked_ag in _target_options_sorted:
+                    st.session_state["dd_target_focus"] = _picked_ag
+                    st.rerun()
         else:
-            # Filter by whichever sidebar axes narrowed to one value.
-            # Either or both can be at the no-focus sentinel — the
-            # focused view only narrows on the active axes.
+            if _target_from_click:
+                if st.button("← Back to landscape", key="dd_target_back",
+                             help="Return to the cross-antigen landscape view."):
+                    _iter_v = st.session_state.get("dd_target_table_iter", 0)
+                    st.session_state["dd_target_table_iter"] = _iter_v + 1
+                    st.session_state.pop("dd_target_focus", None)
+                    st.rerun()
+            # Filter by whichever sidebar axes narrowed to one value
+            # (or by click-to-focus on the antigen landscape table).
             focus = df_filt.copy()
             if target_pick != "—":
                 focus = focus[focus["TargetCategory"] == target_pick]
@@ -6495,15 +6513,6 @@ with tab_deepdive:
                 with m4:
                     st.metric("Distinct products", f"{_distinct_products:,}")
 
-                # In-tab TOC — skip-link bar for the long focused view.
-                _render_section_toc([
-                    ("Charts",          "ag-charts"),
-                    ("Products",        "ag-products"),
-                    ("Coverage",        "ag-coverage"),
-                    ("Trial list",      "ag-trials"),
-                ])
-
-                _section_anchor("ag-charts")
                 # ── Charts row (3-col): Disease entities | Phase | Annual ──
                 # Was a 2×2 grid mixing charts and small tables; now one
                 # clean row of 3 charts gives the visual gestalt, with
@@ -6540,7 +6549,6 @@ with tab_deepdive:
                         key=f"dd_target_timeline_{_focus_token}",
                     )
 
-                _section_anchor("ag-products")
                 # ── Product portfolio table — the pharma-intel centrepiece ──
                 # Same pattern as the sponsor-focused view, but pivoted
                 # to "which products use this antigen?". Row = product;
@@ -6597,7 +6605,6 @@ with tab_deepdive:
                         },
                     )
 
-                _section_anchor("ag-coverage")
                 # ── Sparkbar lists row (3-col): Modality | Family | Top sponsors ──
                 _spk1, _spk2, _spk3 = st.columns(3)
                 with _spk1:
@@ -6623,7 +6630,6 @@ with tab_deepdive:
                         focus["LeadSponsor"].dropna().value_counts().head(10)
                     )
 
-                _section_anchor("ag-trials")
                 # Trial list with row-click → drilldown
                 st.markdown(
                     f"### Trials — **{_focus_label}** "
@@ -6743,17 +6749,6 @@ with tab_deepdive:
                     help=f"{int(pivot.iloc[0]['Trials'])} trials" if not pivot.empty else "",
                 )
 
-            # In-tab TOC for the scroll-heavy By product view —
-            # matches the disease / antigen / sponsor focused-view
-            # TOCs (DEEP_DIVE_DESIGN_REVIEW_2026-05-15.md T3.1).
-            _render_section_toc([
-                ("Pivot",     "pd-pivot"),
-                ("Landscape", "pd-landscape"),
-                ("Timeline",  "pd-timeline"),
-                ("Trials",    "pd-trials"),
-            ])
-
-            _section_anchor("pd-pivot")
             st.caption(
                 f"{len(pivot):,} named products · sorted by trial count · "
                 "click any row for that product's trial list."
@@ -6795,7 +6790,6 @@ with tab_deepdive:
             # carries median enrollment and year range; the only
             # visual pattern this landscape adds over that table is
             # the phase distribution gradient.
-            _section_anchor("pd-landscape")
             st.markdown("##### Product landscape — phase mix")
 
             # Top 10 by trial count. Sort by furthest phase reached
@@ -6894,7 +6888,6 @@ with tab_deepdive:
                     bargap=0.28,
                 )
                 _chart(_prod_phase_fig, key="dd_product_phase_single")
-            _section_anchor("pd-timeline")
             st.markdown("**Annual trial starts by product (top 6)**")
             _chart(
                 _deepdive_timeline(
@@ -6922,7 +6915,6 @@ with tab_deepdive:
                     ["PhaseOrdered", "StartYear", "NCTId"], na_position="last",
                 ).reset_index(drop=True)
 
-                _section_anchor("pd-trials")
                 st.markdown(
                     f"### Trials for **{_picked_product}** "
                     f"<span class='meta-small'>"
@@ -7042,10 +7034,21 @@ with tab_deepdive:
                 return f"{_v}  ({_n} trial{'s' if _n != 1 else ''})"
             _seed_pick_from_query("dd_sponsor_one_pick", _sp_one_options[1:])
 
-            # Sponsor type derives from the sidebar; specific-sponsor
-            # picker stays (no sidebar equivalent — a 100+-option
-            # multiselect was not the right shape for the question).
-            pick = sp_choices[0] if len(sp_choices) == 1 else "—"
+            # Sponsor-type focus resolution (same pattern as
+            # disease / antigen): click-to-focus on the sponsor-type
+            # landscape table OR sidebar narrowing to 1 sponsor type.
+            # Specific-sponsor picker stays (no sidebar equivalent —
+            # a 100+-option multiselect is the wrong shape).
+            _sp_focus = st.session_state.get("dd_sponsor_focus")
+            if _sp_focus and _sp_focus in sp_choices:
+                pick = _sp_focus
+                _sp_from_click = True
+            elif len(sp_choices) == 1:
+                pick = sp_choices[0]
+                _sp_from_click = False
+            else:
+                pick = "—"
+                _sp_from_click = False
             sponsor_pick = st.selectbox(
                 "Focus on a specific sponsor",
                 _sp_one_options,
@@ -7101,15 +7104,6 @@ with tab_deepdive:
                         f"first trial: **{_sm_first}** · most recent: **{_sm_last}**"
                     )
 
-                # In-tab TOC.
-                _render_section_toc([
-                    ("Charts",         "sp-charts"),
-                    ("Portfolio",      "sp-portfolio"),
-                    ("Diseases / antigens", "sp-coverage"),
-                    ("Trial list",     "sp-trials"),
-                ])
-
-                _section_anchor("sp-charts")
                 # ── Charts row (visual gestalt) ──
                 _spA, _spB = st.columns(2)
                 with _spA:
@@ -7127,7 +7121,6 @@ with tab_deepdive:
                         key=f"dd_sponsor_one_timeline_{sponsor_pick}",
                     )
 
-                _section_anchor("sp-portfolio")
                 # ── Product portfolio table (the pharma-intel centrepiece) ──
                 # One row per ProductName: modality, antigen, diseases
                 # covered, phases active, trial count, open trials, and
@@ -7188,7 +7181,6 @@ with tab_deepdive:
                         },
                     )
 
-                _section_anchor("sp-coverage")
                 # ── Aggregate sparkbar lists (compact context) ──
                 _st_a, _st_b = st.columns(2)
                 with _st_a:
@@ -7203,7 +7195,6 @@ with tab_deepdive:
                         spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
                         .fillna("Unspecified").value_counts().head(8)
                     )
-                _section_anchor("sp-trials")
                 # Sponsor's full trial list
                 st.markdown(
                     f"### Trials led by **{sponsor_pick}** "
@@ -7254,14 +7245,24 @@ with tab_deepdive:
                 # ── Landscape view ──
                 st.caption(
                     f"{len(agg)} sponsor categories · sorted by trial "
-                    "count · narrow the sidebar **Sponsor type** filter "
-                    "to one to drill into a single type."
+                    "count · **click any row to drill in.**"
                 )
-                st.dataframe(
+                _sp_iter = st.session_state.get("dd_sponsor_table_iter", 0)
+                _sp_event = st.dataframe(
                     agg, width='stretch', hide_index=True,
                     column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
-                    key="dd_sponsor_landscape_table",
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"dd_sponsor_landscape_table_{_sp_iter}",
                 )
+                _sp_rows_sel = (
+                    _sp_event.selection.rows
+                    if _sp_event and hasattr(_sp_event, "selection") else []
+                )
+                if _sp_rows_sel:
+                    _picked_sp = str(agg.iloc[_sp_rows_sel[0]]["SponsorType"])
+                    if _picked_sp in sp_choices:
+                        st.session_state["dd_sponsor_focus"] = _picked_sp
+                        st.rerun()
 
                 # ── Top sponsors by trial count (with year range) ──
                 # Sponsor-level leaderboard that complements the
@@ -7328,6 +7329,13 @@ with tab_deepdive:
                     # "Sponsor type") is the canonical home for this view.
                     # Removing the duplicate keeps each tab focused.
             else:
+                if _sp_from_click:
+                    if st.button("← Back to landscape", key="dd_sponsor_back",
+                                 help="Return to the cross-type sponsor landscape."):
+                        _iter_v = st.session_state.get("dd_sponsor_table_iter", 0)
+                        st.session_state["dd_sponsor_table_iter"] = _iter_v + 1
+                        st.session_state.pop("dd_sponsor_focus", None)
+                        st.rerun()
                 sub = df_filt[df_filt["SponsorType"] == pick].copy()
 
                 st.markdown(
@@ -7762,11 +7770,10 @@ with tab_deepdive:
 
     # The separate "Specific-sponsor portfolio" block that previously
     # lived here was consolidated into the main `if _active == "By
-    # sponsor":` block above (2026-05-15 restructure per user feedback:
-    # "I don't like that one needs to scroll all the way down to select
-    # the individual sponsor type"). The specific-sponsor picker now
-    # sits beside the sponsor-type picker at the top of the tab, and
-    # selecting a specific sponsor takes priority over the type pick.
+    # sponsor":` block above (2026-05-15). The specific-sponsor picker
+    # sits at the top of the tab; selecting a specific sponsor takes
+    # priority over sponsor-type focus (click-to-focus on the
+    # sponsor-type aggregate table OR sidebar narrowing).
 
     # ===== Compare (side-by-side disease/target — own sub-tab) =====
     if _active == "Compare":
