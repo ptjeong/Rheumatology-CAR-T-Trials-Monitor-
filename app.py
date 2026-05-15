@@ -3565,6 +3565,22 @@ def _sync_pick_to_query(state_key: str, no_focus_sentinels: tuple[str, ...]) -> 
         st.query_params[qkey] = str(val)
 
 
+def _apply_pending_pick(state_key: str) -> None:
+    """Transfer a pending click-to-focus value into a picker's
+    session_state key BEFORE the picker is instantiated.
+
+    Streamlit forbids modifying `st.session_state[key]` after the
+    widget with that key has been instantiated in the same run. The
+    click-to-focus landscape tables sit BELOW their picker on the
+    page, so they cannot write the picker's key directly — they
+    write to `<key>_pending` and call `st.rerun()`; on the next run
+    this helper (called just before the picker's `st.selectbox`)
+    transfers the pending value into the real key."""
+    pending_key = f"{state_key}_pending"
+    if pending_key in st.session_state:
+        st.session_state[state_key] = st.session_state.pop(pending_key)
+
+
 def _any_focus_active() -> bool:
     """True if any Deep Dive focus picker is set to a non-default value.
     Drives the visibility of the "Reset focus" button."""
@@ -5853,6 +5869,7 @@ with tab_deepdive:
                 # meant the reader scrolled past every chart before
                 # discovering the drilldown affordance.
                 disease_choices = agg["Disease"].tolist()
+                _apply_pending_pick("dd_disease_pick")
                 _seed_pick_from_query("dd_disease_pick", disease_choices)
                 pick = st.selectbox(
                     "Focus on a disease",
@@ -5902,7 +5919,11 @@ with tab_deepdive:
                         if (_picked_d in disease_choices
                             and st.session_state.get("dd_disease_last_acted") != _picked_d):
                             st.session_state["dd_disease_last_acted"] = _picked_d
-                            st.session_state["dd_disease_pick"] = _picked_d
+                            # Writing the picker key directly is forbidden
+                            # once the picker has been instantiated this
+                            # run; transferred on next run by
+                            # `_apply_pending_pick`.
+                            st.session_state["dd_disease_pick_pending"] = _picked_d
                             st.rerun()
 
                     # ── Phase 1 additions: landscape-level overview figures ──
@@ -6162,6 +6183,7 @@ with tab_deepdive:
         # caption below the antigen picker (compact + on-context).
         ct1, ct2 = st.columns(2)
         with ct1:
+            _apply_pending_pick("dd_target_pick")
             _seed_pick_from_query("dd_target_pick", _target_options_sorted)
             target_pick = st.selectbox(
                 f"Focus on an antigen target — {len(_antigens_only)} available",
@@ -6502,7 +6524,10 @@ with tab_deepdive:
                 if (_picked_t in _target_options_sorted
                     and st.session_state.get("dd_target_last_acted") != _picked_t):
                     st.session_state["dd_target_last_acted"] = _picked_t
-                    st.session_state["dd_target_pick"] = _picked_t
+                    # Writing the picker key directly is forbidden once
+                    # the picker has been instantiated this run;
+                    # transferred on next run by `_apply_pending_pick`.
+                    st.session_state["dd_target_pick_pending"] = _picked_t
                     st.rerun()
         else:
             st.session_state["dd_target_prev_pick"] = target_pick
@@ -7084,6 +7109,7 @@ with tab_deepdive:
             #   2. Sponsor type picked     → type drilldown
             #   3. Both at default          → cross-type landscape
             sp_choices = agg["SponsorType"].tolist()
+            _apply_pending_pick("dd_sponsor_pick")
             _seed_pick_from_query("dd_sponsor_pick", sp_choices)
 
             # Specific-sponsor options (label-suffixed with count for
@@ -7345,7 +7371,10 @@ with tab_deepdive:
                     if (_picked_sp in sp_choices
                         and st.session_state.get("dd_sponsor_last_acted") != _picked_sp):
                         st.session_state["dd_sponsor_last_acted"] = _picked_sp
-                        st.session_state["dd_sponsor_pick"] = _picked_sp
+                        # Writing the picker key directly is forbidden
+                        # once the picker has been instantiated this run;
+                        # transferred on next run by `_apply_pending_pick`.
+                        st.session_state["dd_sponsor_pick_pending"] = _picked_sp
                         st.rerun()
 
                 # ── Top sponsors by trial count (with year range) ──
