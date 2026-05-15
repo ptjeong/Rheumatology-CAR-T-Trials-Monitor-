@@ -6031,6 +6031,64 @@ with tab_deepdive:
                                 unsafe_allow_html=True,
                             )
 
+                    # ── Product portfolio table (pharma-intel centrepiece) ──
+                    # Mirrors the antigen + sponsor focused-view tables but
+                    # pivoted on "which products are being tested in THIS
+                    # disease?". The Diseases column is dropped (single-
+                    # disease view); Antigen takes its place since products
+                    # within a disease usually vary by target.
+                    if "ProductName" in sub.columns:
+                        st.markdown("##### Products in trials for this disease")
+                        st.caption(
+                            "Aggregated by ProductName. Trials without an "
+                            "inferred product name bucket as “(unnamed)”."
+                        )
+                        _dz_pf = sub.copy()
+                        _dz_pf["ProductName"] = _dz_pf["ProductName"].fillna("(unnamed)")
+                        _dz_pf_rows = []
+                        for _prod_name, _g in _dz_pf.groupby("ProductName", dropna=False):
+                            _g_sponsors = sorted(_g["LeadSponsor"].dropna().unique().tolist())
+                            _g_antigens = sorted(_g.loc[
+                                ~_g["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"}),
+                                "TargetCategory",
+                            ].dropna().unique().tolist())
+                            _g_modalities = sorted(_g["ProductType"].dropna().unique().tolist())
+                            _phase_sorted = _g.dropna(subset=["PhaseLabel"]).sort_values("PhaseOrdered")
+                            _g_phases = _phase_sorted["PhaseLabel"].drop_duplicates().tolist()
+                            _years = _g["StartYearNumeric"]
+                            if _years.notna().any():
+                                _ymin, _ymax = int(_years.min()), int(_years.max())
+                                _yrange = f"{_ymin}–{_ymax}" if _ymin != _ymax else f"{_ymin}"
+                            else:
+                                _yrange = "—"
+                            _dz_pf_rows.append({
+                                "Product":  _prod_name,
+                                "Sponsor":  ", ".join(_g_sponsors) if _g_sponsors else "—",
+                                "Modality": ", ".join(_g_modalities) if _g_modalities else "—",
+                                "Antigen":  ", ".join(_g_antigens) if _g_antigens else "—",
+                                "Phases":   ", ".join(_g_phases) if _g_phases else "—",
+                                "Trials":   len(_g),
+                                "Open":     int(_g["OverallStatus"].isin(OPEN_STATUSES).sum()),
+                                "Years":    _yrange,
+                            })
+                        _dz_pf_df = pd.DataFrame(_dz_pf_rows).sort_values(
+                            ["Trials", "Open"], ascending=[False, False],
+                        ).reset_index(drop=True)
+                        st.dataframe(
+                            _dz_pf_df, width="stretch", hide_index=True,
+                            height=min(380, 50 + 36 * len(_dz_pf_df)),
+                            column_config={
+                                "Product":  st.column_config.TextColumn("Product",  width="medium"),
+                                "Sponsor":  st.column_config.TextColumn("Sponsor",  width="medium"),
+                                "Modality": st.column_config.TextColumn("Modality", width="small"),
+                                "Antigen":  st.column_config.TextColumn("Antigen",  width="small"),
+                                "Phases":   st.column_config.TextColumn("Phases",   width="medium"),
+                                "Trials":   st.column_config.NumberColumn("Trials", width="small", format="%d"),
+                                "Open":     st.column_config.NumberColumn("Open",   width="small", format="%d"),
+                                "Years":    st.column_config.TextColumn("Years",    width="small"),
+                            },
+                        )
+
                     _dd_cols = [c for c in (
                         "NCTId", "NCTLink", "BriefTitle", "TargetCategory", "ProductType",
                         "Phase", "OverallStatus", "LeadSponsor", "StartYear", "Countries",
@@ -7633,79 +7691,45 @@ with tab_deepdive:
             # "how mature is this cohort?" without scrolling past two
             # near-identical charts.
 
-            # ── Sponsor activity over time (top 10 sponsors) ──
-            # Was a 10-line spaghetti chart. With most cells in the 1-3
-            # range, year-over-year fluctuations are statistical noise and
-            # the line crossings made it impossible to read any single
-            # sponsor's trajectory. Heatmap shows the same data legibly:
-            # each cell carries its count, rows scan as one sponsor's
-            # activity-over-time, columns scan as "who was busy in year Y".
-            st.markdown("**Top sponsors — annual trial starts**")
+            # ── Top sponsors by trial count (with year range) ──
+            # Was a 10-row × 5-7 column heatmap of sponsor × year.
+            # Most cells were 0, 1, or 2 — the colour gradient could
+            # not carry information, the eye read it as a sea of
+            # low-saturation cells (same failure mode as the box-plots
+            # the user has dropped multiple times;
+            # DEEP_DIVE_DESIGN_REVIEW_2026-05-15.md T1.2).
+            # Replaced with a sparkbar list — trial count is the
+            # signal, year range a one-glance maturity hint. The "Year-
+            # over-year movers" table directly above already covers
+            # the year-on-year-change question.
+            st.markdown("**Top sponsors by trial count**")
             _sp_top = (
-                df_filt["LeadSponsor"].dropna().value_counts().head(10).index.tolist()
+                df_filt["LeadSponsor"].dropna().value_counts().head(10)
             )
-            _sp_in = df_filt[df_filt["LeadSponsor"].isin(_sp_top)].copy()
-            _sp_in["StartYear"] = _sp_in["StartYearNumeric"]
-            _sp_in = _sp_in.dropna(subset=["StartYear"])
-            _sp_in = _sp_in[_sp_in["StartYear"] <= _today_year()]
-            if not _sp_in.empty:
-                _sp_in["StartYear"] = _sp_in["StartYear"].astype(int)
-                _sp_pivot = (
-                    _sp_in.groupby(["LeadSponsor", "StartYear"]).size()
-                    .unstack(fill_value=0)
-                    .reindex(_sp_top)  # preserve top-10 order
-                    .fillna(0).astype(int)
+            if not _sp_top.empty:
+                _sp_in_all = df_filt[df_filt["LeadSponsor"].isin(_sp_top.index)].copy()
+                _sp_years = _sp_in_all["StartYearNumeric"]
+                _sp_in_all = _sp_in_all.assign(_yr=_sp_years).dropna(subset=["_yr"])
+                _sp_in_all = _sp_in_all[_sp_in_all["_yr"] <= _today_year()]
+                _sp_year_range = (
+                    _sp_in_all.groupby("LeadSponsor")["_yr"]
+                    .agg(["min", "max"])
+                    if not _sp_in_all.empty else pd.DataFrame()
                 )
-                # Sort columns ascending so years read left-to-right
-                _sp_pivot = _sp_pivot.reindex(sorted(_sp_pivot.columns), axis=1)
-                # Truncate long sponsor names for the y-axis tick labels
-                _sp_y_labels = [
-                    (s if len(s) <= 28 else s[:25] + "…")
-                    for s in _sp_pivot.index
+                def _yr_hint(_sp: str) -> str:
+                    if _sp not in _sp_year_range.index:
+                        return ""
+                    _lo = int(_sp_year_range.loc[_sp, "min"])
+                    _hi = int(_sp_year_range.loc[_sp, "max"])
+                    return f"  ({_lo}–{_hi})" if _lo != _hi else f"  ({_lo})"
+                _sp_items = [
+                    (f"{sp}{_yr_hint(sp)}", int(_sp_top[sp]))
+                    for sp in _sp_top.index
                 ]
-                _sp_annotations = [
-                    dict(
-                        x=year, y=sp, text=str(val),
-                        showarrow=False, xref="x", yref="y",
-                        font=dict(
-                            family=FONT_FAMILY, size=10,
-                            color="#f8fafc" if val >= _sp_pivot.values.max() * 0.55 else "#0f172a",
-                        ),
-                    )
-                    for sp, row in zip(_sp_y_labels, _sp_pivot.values)
-                    for year, val in zip(_sp_pivot.columns, row)
-                    if val > 0
-                ]
-                _sp_fig = go.Figure(go.Heatmap(
-                    x=_sp_pivot.columns.tolist(),
-                    y=_sp_y_labels,
-                    z=_sp_pivot.values,
-                    colorscale=[
-                        [0.0, "#f1f5f9"],
-                        [0.15, "#cbd5e1"],
-                        [0.45, "#7dd3fc"],
-                        [0.75, "#0284c7"],
-                        [1.0, "#0c4a6e"],
-                    ],
-                    showscale=False,
-                    hovertemplate=(
-                        "<b>%{y}</b><br>%{x}: %{z} trial(s)<extra></extra>"
-                    ),
-                    xgap=2, ygap=2,
-                ))
-                _sp_fig.update_layout(
-                    height=max(280, len(_sp_top) * 32 + 80),
-                    margin=dict(l=12, r=12, t=8, b=40),
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    xaxis=dict(
-                        tickmode="linear", dtick=1, tickformat="d",
-                        side="bottom", showgrid=False,
-                    ),
-                    yaxis=dict(autorange="reversed", showgrid=False),
-                    annotations=_sp_annotations,
-                    font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                st.markdown(
+                    _topn_sparkbar_html(_sp_items),
+                    unsafe_allow_html=True,
                 )
-                _chart(_sp_fig, key="dd_time_sponsor_activity")
 
             # ── Phase-progression heatmap (start-year × current phase) ──
             # Was a Sankey, but the crossing flow bands made it too busy
