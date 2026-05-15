@@ -6000,46 +6000,6 @@ with tab_deepdive:
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_target")
         elif _target_no_focus:
-            st.markdown(
-                "**Top antigens by trial count** "
-                "<span class='meta-small'>"
-                "— pick a specific antigen above to drill in</span>",
-                unsafe_allow_html=True,
-            )
-            _top_n = 25
-            _landscape = (
-                df_filt.loc[df_filt["TargetCategory"].isin(_antigens_only)]
-                .groupby("TargetCategory")
-                .agg(
-                    Trials=("NCTId", "nunique"),
-                    Sponsors=("LeadSponsor", "nunique"),
-                    Products=("ProductName", "nunique"),
-                    TopDisease=("DiseaseEntity",
-                                lambda s: s.value_counts().index[0] if not s.empty else "—"),
-                    Diseases=("DiseaseEntity",
-                              lambda s: ", ".join(sorted(set(s.dropna()))[:6])),
-                )
-                .reset_index()
-                .sort_values("Trials", ascending=False)
-                .head(_top_n)
-            )
-            st.dataframe(
-                _landscape,
-                width="stretch", height=460, hide_index=True,
-                column_config={
-                    "TargetCategory": st.column_config.TextColumn("Antigen", width="medium"),
-                    "Trials":         st.column_config.NumberColumn("Trials", format="%d", width="small"),
-                    "Sponsors":       st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
-                    "Products":       st.column_config.NumberColumn("# Products", format="%d", width="small", help="Distinct named products (KYV-101, CABA-201, …) targeting this antigen. A high product count signals a crowded competitive field."),
-                    "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
-                    "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
-                },
-            )
-            st.caption(
-                f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
-                "Pick a specific antigen above to see its full focus view."
-            )
-
             # ── Antigen landscape figures (restructured 2026-05-14) ──
             # Previous layout: 2 columns, heatmap on the left (took the
             # full vertical), emergence + phase composition stacked on
@@ -6283,6 +6243,50 @@ with tab_deepdive:
                         xanchor="left",
                     )
                 _chart(_aln_fig, key="dd_target_emerge_phase_aligned")
+
+            # ── Top antigens table (moved below the figures 2026-05-15) ──
+            # Per user feedback, figures come first (visual gestalt /
+            # at-a-glance) and the per-antigen table acts as the
+            # detail-level drilldown beneath them.
+            st.markdown(
+                "**Top antigens by trial count** "
+                "<span class='meta-small'>"
+                "— pick a specific antigen above to drill in</span>",
+                unsafe_allow_html=True,
+            )
+            _top_n = 25
+            _landscape = (
+                df_filt.loc[df_filt["TargetCategory"].isin(_antigens_only)]
+                .groupby("TargetCategory")
+                .agg(
+                    Trials=("NCTId", "nunique"),
+                    Sponsors=("LeadSponsor", "nunique"),
+                    Products=("ProductName", "nunique"),
+                    TopDisease=("DiseaseEntity",
+                                lambda s: s.value_counts().index[0] if not s.empty else "—"),
+                    Diseases=("DiseaseEntity",
+                              lambda s: ", ".join(sorted(set(s.dropna()))[:6])),
+                )
+                .reset_index()
+                .sort_values("Trials", ascending=False)
+                .head(_top_n)
+            )
+            st.dataframe(
+                _landscape,
+                width="stretch", height=460, hide_index=True,
+                column_config={
+                    "TargetCategory": st.column_config.TextColumn("Antigen", width="medium"),
+                    "Trials":         st.column_config.NumberColumn("Trials", format="%d", width="small"),
+                    "Sponsors":       st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
+                    "Products":       st.column_config.NumberColumn("# Products", format="%d", width="small", help="Distinct named products (KYV-101, CABA-201, …) targeting this antigen. A high product count signals a crowded competitive field."),
+                    "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
+                    "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
+                },
+            )
+            st.caption(
+                f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
+                "Pick a specific antigen above to see its full focus view."
+            )
         else:
             # Filter by whichever pickers are set. Either or both can be
             # at "any" — the focused view only narrows on the active axes.
