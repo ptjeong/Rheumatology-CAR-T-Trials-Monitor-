@@ -3435,7 +3435,7 @@ def _sync_pick_to_query(state_key: str, no_focus_sentinels: tuple[str, ...]) -> 
     """Write a single-value picker's session_state back to URL params.
     `no_focus_sentinels` lists the "no selection" values for this
     picker (most use "—"; the target picker uses
-    "(any — show landscape)"). When the picker is at a no-focus
+    "—"). When the picker is at a no-focus
     value, the URL param is removed entirely so a fresh URL stays
     clean."""
     qkey = _FOCUS_PICKER_QPARAM.get(state_key)
@@ -3451,7 +3451,7 @@ def _sync_pick_to_query(state_key: str, no_focus_sentinels: tuple[str, ...]) -> 
 def _any_focus_active() -> bool:
     """True if any Deep Dive focus picker is set to a non-default value.
     Drives the visibility of the "Reset focus" button."""
-    sentinels = {"—", "(any — show landscape)", "", None}
+    sentinels = {"—", "—", "", None}
     return any(
         st.session_state.get(k) not in sentinels
         for k in _FOCUS_PICKER_QPARAM
@@ -3482,7 +3482,7 @@ def _active_sidebar_filters(sync_opt_map: dict[str, list[str]]) -> list[tuple[st
 def _active_focus_picks() -> list[tuple[str, str]]:
     """Return [(picker_label, current_value), ...] for Deep Dive focus
     pickers that are currently set to a non-default value."""
-    sentinels = {"—", "(any — show landscape)", "", None}
+    sentinels = {"—", "—", "", None}
     labels = {
         "dd_disease_pick":     "Disease",
         "dd_target_pick":      "Target",
@@ -5883,7 +5883,7 @@ with tab_deepdive:
                             )
                             if _stalled.empty:
                                 st.caption(
-                                    "✓ All open trials are <3 y old — "
+                                    "All open trials are <3 y old — "
                                     "landscape is fresh."
                                 )
                             else:
@@ -6106,15 +6106,15 @@ with tab_deepdive:
             _seed_pick_from_query("dd_target_pick", _target_options_sorted)
             target_pick = st.selectbox(
                 f"Focus on an antigen target — {len(_antigens_only)} available",
-                ["(any — show landscape)"] + _target_options_sorted,
+                ["—"] + _target_options_sorted,
                 key="dd_target_pick",
                 format_func=lambda t: (
-                    t if t == "(any — show landscape)"
+                    t if t == "—"
                     else f"{t}  ({_target_counts.get(t, 0)} trials)"
                 ),
-                help="Leave at '(any — show landscape)' to see all antigens. Pick one to filter to that antigen — combine with the modality picker for cross-axis narrowing. Catch-all buckets (Other_or_unknown / CAR-T_unspecified) are excluded.",
+                help="Leave at '—' to see all antigens. Pick one to filter to that antigen — combine with the modality picker for cross-axis narrowing. Catch-all buckets (Other_or_unknown / CAR-T_unspecified) are excluded.",
             )
-            _sync_pick_to_query("dd_target_pick", ("(any — show landscape)",))
+            _sync_pick_to_query("dd_target_pick", ("—",))
         with ct2:
             # Modality focus — applies AS A FILTER on top of antigen
             # picker; doesn't reset disease/sponsor sidebar filters.
@@ -6130,7 +6130,7 @@ with tab_deepdive:
         # Compute the focused subset once — used by all focused-view
         # panels below. Landscape renders when both picks are default.
         _target_no_focus = (
-            target_pick == "(any — show landscape)" and modality_pick == "(any)"
+            target_pick == "—" and modality_pick == "(any)"
         )
 
         if df_filt.empty:
@@ -6139,9 +6139,9 @@ with tab_deepdive:
             # Detect user navigating BACK to landscape via the picker
             # — clear the click-tracker so a re-click on the same
             # antigen row re-fires (DEBUG_REVIEW_2026-05-15.md M1).
-            if st.session_state.get("dd_target_prev_pick") not in (None, "(any — show landscape)"):
+            if st.session_state.get("dd_target_prev_pick") not in (None, "—"):
                 st.session_state.pop("dd_target_last_acted", None)
-            st.session_state["dd_target_prev_pick"] = "(any — show landscape)"
+            st.session_state["dd_target_prev_pick"] = "—"
             # ── Antigen landscape figures (restructured 2026-05-14) ──
             # Previous layout: 2 columns, heatmap on the left (took the
             # full vertical), emergence + phase composition stacked on
@@ -6166,7 +6166,7 @@ with tab_deepdive:
                     x_col="TargetCategory", y_col="_Disease",
                     x_label="Antigen target", y_label="Disease entity",
                     max_x=12, max_y=15, height=440,
-                    colorscale="Purples",
+                    colorscale="Blues",
                 ),
                 key="dd_target_landscape_heatmap",
             )
@@ -6450,13 +6450,13 @@ with tab_deepdive:
             # Filter by whichever pickers are set. Either or both can be
             # at "any" — the focused view only narrows on the active axes.
             focus = df_filt.copy()
-            if target_pick != "(any — show landscape)":
+            if target_pick != "—":
                 focus = focus[focus["TargetCategory"] == target_pick]
             if modality_pick != "(any)":
                 focus = focus[focus["Modality"] == modality_pick]
             # Build a human-readable focus label for headings + empty-state
             _focus_parts: list[str] = []
-            if target_pick != "(any — show landscape)":
+            if target_pick != "—":
                 _focus_parts.append(f"target = {target_pick}")
             if modality_pick != "(any)":
                 _focus_parts.append(f"modality = {modality_pick}")
@@ -6502,15 +6502,13 @@ with tab_deepdive:
                 # median-enrollment number was rarely the headline here.
                 m1, m2, m3, m4 = st.columns(4)
                 with m1:
-                    st.metric("Trials", f"{_n:,}", help=f"Focus: {_focus_label}")
+                    st.metric("Trials", f"{_n:,}")
                 with m2:
                     st.metric("Open / recruiting", f"{_rec:,}")
                 with m3:
-                    st.metric("Distinct sponsors", f"{_sponsors:,}",
-                              help=f"across {len(_countries)} countries")
+                    st.metric("Distinct sponsors", f"{_sponsors:,}")
                 with m4:
-                    st.metric("Distinct products", f"{_distinct_products:,}",
-                              help="Named CAR-T products (CT.gov InterventionName → resolved alias) targeting this antigen.")
+                    st.metric("Distinct products", f"{_distinct_products:,}")
 
                 # In-tab TOC — skip-link bar for the long focused view.
                 _render_section_toc([
@@ -6793,7 +6791,7 @@ with tab_deepdive:
 
             st.caption(
                 f"{len(pivot):,} named products · sorted by trial count · "
-                "click any row to see that product's trial list, then click a trial for full details"
+                "click any row for that product's trial list."
             )
             _prod_event = st.dataframe(
                 pivot, width='stretch', height=460, hide_index=True,
@@ -7348,7 +7346,7 @@ with tab_deepdive:
                             _hm_in, x_col="SponsorType", y_col="_Disease",
                             x_label="Sponsor type", y_label="Disease entity",
                             max_x=6, max_y=15, height=440,
-                            colorscale="Greens",
+                            colorscale="Blues",
                         ),
                         key="dd_sponsor_x_disease_heatmap",
                     )
@@ -7376,28 +7374,64 @@ with tab_deepdive:
                     f"</span>",
                     unsafe_allow_html=True,
                 )
+                # Charts-first: phase mix bar at the top brings the
+                # sponsor-type drilldown in line with every other Deep
+                # Dive focused view. Was previously the only chartless
+                # focused view in the section.
+                _stype_phase = (
+                    sub.assign(PhaseLabel=sub.get("PhaseLabel", sub["Phase"]))
+                    .groupby("PhaseLabel").size().reset_index(name="Trials")
+                )
+                _stype_phase["PhaseLabel"] = pd.Categorical(
+                    _stype_phase["PhaseLabel"],
+                    categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_stype_phase["PhaseLabel"])],
+                    ordered=True,
+                )
+                _stype_phase = _stype_phase.sort_values("PhaseLabel")
+                if not _stype_phase.empty:
+                    _chart(
+                        make_bar(_stype_phase, "PhaseLabel", "Trials", height=220),
+                        key=f"dd_sponsor_type_phase_{pick}",
+                    )
                 _top_sponsors = (
                     sub["LeadSponsor"].dropna().value_counts().head(15)
                     .rename_axis("Lead sponsor").reset_index(name="Trials")
                 )
-                st.dataframe(
-                    _top_sponsors, width='stretch', hide_index=True,
-                    column_config=_mini_count_cols("Lead sponsor"),
-                )
+                st.markdown("**Top sponsors**")
+                if not _top_sponsors.empty:
+                    st.markdown(
+                        _topn_sparkbar_html(list(zip(
+                            _top_sponsors["Lead sponsor"].astype(str),
+                            _top_sponsors["Trials"].astype(int),
+                        ))),
+                        unsafe_allow_html=True,
+                    )
                 _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
                 _tgt = (
                     sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                    .fillna("Unknown").value_counts().rename_axis("Target").reset_index(name="Trials")
+                    .fillna("Unspecified").value_counts().rename_axis("Target").reset_index(name="Trials")
                 )
                 cA, cB = st.columns(2)
                 with cA:
                     st.markdown("**Antigen targets**")
-                    st.dataframe(_tgt, width='stretch', hide_index=True,
-                                 column_config=_mini_count_cols("Target"))
+                    if not _tgt.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _tgt["Target"].astype(str),
+                                _tgt["Trials"].astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
                 with cB:
                     st.markdown("**Product types**")
-                    st.dataframe(_prod, width='stretch', hide_index=True,
-                                 column_config=_mini_count_cols("Product"))
+                    if not _prod.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _prod["Product"].astype(str),
+                                _prod["Trials"].astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
 
                 # Trial list with row-click → drilldown
                 _sp_trials = sub.copy()
@@ -7681,12 +7715,9 @@ with tab_deepdive:
             # columns, mature cohorts spread across Phase II/III.
             st.markdown("**Phase-progression heat-map (start year × current phase)**")
             st.caption(
-                "Each cell = trial count for that start-year cohort × "
-                "current phase. Late cohorts (recent years) concentrating "
-                "in early-phase columns is expected; mature cohorts "
-                "spreading across Phase II / III columns signals real "
-                "pipeline progression. Built from snapshot StartYear + "
-                "PhaseLabel."
+                "Cell = trial count for that start-year cohort at its "
+                "current phase. Mature cohorts spreading rightward into "
+                "Phase II / III = real pipeline progression."
             )
             _hm_in = df_filt.copy()
             _hm_in["StartYear"] = _hm_in["StartYearNumeric"]
@@ -7761,8 +7792,7 @@ with tab_deepdive:
         st.subheader("Side-by-side comparator")
         _section_question(
             "Pick any two diseases, antigens, modalities, sponsors, "
-            "or products — see them side-by-side as matched mini-"
-            "dashboards."
+            "or products — matched side-by-side."
         )
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_compare")
