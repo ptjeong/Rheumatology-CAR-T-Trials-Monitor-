@@ -2790,7 +2790,16 @@ def _deepdive_timeline(
     if df_in.empty or "StartYear" not in df_in.columns or group_col not in df_in.columns:
         return go.Figure()
     df = df_in.copy()
-    df["StartYear"] = df["StartYearNumeric"]
+    # Prefer the pre-baked numeric column; fall back to on-the-fly
+    # coercion if the caller passed a frame that didn't go through
+    # `_post_process_trials` (e.g. unit tests, future call sites that
+    # build a DataFrame from scratch). Without this guard, callers
+    # missing the baked column would KeyError silently into a blank
+    # chart cell — flagged as H2 in DEBUG_REVIEW_2026-05-15.md.
+    if "StartYearNumeric" in df.columns:
+        df["StartYear"] = df["StartYearNumeric"]
+    else:
+        df["StartYear"] = pd.to_numeric(df["StartYear"], errors="coerce")
     df = df.dropna(subset=["StartYear"])
     df["StartYear"] = df["StartYear"].astype(int)
     # Clip planned-future StartYears so the rightmost year of the chart
@@ -3224,27 +3233,28 @@ df = _post_process_trials(df)
 if df.empty:
     st.error("No studies were returned. Try broadening the status filters.")
     st.stop()
-# Only recompute DiseaseFamily if it isn't already on disk. Snapshots
-# carry the column for free; skipping the apply on a 290-row frame
-# saves ~50-100 ms per warm rerun. Previously this overwrote the
-# column unconditionally — a snapshot-correct value was thrown away
-# and rebuilt from BriefTitle / Conditions every render.
-if "DiseaseFamily" not in df.columns:
-    df["DiseaseFamily"] = df.apply(
-        lambda r: _disease_family(
-            r.get("DiseaseEntity"),
-            r.get("TrialDesign"),
-            r.get("Conditions"),
-            r.get("BriefTitle"),
-            # Pipe-joined constituent entities — required to detect the
-            # "Rheumatology basket" sub-family. Rheum-only baskets (≥2 of
-            # CTD/IA/Vasc, no non-rheum constituents) get a distinct family
-            # wedge rather than falling into the generic "Multidisease
-            # basket" bucket.
-            r.get("DiseaseEntities"),
-        ),
-        axis=1,
-    )
+# DiseaseFamily is recomputed every load. An earlier "skip if column
+# already present" guard turned out to be dead code — the pipeline
+# (pipeline.py) doesn't write DiseaseFamily to the snapshot CSV, so
+# the guard never short-circuited (DEBUG_REVIEW_2026-05-15.md H4).
+# Either move the apply into the pipeline (so snapshots carry it),
+# or accept the ~50-100 ms cost. We accept the cost for now since the
+# guard would otherwise become misleading on any future write-side change.
+df["DiseaseFamily"] = df.apply(
+    lambda r: _disease_family(
+        r.get("DiseaseEntity"),
+        r.get("TrialDesign"),
+        r.get("Conditions"),
+        r.get("BriefTitle"),
+        # Pipe-joined constituent entities — required to detect the
+        # "Rheumatology basket" sub-family. Rheum-only baskets (≥2 of
+        # CTD/IA/Vasc, no non-rheum constituents) get a distinct family
+        # wedge rather than falling into the generic "Multidisease
+        # basket" bucket.
+        r.get("DiseaseEntities"),
+    ),
+    axis=1,
+)
 # Safety-backfill columns that older cached snapshots may be missing.
 # load_snapshot() handles this on disk, but an in-memory cached DataFrame from
 # a prior deploy can still be served before a cache-clear.
@@ -4632,13 +4642,16 @@ with tab_overview:
             _ra = df_filt.copy()
             _ra["LastUpdatePostDate"] = pd.to_datetime(_ra["LastUpdatePostDate"], errors="coerce")
             _ra = _ra.dropna(subset=["LastUpdatePostDate"])
-            # Timeframe filter: keep rows updated within N days of today
+            # Timeframe filter: keep rows updated within N days of today.
+            # Use locale-naive Timestamp.now() directly — LastUpdatePostDate
+            # is tz-naive calendar-day data. The earlier
+            # `Timestamp.now(tz="UTC").tz_localize(None)` round-trip could
+            # shift the cutoff by up to a calendar day at the timezone
+            # boundary (DEBUG_REVIEW_2026-05-15.md M3).
             _tf_days = _TIMEFRAME_DAYS.get(_ra_timeframe)
             if _tf_days is not None:
-                _cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=_tf_days)
-                # Normalise both sides to tz-naive for comparison safety;
-                # LastUpdatePostDate is stored without tz info.
-                _ra = _ra[_ra["LastUpdatePostDate"] >= _cutoff.tz_localize(None)]
+                _cutoff = pd.Timestamp.now() - pd.Timedelta(days=_tf_days)
+                _ra = _ra[_ra["LastUpdatePostDate"] >= _cutoff]
             if _ra_fam != "All families" and "DiseaseFamily" in _ra.columns:
                 _ra = _ra[_ra["DiseaseFamily"] == _ra_fam]
             if _ra_status == "Open / recruiting":
@@ -5752,6 +5765,15 @@ with tab_deepdive:
 
                 if pick == "—":
                     # ── Landscape view (default) ──
+                    # Detect user navigating BACK to landscape via the
+                    # dropdown — clear the click-tracker so a re-click
+                    # on the same row will re-fire (otherwise
+                    # `last_acted == _picked_d` would veto it, requiring
+                    # the user to click a different row first;
+                    # DEBUG_REVIEW_2026-05-15.md M1).
+                    if st.session_state.get("dd_disease_prev_pick") not in (None, "—"):
+                        st.session_state.pop("dd_disease_last_acted", None)
+                    st.session_state["dd_disease_prev_pick"] = "—"
                     st.caption(
                         f"{len(agg)} diseases · sorted by trial count "
                         "· click any row to focus on that disease"
@@ -5900,6 +5922,7 @@ with tab_deepdive:
 
                 else:
                     # ── Focused view: drilldown for the picked disease ──
+                    st.session_state["dd_disease_prev_pick"] = pick
                     sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Trials", len(sub))
@@ -6113,6 +6136,12 @@ with tab_deepdive:
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_target")
         elif _target_no_focus:
+            # Detect user navigating BACK to landscape via the picker
+            # — clear the click-tracker so a re-click on the same
+            # antigen row re-fires (DEBUG_REVIEW_2026-05-15.md M1).
+            if st.session_state.get("dd_target_prev_pick") not in (None, "(any — show landscape)"):
+                st.session_state.pop("dd_target_last_acted", None)
+            st.session_state["dd_target_prev_pick"] = "(any — show landscape)"
             # ── Antigen landscape figures (restructured 2026-05-14) ──
             # Previous layout: 2 columns, heatmap on the left (took the
             # full vertical), emergence + phase composition stacked on
@@ -6417,6 +6446,7 @@ with tab_deepdive:
                     st.session_state["dd_target_pick"] = _picked_t
                     st.rerun()
         else:
+            st.session_state["dd_target_prev_pick"] = target_pick
             # Filter by whichever pickers are set. Either or both can be
             # at "any" — the focused view only narrows on the active axes.
             focus = df_filt.copy()
@@ -7069,10 +7099,24 @@ with tab_deepdive:
                 if "LeadSponsor" in df_filt.columns
                 else pd.DataFrame(columns=["Sponsor", "Trials"])
             )
-            _sp_one_options = ["—"] + [
-                f"{r['Sponsor']}  ({r['Trials']} trials)"
-                for _, r in _sp_one_counts.iterrows()
-            ]
+            # Use bare sponsor names as the picker's options (URL-stable
+            # across snapshot updates) and surface the trial count via
+            # format_func only at display time. Previous design baked
+            # "Sponsor (N trials)" into the option list and the URL —
+            # when N changed on a snapshot rebuild, the URL value no
+            # longer matched any option, silently dropping the seed
+            # (DEBUG_REVIEW_2026-05-15.md H3).
+            _sp_one_options = ["—"] + _sp_one_counts["Sponsor"].astype(str).tolist()
+            _sp_one_count_map = dict(zip(
+                _sp_one_counts["Sponsor"].astype(str),
+                _sp_one_counts["Trials"].astype(int),
+            ))
+
+            def _fmt_sponsor(_v: str) -> str:
+                if _v == "—":
+                    return "—"
+                _n = _sp_one_count_map.get(_v, 0)
+                return f"{_v}  ({_n} trial{'s' if _n != 1 else ''})"
             _seed_pick_from_query("dd_sponsor_one_pick", _sp_one_options[1:])
 
             _spc1, _spc2 = st.columns(2)
@@ -7084,18 +7128,16 @@ with tab_deepdive:
                 )
                 _sync_pick_to_query("dd_sponsor_pick", ("—",))
             with _spc2:
-                sponsor_pick_label = st.selectbox(
+                sponsor_pick = st.selectbox(
                     "Focus on a specific sponsor",
                     _sp_one_options,
                     key="dd_sponsor_one_pick",
+                    format_func=_fmt_sponsor,
                     help="Leave at '—' for no specific sponsor. Pick a sponsor to see their full portfolio: phases, diseases, antigens, geography, and activity over time. Takes priority over the sponsor-type picker.",
                 )
                 _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
-            sponsor_pick = (
-                sponsor_pick_label.rsplit("  (", 1)[0]
-                if sponsor_pick_label and sponsor_pick_label != "—"
-                else None
-            )
+            if sponsor_pick == "—":
+                sponsor_pick = None
 
             if sponsor_pick:
                 # ── Priority 1: specific-sponsor portfolio ──
@@ -7309,6 +7351,12 @@ with tab_deepdive:
                     )
             elif pick == "—":
                 # ── Landscape view (default) ──
+                # Clear click-tracker on navigation back to landscape
+                # so re-clicking the same row re-fires
+                # (DEBUG_REVIEW_2026-05-15.md M1).
+                if st.session_state.get("dd_sponsor_prev_pick") not in (None, "—"):
+                    st.session_state.pop("dd_sponsor_last_acted", None)
+                st.session_state["dd_sponsor_prev_pick"] = "—"
                 st.caption(
                     f"{len(agg)} sponsor categories · sorted by trial count "
                     "· click any row to focus on that sponsor type"
@@ -7363,6 +7411,7 @@ with tab_deepdive:
                     # "Sponsor type") is the canonical home for this view.
                     # Removing the duplicate keeps each tab focused.
             else:
+                st.session_state["dd_sponsor_prev_pick"] = pick
                 sub = df_filt[df_filt["SponsorType"] == pick].copy()
 
                 st.markdown(
@@ -7785,46 +7834,51 @@ with tab_deepdive:
             )
             # For sponsor / product the option list is potentially
             # long (100+ sponsors, 30+ products) — sort by trial count
-            # descending and show "Name (N trials)" in the label so
-            # the user can pick the most-active items first. For the
-            # other axes, alphabetic sort is fine (≤30 items each).
+            # descending and show "Name (N trials)" via format_func at
+            # display time only. The picker's underlying value stays
+            # the bare name, so session_state survives a sidebar
+            # narrow that changes counts (no need for a separate
+            # resolve step; H3 in DEBUG_REVIEW_2026-05-15.md).
             if _axis_col_cmp in ("LeadSponsor", "ProductName"):
                 _vc = df_filt.loc[~df_filt[_axis_col_cmp].isin(_hidden_cmp), _axis_col_cmp].value_counts()
                 _opts_raw = [str(v) for v in _vc.index]
-                _label_to_value = {
-                    f"{v}  ({int(_vc[v])} trials)": v for v in _opts_raw
-                }
-                _opts_display = list(_label_to_value.keys())
+                _cmp_count_map = {str(k): int(v) for k, v in _vc.items()}
 
-                def _resolve(_label: str) -> str:
-                    return _label_to_value.get(_label, _label)
+                def _fmt_cmp(_v: str) -> str:
+                    _n = _cmp_count_map.get(_v, 0)
+                    return f"{_v}  ({_n} trial{'s' if _n != 1 else ''})"
             else:
                 _opts_raw = sorted(
                     str(v) for v in df_filt[_axis_col_cmp].dropna().unique()
                     if v not in _hidden_cmp
                 )
-                _opts_display = _opts_raw
-                _label_to_value = {v: v for v in _opts_raw}
 
-                def _resolve(_label: str) -> str:
-                    return _label
-            if len(_opts_display) < 2:
+                def _fmt_cmp(_v: str) -> str:
+                    return _v
+            if len(_opts_raw) < 2:
                 st.info(f"Need at least 2 {_cmp_axis.lower()} values to compare.")
             else:
+                # Pop stale picker values when sidebar narrowing has
+                # removed them from the option set
+                # (DEBUG_REVIEW_2026-05-15.md M2).
+                for _ck in ("dd_compare_a", "dd_compare_b"):
+                    if (_ck in st.session_state
+                        and st.session_state[_ck] not in _opts_raw):
+                        st.session_state.pop(_ck, None)
                 _c1, _c2 = st.columns(2)
                 with _c1:
-                    _pick_a_label = st.selectbox(
-                        "Compare A", _opts_display, index=0,
+                    _pick_a = st.selectbox(
+                        "Compare A", _opts_raw, index=0,
+                        format_func=_fmt_cmp,
                         key="dd_compare_a",
                     )
                 with _c2:
-                    _pick_b_label = st.selectbox(
+                    _pick_b = st.selectbox(
                         "Compare B",
-                        _opts_display, index=min(1, len(_opts_display) - 1),
+                        _opts_raw, index=min(1, len(_opts_raw) - 1),
+                        format_func=_fmt_cmp,
                         key="dd_compare_b",
                     )
-                _pick_a = _resolve(_pick_a_label)
-                _pick_b = _resolve(_pick_b_label)
 
                 if _pick_a == _pick_b:
                     st.warning("Pick two different categories.")
