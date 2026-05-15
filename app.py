@@ -7796,47 +7796,75 @@ with tab_deepdive:
     if _active == "Compare":
         st.subheader("Side-by-side comparator")
         _section_question(
-            "Pick any two diseases or antigens — see them side-by-"
-            "side as matched mini-dashboards."
+            "Pick any two diseases, antigens, modalities, sponsors, "
+            "or products — see them side-by-side as matched mini-"
+            "dashboards."
         )
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_compare")
         else:
             _cmp_axis = st.radio(
                 "Comparison axis",
-                options=["Disease entity", "Antigen target", "Modality"],
+                options=["Disease entity", "Antigen target", "Modality",
+                         "Sponsor", "Product"],
                 horizontal=True, key="dd_compare_axis",
             )
             _axis_col_cmp = {
                 "Disease entity": "DiseaseEntity",
                 "Antigen target": "TargetCategory",
                 "Modality":       "Modality",
+                "Sponsor":        "LeadSponsor",
+                "Product":        "ProductName",
             }[_cmp_axis]
             _hidden_cmp = (
                 {"Other_or_unknown", "CAR-T_unspecified"}
                 if _axis_col_cmp == "TargetCategory"
                 else {"Unclassified"} if _axis_col_cmp == "DiseaseEntity"
-                else set()  # Modality has no catch-all to hide
+                else set()  # Modality / Sponsor / Product have no
+                            # catch-all to hide
             )
-            _opts = sorted(
-                v for v in df_filt[_axis_col_cmp].dropna().unique()
-                if v not in _hidden_cmp
-            )
-            if len(_opts) < 2:
-                st.info("Need at least 2 categories on this axis to compare.")
+            # For sponsor / product the option list is potentially
+            # long (100+ sponsors, 30+ products) — sort by trial count
+            # descending and show "Name (N trials)" in the label so
+            # the user can pick the most-active items first. For the
+            # other axes, alphabetic sort is fine (≤30 items each).
+            if _axis_col_cmp in ("LeadSponsor", "ProductName"):
+                _vc = df_filt.loc[~df_filt[_axis_col_cmp].isin(_hidden_cmp), _axis_col_cmp].value_counts()
+                _opts_raw = [str(v) for v in _vc.index]
+                _label_to_value = {
+                    f"{v}  ({int(_vc[v])} trials)": v for v in _opts_raw
+                }
+                _opts_display = list(_label_to_value.keys())
+
+                def _resolve(_label: str) -> str:
+                    return _label_to_value.get(_label, _label)
+            else:
+                _opts_raw = sorted(
+                    str(v) for v in df_filt[_axis_col_cmp].dropna().unique()
+                    if v not in _hidden_cmp
+                )
+                _opts_display = _opts_raw
+                _label_to_value = {v: v for v in _opts_raw}
+
+                def _resolve(_label: str) -> str:
+                    return _label
+            if len(_opts_display) < 2:
+                st.info(f"Need at least 2 {_cmp_axis.lower()} values to compare.")
             else:
                 _c1, _c2 = st.columns(2)
                 with _c1:
-                    _pick_a = st.selectbox(
-                        "Compare A", _opts, index=0,
+                    _pick_a_label = st.selectbox(
+                        "Compare A", _opts_display, index=0,
                         key="dd_compare_a",
                     )
                 with _c2:
-                    _pick_b = st.selectbox(
+                    _pick_b_label = st.selectbox(
                         "Compare B",
-                        _opts, index=min(1, len(_opts) - 1),
+                        _opts_display, index=min(1, len(_opts_display) - 1),
                         key="dd_compare_b",
                     )
+                _pick_a = _resolve(_pick_a_label)
+                _pick_b = _resolve(_pick_b_label)
 
                 if _pick_a == _pick_b:
                     st.warning("Pick two different categories.")
@@ -7870,8 +7898,6 @@ with tab_deepdive:
                         _n_a, _n_b = len(_slice_a), len(_slice_b)
                         _open_a = int(_slice_a["OverallStatus"].isin(OPEN_STATUSES).sum())
                         _open_b = int(_slice_b["OverallStatus"].isin(OPEN_STATUSES).sum())
-                        _spn_a = int(_slice_a["LeadSponsor"].dropna().nunique())
-                        _spn_b = int(_slice_b["LeadSponsor"].dropna().nunique())
 
                         def _kv_block(label: str, a: int, b: int) -> str:
                             return (
@@ -7888,12 +7914,26 @@ with tab_deepdive:
                                 '</div></div>'
                             )
 
+                        # Third KPI tile adapts to the comparison axis. For
+                        # sponsor compare, "Sponsors" is always 1 — show
+                        # "Distinct products" instead. For product compare,
+                        # show distinct sponsors (some products are licensed
+                        # across multiple sponsors).
+                        if _axis_col_cmp == "LeadSponsor":
+                            _m3_label = "Distinct products"
+                            _m3_a = int(_slice_a["ProductName"].dropna().nunique()) if "ProductName" in _slice_a.columns else 0
+                            _m3_b = int(_slice_b["ProductName"].dropna().nunique()) if "ProductName" in _slice_b.columns else 0
+                        else:
+                            _m3_label = "Sponsors"
+                            _m3_a = int(_slice_a["LeadSponsor"].dropna().nunique())
+                            _m3_b = int(_slice_b["LeadSponsor"].dropna().nunique())
+
                         st.markdown(
                             '<div style="display:grid; grid-template-columns:1fr 1fr 1fr;'
                             ' gap:0 24px; padding:6px 0 14px;">'
                             f'{_kv_block("Trials", _n_a, _n_b)}'
                             f'{_kv_block("Open", _open_a, _open_b)}'
-                            f'{_kv_block("Sponsors", _spn_a, _spn_b)}'
+                            f'{_kv_block(_m3_label, _m3_a, _m3_b)}'
                             '</div>',
                             unsafe_allow_html=True,
                         )
@@ -7949,7 +7989,10 @@ with tab_deepdive:
                         )
 
                         # ── Sponsor-type split: paired horizontal 100% bars ──
-                        if "SponsorType" in df_filt.columns:
+                        # Skip when the comparison axis IS LeadSponsor — each
+                        # sponsor maps to a single sponsor-type, so the chart
+                        # collapses to two 100% bars and adds no information.
+                        if "SponsorType" in df_filt.columns and _axis_col_cmp != "LeadSponsor":
                             st.markdown(
                                 "**Sponsor-type split** "
                                 f"<span style='color:{THEME['muted']}; font-weight:400;'>(% of trials)</span>",
@@ -8010,47 +8053,46 @@ with tab_deepdive:
                                 key=f"dd_compare_sptype_paired_{_pick_a}_{_pick_b}",
                             )
 
-                        # ── Other-axis mix: paired sparkbar list ──
-                        if _axis_col_cmp == "DiseaseEntity":
-                            _xlabel, _xcol = "Antigen mix", "TargetCategory"
-                            _hide = _PLATFORM_LABELS | {"Other_or_unknown"}
-                        elif _axis_col_cmp == "TargetCategory":
-                            _xlabel, _xcol = "Disease mix", "DiseaseEntity"
-                            _hide = {"Unclassified"}
-                        else:  # Modality axis → show disease mix
-                            _xlabel, _xcol = "Disease mix", "DiseaseEntity"
-                            _hide = {"Unclassified"}
-                        _a_counts = (
-                            _slice_a.loc[~_slice_a[_xcol].isin(_hide), _xcol]
-                            .value_counts()
-                        )
-                        _b_counts = (
-                            _slice_b.loc[~_slice_b[_xcol].isin(_hide), _xcol]
-                            .value_counts()
-                        )
-                        _union = list(
-                            _a_counts.add(_b_counts, fill_value=0)
-                            .sort_values(ascending=False).head(10).index
-                        )
-                        if _union:
+                        # ── Cross-axis paired sparkbar(s) ──
+                        # Factored into a closure so the sponsor- and
+                        # product-compare cases can render a second
+                        # breakdown without duplicating the HTML loop.
+                        def _render_cross_mix(xcol: str, label: str,
+                                              hide_set: set, head_n: int = 10) -> None:
+                            if xcol not in _slice_a.columns or xcol not in _slice_b.columns:
+                                return
+                            a_counts = (
+                                _slice_a.loc[~_slice_a[xcol].isin(hide_set), xcol]
+                                .dropna().value_counts()
+                            )
+                            b_counts = (
+                                _slice_b.loc[~_slice_b[xcol].isin(hide_set), xcol]
+                                .dropna().value_counts()
+                            )
+                            union = list(
+                                a_counts.add(b_counts, fill_value=0)
+                                .sort_values(ascending=False).head(head_n).index
+                            )
+                            if not union:
+                                return
                             st.markdown(
-                                f"**{_xlabel}** "
+                                f"**{label}** "
                                 f"<span style='color:{THEME['muted']}; font-weight:400;'>"
-                                f"(top {len(_union)} across both)</span>",
+                                f"(top {len(union)} across both)</span>",
                                 unsafe_allow_html=True,
                             )
                             _max = max(
-                                int(_a_counts.reindex(_union, fill_value=0).max()),
-                                int(_b_counts.reindex(_union, fill_value=0).max()),
+                                int(a_counts.reindex(union, fill_value=0).max()),
+                                int(b_counts.reindex(union, fill_value=0).max()),
                                 1,
                             )
-                            _rows: list[str] = []
-                            for _cat in _union:
-                                _av = int(_a_counts.get(_cat, 0))
-                                _bv = int(_b_counts.get(_cat, 0))
+                            _r: list[str] = []
+                            for _cat in union:
+                                _av = int(a_counts.get(_cat, 0))
+                                _bv = int(b_counts.get(_cat, 0))
                                 _ap = max(2, int(round(100 * _av / _max))) if _av else 0
                                 _bp = max(2, int(round(100 * _bv / _max))) if _bv else 0
-                                _rows.append(
+                                _r.append(
                                     '<div style="display:grid;'
                                     ' grid-template-columns: minmax(0,1.4fr) 30px 1fr 30px 1fr;'
                                     ' gap: 0 10px; align-items:center; padding:3px 0;">'
@@ -8072,7 +8114,43 @@ with tab_deepdive:
                                     f'<div style="background:{_COL_B}; height:100%; width:{_bp}%;"></div>'
                                     '</div></div>'
                                 )
-                            st.markdown("".join(_rows), unsafe_allow_html=True)
+                            st.markdown("".join(_r), unsafe_allow_html=True)
+
+                        # Primary cross-axis breakdown — varies per axis.
+                        # For sponsor + product axes we add a SECOND
+                        # breakdown below since both axes benefit from
+                        # >1 cross-cut (e.g., sponsor compare benefits
+                        # from BOTH disease coverage AND antigen
+                        # coverage).
+                        if _axis_col_cmp == "DiseaseEntity":
+                            _render_cross_mix(
+                                "TargetCategory", "Antigen mix",
+                                _PLATFORM_LABELS | {"Other_or_unknown"},
+                            )
+                        elif _axis_col_cmp == "TargetCategory":
+                            _render_cross_mix(
+                                "DiseaseEntity", "Disease mix", {"Unclassified"},
+                            )
+                        elif _axis_col_cmp == "Modality":
+                            _render_cross_mix(
+                                "DiseaseEntity", "Disease mix", {"Unclassified"},
+                            )
+                        elif _axis_col_cmp == "LeadSponsor":
+                            _render_cross_mix(
+                                "DiseaseEntity", "Disease coverage", {"Unclassified"},
+                            )
+                            _render_cross_mix(
+                                "TargetCategory", "Antigen coverage",
+                                _PLATFORM_LABELS | {"Other_or_unknown"},
+                            )
+                        elif _axis_col_cmp == "ProductName":
+                            _render_cross_mix(
+                                "DiseaseEntity", "Indications covered", {"Unclassified"},
+                            )
+                            _render_cross_mix(
+                                "LeadSponsor", "Sponsors developing it",
+                                set(), head_n=8,
+                            )
 
 
 with tab_pub:
