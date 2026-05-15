@@ -2446,6 +2446,19 @@ def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
         out["TargetSource"] = _new_target_sources
         out["ProductType"] = _new_prod_types
         out["ProductTypeSource"] = _new_prod_sources
+    # Canonicalise Stiff-person spelling. Pipeline emits "Stiff_person"
+    # (underscore, matching the other neuro abbreviations NMOSD /
+    # MOGAD / AIE), but it's actually a hyphenated phrase and the
+    # dashboard's neuro-disease reclassifier emits "Stiff-person".
+    # Two display strings for one concept = duplicate entries in the
+    # disease picker; pin the hyphenated form everywhere here.
+    for _disease_col in ("DiseaseEntity", "DiseaseEntities"):
+        if _disease_col in out.columns:
+            out[_disease_col] = (
+                out[_disease_col].astype(str)
+                .str.replace("Stiff_person", "Stiff-person", regex=False)
+            )
+
     # Modality assignment AFTER reclassification — depends on the
     # current TargetCategory / ProductType columns.
     out = _add_modality_vectorized(out)
