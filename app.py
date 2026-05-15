@@ -2386,7 +2386,6 @@ def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
     if raw_df.empty:
         return raw_df
     out = add_phase_columns(raw_df)
-    out = _add_modality_vectorized(out)
     # Bake NCTLink once here so downstream filtered slices inherit it for free
     # instead of rebuilding via a row-wise apply on every widget-driven rerun.
     _nct = out["NCTId"].astype("string")
@@ -2404,6 +2403,10 @@ def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
     # produced the correct "CD20/BCMA dual" label. Re-classification
     # is fast (~30 ms on 290 rows) and the result is @st.cache_data-
     # cached at this function's level, so it runs once per session.
+    #
+    # NOTE: this MUST run before _add_modality_vectorized — the
+    # modality assignment reads TargetCategory + ProductType. Earlier
+    # ordering left Modality stale (DEBUG_REVIEW_2026-05-15.md C1).
     if not out.empty:
         _new_targets: list[str] = []
         _new_target_sources: list[str] = []
@@ -2420,6 +2423,9 @@ def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
         out["TargetSource"] = _new_target_sources
         out["ProductType"] = _new_prod_types
         out["ProductTypeSource"] = _new_prod_sources
+    # Modality assignment AFTER reclassification — depends on the
+    # current TargetCategory / ProductType columns.
+    out = _add_modality_vectorized(out)
     # Bake numeric versions of the two columns that get hit repeatedly
     # with pd.to_numeric(..., errors="coerce") across the render path
     # (EnrollmentCount + StartYear, ~15 call sites total). Doing it once
@@ -4716,6 +4722,13 @@ with tab_overview:
             with st.expander(f"Changes since previous snapshot ({prev_date} → {_pinned_for_diff})", expanded=False):
                 try:
                     df_prev, _, _ = _load_snap(prev_date)
+                    # Post-process both sides so the diff reflects
+                    # ACTUAL day-over-day changes, not the constant
+                    # in-memory reclassification delta that would
+                    # otherwise show up as phantom target / product-
+                    # type changes on every load
+                    # (DEBUG_REVIEW_2026-05-15.md C2).
+                    df_prev = _post_process_trials(df_prev)
                     diff = _snap_diff(df, df_prev)
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Trials added", diff["n_added"])
@@ -6436,8 +6449,11 @@ with tab_deepdive:
                 )
             else:
                 _n = len(focus)
-                _rec = int(focus["OverallStatus"].isin(
-                    ["RECRUITING", "NOT_YET_RECRUITING"]).sum())
+                # Use the canonical OPEN_STATUSES (includes
+                # ENROLLING_BY_INVITATION) — earlier hardcoded 2-status
+                # list disagreed with every other "Open / recruiting"
+                # KPI in the app (DEBUG_REVIEW_2026-05-15.md C3).
+                _rec = int(focus["OverallStatus"].isin(OPEN_STATUSES).sum())
                 _sponsors = int(focus["LeadSponsor"].dropna().nunique())
                 _countries = set()
                 for cs in focus["Countries"].dropna():

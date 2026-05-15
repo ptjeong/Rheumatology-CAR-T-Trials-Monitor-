@@ -7,5 +7,13 @@
     "product_type": "Allogeneic/Off-the-shelf",
     "confidence": "high",
     "notes": "BMS-986515 (Juno / BMS) — healthy-donor allogeneic CD19 CAR-T basket for severe, refractory autoimmune diseases. Trial title and conditions field name only the generic phrase 'autoimmune diseases', so the rule-based classifier lands it in the slate Basket/Multidisease bucket. The product's documented clinical-development plan covers classical-rheum CTD/IIM (SLE, SSc, dermatomyositis/polymyositis), so we manually enumerate those constituents — `is_classical_rheum_basket` then returns True and `_disease_family` routes the trial to the rheum-blue 'Rheumatology basket' wedge alongside the autologous CD19 rheum baskets."
+  },
+  {
+    "nct_id": "NCT04422912",
+    "disease_entity": "Other immune-mediated",
+    "target_category": "CAAR-T",
+    "product_type": "Autologous",
+    "confidence": "high",
+    "notes": "RESET-PV (Cabaletta Bio) — DUAL-arm trial of DSG3-CAART (chimeric autoantibody receptor T cells) OR CABA-201 (CD19 CAR-T) in pemphigus vulgaris. The CABA-201 alias in NAMED_PRODUCT_TARGETS matches the text first and the named_product priority reorder (commit 3b166ca) returns CD19, masking the more clinically distinctive DSG3-CAART arm. Override to CAAR-T because (a) CAAR-T is the unique mechanism this trial pioneered for pemphigus, (b) CABA-201 has standalone trials with proper attribution elsewhere, and (c) the dashboard's CAAR-T category would otherwise be empty / mis-counting. disease_entity field is required by _load_overrides filter — kept as 'Other immune-mediated' (pemphigus vulgaris) to match current classifier. Per DEBUG_REVIEW_2026-05-15.md H1."
   }
 ]
