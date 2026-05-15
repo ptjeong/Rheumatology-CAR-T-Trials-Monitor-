@@ -6450,11 +6450,28 @@ with tab_deepdive:
                     st.session_state["dd_target_table_iter"] = _iter_v + 1
                     st.session_state.pop("dd_target_focus", None)
                     st.rerun()
-            # Filter by whichever sidebar axes narrowed to one value
-            # (or by click-to-focus on the antigen landscape table).
+            # Apply antigen narrowing first so the modality pills (next)
+            # only offer modalities actually present in this antigen.
             focus = df_filt.copy()
             if target_pick != "—":
                 focus = focus[focus["TargetCategory"] == target_pick]
+            # Modality sub-pick: pills picker inside the antigen
+            # focused view so the user can drill to e.g. Allo CD19
+            # without leaving the page. Renders only when the antigen
+            # slice has >1 modality. The sidebar Modality filter still
+            # applies upstream — the pills further narrow within that.
+            if target_pick != "—" and not focus.empty:
+                _mod_within = sorted(set(focus["Modality"].dropna()))
+                if len(_mod_within) > 1:
+                    _mod_choice = st.pills(
+                        f"Modality within {target_pick}",
+                        options=["(all)"] + _mod_within,
+                        default="(all)",
+                        selection_mode="single",
+                        key=f"dd_target_modality_pills_{target_pick}",
+                    )
+                    if _mod_choice and _mod_choice != "(all)":
+                        modality_pick = _mod_choice
             if modality_pick != "(any)":
                 focus = focus[focus["Modality"] == modality_pick]
             # Build a human-readable focus label for headings + empty-state
