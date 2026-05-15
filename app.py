@@ -5637,68 +5637,11 @@ with tab_deepdive:
         unsafe_allow_html=True,
     )
 
-    # ── Active sidebar-filter strip ──────────────────────────────────
-    # Shows which sidebar filters are currently narrowing the data, so
-    # the reader doesn't misinterpret sparse charts as "the field is
-    # small" when in fact three filters are on. Only sidebar filters
-    # cross-cut every chart — Deep Dive focus pickers (disease / target /
-    # etc.) are TAB-LOCAL: picking SLE on the By disease tab doesn't
-    # affect what By target shows. So focus picks aren't included here;
-    # they're visible on their own tab's picker row instead. Per user
-    # feedback (2026-05-15): "there's no cross-tab filtering ... is the
-    # focus display tab and reset actually necessary?" — answer was no.
-    #
-    # The strip only renders when at least one sidebar filter is
-    # narrowed below "all selected".
-    # Smart chip display: when MOST options are selected (e.g. 13 of
-    # 15 targets), invert the rendering to "all except X, Y" — the
-    # naive "first 3 + (N) more" reading was unreadable (a chip
-    # showing "Target: BAFF-R, BCMA, BCMA/CD70 dual +10" implied a
-    # narrowly-filtered view when only 2 items were actually
-    # excluded). Inversion threshold = simple majority: if more than
-    # half the options are selected, show what's been deselected.
-    _sidebar_chips: list[str] = []
-    for _sk, _opts in _sync_opt_map.items():
-        _val = st.session_state.get(_sk)
-        if _val is None or set(_val) == set(_opts):
-            continue
-        _label = _sk.replace("flt_", "").replace("_", " ").title()
-        _excluded = sorted(set(_opts) - set(_val))
-        if _excluded and len(_excluded) < len(_val):
-            # Inverted form: shorter to read
-            _shown = _excluded[:3]
-            _suffix = f" +{len(_excluded) - 3}" if len(_excluded) > 3 else ""
-            _sidebar_chips.append(
-                f"{_label}: all except {', '.join(_shown)}{_suffix}"
-            )
-        else:
-            # Selected form: list the picked items
-            _shown = list(_val)[:3]
-            _suffix = f" +{len(_val) - 3}" if len(_val) > 3 else ""
-            _sidebar_chips.append(f"{_label}: {', '.join(_shown)}{_suffix}")
-    if _sidebar_chips:
-        _PREFIX_STYLE = (
-            'display: inline-block; font-size: 9px; '
-            'font-weight: 600; letter-spacing: 0.08em; '
-            'text-transform: uppercase; '
-            'padding: 2px 6px; margin-right: 6px; border-radius: 3px; '
-            'vertical-align: middle;'
-        )
-        _chip_html_parts = [
-            '<div style="background: #f8fafc; border-left: 3px solid #0284c7; '
-            'padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;">'
-        ]
-        for _c in _sidebar_chips:
-            _chip_html_parts.append(
-                f'<span style="display: inline-block; padding: 2px 10px 2px 4px; '
-                f'margin: 0 6px 4px 0; background: #f0f9ff; '
-                f'color: #0c4a6e; border-radius: 3px; font-size: 12px; '
-                f'border: 1px solid #bae6fd; vertical-align: middle;">'
-                f'<span style="{_PREFIX_STYLE} background: #0284c7; color: white;">Filter</span>'
-                f'{_c}</span>'
-            )
-        _chip_html_parts.append('</div>')
-        st.markdown("".join(_chip_html_parts), unsafe_allow_html=True)
+    # (Active sidebar-filter chip strip removed per user feedback —
+    # the chip wasn't carrying its weight either as readable display
+    # or as a clear "you have filters on" cue. Sidebar filter state
+    # remains visible in the sidebar itself; the trial-count footer
+    # under the hero conveys the narrowing effect.)
 
     # ── Sub-tab structure — stateful radio styled as tabs ────────────────
     # Streamlit's native `st.tabs` does NOT persist the active tab across
