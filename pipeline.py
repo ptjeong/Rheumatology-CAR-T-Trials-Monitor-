@@ -801,6 +801,18 @@ def _assign_product_type(row: dict, target_source: str | None = None) -> tuple[s
     if _contains_any(text, AUTOL_MARKERS):
         return "Autologous", "weak_autologous_marker"
 
+    # CAR-NK platform default: NK-cell CAR products in autoimmune are
+    # predominantly allogeneic (NK cells from healthy donors / iPSC-
+    # derived), even when the text doesn't include an explicit allo
+    # marker. Before this rule, "Anti-CD19/BCMA CAR-NK Cells" trials
+    # defaulted to Autologous — which contradicts the field standard.
+    # Validation run 2026-05-15 confirmed 4 such mis-classifications
+    # in the n=200 sample (NCT07283315, NCT07059169, NCT06792799,
+    # NCT07490041). Same `_contains_any(text, CAR_NK_TERMS)` probe
+    # the target classifier uses.
+    if _contains_any(text, CAR_NK_TERMS) or ("car nk" in text):
+        return "Allogeneic/Off-the-shelf", "carnk_default_allogeneic"
+
     # Default: CAR-T confirmed via any target channel and no allo/in-vivo signal
     if target_source in ("explicit_marker", "named_product", "car_core_fallback"):
         return "Autologous", "default_autologous_no_allo_markers"

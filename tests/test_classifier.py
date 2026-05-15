@@ -231,6 +231,30 @@ class TestProductTypeAssignment:
         assert pt == "In vivo"
         assert src == "explicit_in_vivo_text"
 
+    def test_carnk_defaults_to_allogeneic(self):
+        # Regression: validation run 2026-05-15 surfaced 4 CAR-NK
+        # trials (NCT06518668, NCT06614270, NCT06421701, NCT06464679)
+        # that fell through to the autologous default because the
+        # text had no explicit allogeneic marker. CAR-NK products in
+        # autoimmune are predominantly allogeneic, so the platform
+        # itself should imply allo when no other signal fires.
+        pt, src = _assign_product_type(self._row(
+            BriefTitle="Anti-CD19 CAR-NK Cells in Refractory SLE",
+        ), target_source="explicit_marker")
+        assert pt == "Allogeneic/Off-the-shelf"
+        assert src == "carnk_default_allogeneic"
+
+    def test_carnk_yields_to_explicit_autologous(self):
+        # The CAR-NK default must NOT override an explicit autologous
+        # marker. A self-derived CAR-NK trial (unusual but possible)
+        # would carry "autologous" in the text.
+        pt, src = _assign_product_type(self._row(
+            BriefTitle="Autologous CAR-NK study",
+            BriefSummary="autologous NK cells engineered with anti-CD19 CAR",
+        ))
+        assert pt == "Autologous"
+        assert src == "explicit_autologous"
+
     def test_default_autologous_when_target_known(self):
         # CAR-T confirmed via explicit antigen; no allo/in-vivo signal → default Autologous
         pt, src = _assign_product_type(
