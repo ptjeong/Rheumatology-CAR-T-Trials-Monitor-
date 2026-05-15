@@ -5892,57 +5892,61 @@ with tab_deepdive:
                             return _BUCKETS[3]
                         _open_age["AgeBucket"] = _open_age["TrialAge"].apply(_bucket)
                         _bcnt = _open_age["AgeBucket"].value_counts().reindex(_BUCKETS, fill_value=0)
-                        _ba, _bb = st.columns([0.45, 0.55])
-                        with _ba:
+                        # Stacked vertically (was a 0.45 / 0.55 column split
+                        # that left the stalled-trial table too narrow for
+                        # its Title column — titles truncated mid-word and
+                        # Status / Years / Sponsor columns auto-hid). The
+                        # bucket sparkbar is 4 short rows; fits fine in a
+                        # thin top band while the table gets full width
+                        # for the wide-content columns.
+                        st.markdown(
+                            _topn_sparkbar_html(
+                                [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
+                                color="#0c4a6e",
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        _stalled = _open_age[_open_age["TrialAge"] >= 3].sort_values(
+                            "TrialAge", ascending=False
+                        )
+                        if _stalled.empty:
+                            st.caption(
+                                "All open trials are <3 y old — "
+                                "landscape is fresh."
+                            )
+                        else:
+                            _sd = _stalled[[c for c in (
+                                "NCTId", "BriefTitle", "_Disease",
+                                "PhaseLabel", "OverallStatus",
+                                "TrialAge", "LeadSponsor",
+                            ) if c in _stalled.columns]].copy()
+                            if "OverallStatus" in _sd.columns:
+                                _sd["OverallStatus"] = _sd["OverallStatus"].map(STATUS_DISPLAY).fillna(_sd["OverallStatus"])
+                            _sd = _sd.rename(columns={
+                                "_Disease": "Disease",
+                                "PhaseLabel": "Phase",
+                                "OverallStatus": "Status",
+                                "TrialAge": "Years",
+                                "LeadSponsor": "Sponsor",
+                            })
                             st.markdown(
-                                _topn_sparkbar_html(
-                                    [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
-                                    color="#0c4a6e",
-                                ),
-                                unsafe_allow_html=True,
+                                f"**{len(_stalled)} open trial"
+                                f"{'s' if len(_stalled) != 1 else ''} "
+                                "≥3 y since start**"
                             )
-                        with _bb:
-                            _stalled = _open_age[_open_age["TrialAge"] >= 3].sort_values(
-                                "TrialAge", ascending=False
+                            st.dataframe(
+                                _sd, width='stretch', hide_index=True,
+                                height=min(320, 38 + 36 * len(_sd)),
+                                column_config={
+                                    "NCTId": st.column_config.TextColumn("NCT", width="small"),
+                                    "BriefTitle": st.column_config.TextColumn("Title", width="large"),
+                                    "Disease": st.column_config.TextColumn("Disease", width="small"),
+                                    "Phase": st.column_config.TextColumn("Phase", width="small"),
+                                    "Status": st.column_config.TextColumn("Status", width="small"),
+                                    "Years": st.column_config.NumberColumn("Yrs", width="small", format="%d"),
+                                    "Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
+                                },
                             )
-                            if _stalled.empty:
-                                st.caption(
-                                    "All open trials are <3 y old — "
-                                    "landscape is fresh."
-                                )
-                            else:
-                                _sd = _stalled[[c for c in (
-                                    "NCTId", "BriefTitle", "_Disease",
-                                    "PhaseLabel", "OverallStatus",
-                                    "TrialAge", "LeadSponsor",
-                                ) if c in _stalled.columns]].copy()
-                                if "OverallStatus" in _sd.columns:
-                                    _sd["OverallStatus"] = _sd["OverallStatus"].map(STATUS_DISPLAY).fillna(_sd["OverallStatus"])
-                                _sd = _sd.rename(columns={
-                                    "_Disease": "Disease",
-                                    "PhaseLabel": "Phase",
-                                    "OverallStatus": "Status",
-                                    "TrialAge": "Years",
-                                    "LeadSponsor": "Sponsor",
-                                })
-                                st.markdown(
-                                    f"**{len(_stalled)} open trial"
-                                    f"{'s' if len(_stalled) != 1 else ''} "
-                                    "≥3 y since start**"
-                                )
-                                st.dataframe(
-                                    _sd, width='stretch', hide_index=True,
-                                    height=min(260, 38 + 36 * len(_sd)),
-                                    column_config={
-                                        "NCTId": st.column_config.TextColumn("NCT", width="small"),
-                                        "BriefTitle": st.column_config.TextColumn("Title", width="large"),
-                                        "Disease": st.column_config.TextColumn("Disease", width="small"),
-                                        "Phase": st.column_config.TextColumn("Phase", width="small"),
-                                        "Status": st.column_config.TextColumn("Status", width="small"),
-                                        "Years": st.column_config.NumberColumn("Yrs", width="small", format="%d"),
-                                        "Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
-                                    },
-                                )
 
                 else:
                     # ── Focused view: drilldown for the picked disease ──
