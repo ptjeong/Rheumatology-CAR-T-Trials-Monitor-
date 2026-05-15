@@ -6819,40 +6819,38 @@ with tab_deepdive:
                 mime="text/csv",
             )
 
-            # ── Per-product landscape figures (shared y-axis) ──
-            # Same alignment trick as the antigen landscape: a shared
-            # product-name list sorted by median enrollment ascending
-            # makes both charts read as one panel — phase mix and
-            # enrollment distribution for the same product line up in
-            # the same row. Previously the two charts used different
-            # orderings (both sorted by trial count) but in different
-            # axis directions, so cross-reading was friction-heavy.
-            st.markdown("##### Product landscape — patterns at a glance")
+            # ── Per-product landscape ──
+            # Single-panel phase composition (100% stacked horizontal
+            # bars, one row per product) with the per-product trial
+            # count rendered as a label just past the right edge of
+            # each bar. The earlier two-panel (phase composition +
+            # enrollment box plot) version failed for the box-plot
+            # half: most products have 1-3 trials, so each box was
+            # degenerate, and the wide [0, ~260] x-axis squished
+            # everything against the left. Dropped per user feedback
+            # 2026-05-15. The product portfolio table above already
+            # carries median enrollment and year range; the only
+            # visual pattern this landscape adds over that table is
+            # the phase distribution gradient.
+            st.markdown("##### Product landscape — phase mix")
 
-            # Compute shared product list once. Top 10 by trial count
-            # among products with at least one numeric EnrollmentCount.
-            # Sort by median enrollment ascending (smallest trials at
-            # top; gives the chart a natural "small → big" progression).
-            _prod_enroll = prod_df.copy()
-            _prod_enroll["EnrollmentCount"] = pd.to_numeric(
-                _prod_enroll["EnrollmentCount"], errors="coerce")
-            _prod_with_enroll = _prod_enroll.dropna(subset=["EnrollmentCount"])
-            _prod_counts = _prod_with_enroll["ProductName"].value_counts()
-            _shared_prod_top = _prod_counts.head(10).index.tolist()
-            _med_by_prod = (
-                _prod_with_enroll.loc[
-                    _prod_with_enroll["ProductName"].isin(_shared_prod_top)
-                ].groupby("ProductName")["EnrollmentCount"].median()
-            )
+            # Top 10 by trial count. Sort by furthest phase reached
+            # (descending: most-advanced product at the top) so the
+            # eye reads "where in the pipeline" top → bottom rather
+            # than enrollment-size top → bottom.
+            _prod_counts_all = prod_df["ProductName"].value_counts()
+            _shared_prod_top = _prod_counts_all.head(10).index.tolist()
+            _phase_max_by_prod = {
+                _p: PHASE_ORDER.index(str(
+                    prod_df.loc[prod_df["ProductName"] == _p, "PhaseOrdered"].max()
+                )) if not prod_df.loc[prod_df["ProductName"] == _p, "PhaseOrdered"].dropna().empty else -1
+                for _p in _shared_prod_top
+            }
             _shared_prod_ordered = sorted(
                 _shared_prod_top,
-                key=lambda p: (float(_med_by_prod.get(p, 0)), p),
+                key=lambda p: (-_phase_max_by_prod.get(p, -1), -int(_prod_counts_all.get(p, 0)), p),
             )
 
-            # Same shared-y-axis approach as the antigen landscape: one
-            # make_subplots figure with phase composition (col 1) and
-            # enrollment-size box (col 2) sharing a y-axis. Product
-            # names appear once on the left; rows align pixel-for-pixel.
             _phase_palette_p = {
                 "Early Phase I": "#bae6fd", "Phase I":       "#7dd3fc",
                 "Phase I/II":    "#0ea5e9", "Phase II":      "#0369a1",
@@ -6878,18 +6876,7 @@ with tab_deepdive:
                     if PHASE_LABELS[p] in set(_pp_counts["PhaseLabel"])
                 ]
 
-                _prod_aln_fig = make_subplots(
-                    rows=1, cols=2,
-                    shared_yaxes=True,
-                    column_widths=[0.55, 0.45],
-                    horizontal_spacing=0.02,
-                    subplot_titles=(
-                        "Phase composition by product",
-                        "Enrollment-size distribution by product",
-                    ),
-                )
-                # Col 1: stacked phase bars (one trace per phase, all
-                # ordered so the y-axis lines up).
+                _prod_phase_fig = go.Figure()
                 for _phase_lbl in _pp_label_order:
                     _sub = _pp_counts[_pp_counts["PhaseLabel"] == _phase_lbl]
                     _sub_pivot = (
@@ -6897,7 +6884,7 @@ with tab_deepdive:
                         .reindex(_shared_prod_ordered, fill_value=0.0)
                         .reset_index()
                     )
-                    _prod_aln_fig.add_trace(
+                    _prod_phase_fig.add_trace(
                         go.Bar(
                             x=_sub_pivot["Pct"],
                             y=_sub_pivot["ProductName"],
@@ -6906,56 +6893,34 @@ with tab_deepdive:
                             marker_color=_phase_palette_p.get(_phase_lbl, "#94a3b8"),
                             marker_line_width=0,
                             hovertemplate="<b>%{y}</b><br>" + _phase_lbl + ": %{x:.1f}%<extra></extra>",
-                        ),
-                        row=1, col=1,
+                        )
                     )
-                # Col 2: horizontal box per product, sharing y-axis.
-                _box_in = _prod_with_enroll.loc[
-                    _prod_with_enroll["ProductName"].isin(_shared_prod_ordered)
-                ].copy()
+                # Trial-count annotations sit just past the right edge of
+                # the 100% bar — collapses what used to be a whole
+                # right-panel chart into a single number per row.
                 for _p in _shared_prod_ordered:
-                    _vals = _box_in.loc[_box_in["ProductName"] == _p, "EnrollmentCount"]
-                    if _vals.empty:
-                        continue
-                    _prod_aln_fig.add_trace(
-                        go.Box(
-                            x=_vals, y=[_p] * len(_vals),
-                            name=_p,
-                            marker_color="#0c4a6e",
-                            line_color="#0c4a6e",
-                            fillcolor="rgba(12, 74, 110, 0.14)",
-                            boxpoints="outliers",
-                            marker=dict(size=4, color="#0c4a6e"),
-                            orientation="h",
-                            showlegend=False,
-                            hovertemplate=f"<b>{_p}</b><br>"
-                                          "Min %{x.min}, Median %{median}, Max %{x.max}"
-                                          "<extra></extra>",
-                        ),
-                        row=1, col=2,
+                    _n = int(_prod_counts_all.get(_p, 0))
+                    _prod_phase_fig.add_annotation(
+                        x=102, y=_p,
+                        text=f"<b>{_n}</b> trial{'s' if _n != 1 else ''}",
+                        showarrow=False, xanchor="left", yanchor="middle",
+                        font=dict(family=FONT_FAMILY, size=11, color=THEME["muted"]),
                     )
-                # Shared y-axis applies to BOTH columns; tick labels
-                # render only on col 1 thanks to shared_yaxes.
-                _prod_aln_fig.update_yaxes(
+                _prod_phase_fig.update_yaxes(
                     title=None, showgrid=False,
                     categoryorder="array",
                     categoryarray=_shared_prod_ordered,
                     autorange="reversed",
-                    row=1, col=1,
                 )
-                _prod_aln_fig.update_xaxes(
-                    title_text="Phase mix (%)", range=[0, 100],
-                    row=1, col=1,
+                _prod_phase_fig.update_xaxes(
+                    title_text="Phase mix (%)", range=[0, 130],
+                    tickvals=[0, 25, 50, 75, 100],
                 )
-                _prod_aln_fig.update_xaxes(
-                    title_text="EnrollmentCount",
-                    row=1, col=2,
-                )
-                _prod_aln_fig.update_layout(
-                    height=500,
+                _prod_phase_fig.update_layout(
+                    height=420,
                     barmode="stack",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=130, r=20, t=44, b=120),
+                    margin=dict(l=130, r=20, t=20, b=110),
                     legend=dict(
                         orientation="h", yanchor="top", y=-0.22, x=0,
                         font=dict(family=FONT_FAMILY, size=10),
@@ -6964,17 +6929,7 @@ with tab_deepdive:
                     font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                     bargap=0.28,
                 )
-                # Same per-column left-alignment fix as the antigen panel.
-                # Product panel column_widths=[0.55, 0.45], spacing=0.02.
-                _prod_col_lefts = [0.0, 0.55 + 0.02]
-                for _i, _ann in enumerate(_prod_aln_fig.layout.annotations):
-                    _ann.update(
-                        font=dict(family=FONT_FAMILY, size=13,
-                                  color=THEME["text"]),
-                        x=_prod_col_lefts[_i] if _i < len(_prod_col_lefts) else _ann.x,
-                        xanchor="left",
-                    )
-                _chart(_prod_aln_fig, key="dd_product_phase_enroll_aligned")
+                _chart(_prod_phase_fig, key="dd_product_phase_single")
             st.markdown("**Annual trial starts by product (top 6)**")
             _chart(
                 _deepdive_timeline(
