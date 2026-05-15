@@ -5533,11 +5533,29 @@ with tab_deepdive:
     #
     # The strip only renders when at least one sidebar filter is
     # narrowed below "all selected".
+    # Smart chip display: when MOST options are selected (e.g. 13 of
+    # 15 targets), invert the rendering to "all except X, Y" — the
+    # naive "first 3 + (N) more" reading was unreadable (a chip
+    # showing "Target: BAFF-R, BCMA, BCMA/CD70 dual +10" implied a
+    # narrowly-filtered view when only 2 items were actually
+    # excluded). Inversion threshold = simple majority: if more than
+    # half the options are selected, show what's been deselected.
     _sidebar_chips: list[str] = []
     for _sk, _opts in _sync_opt_map.items():
         _val = st.session_state.get(_sk)
-        if _val is not None and set(_val) != set(_opts):
-            _label = _sk.replace("flt_", "").replace("_", " ").title()
+        if _val is None or set(_val) == set(_opts):
+            continue
+        _label = _sk.replace("flt_", "").replace("_", " ").title()
+        _excluded = sorted(set(_opts) - set(_val))
+        if _excluded and len(_excluded) < len(_val):
+            # Inverted form: shorter to read
+            _shown = _excluded[:3]
+            _suffix = f" +{len(_excluded) - 3}" if len(_excluded) > 3 else ""
+            _sidebar_chips.append(
+                f"{_label}: all except {', '.join(_shown)}{_suffix}"
+            )
+        else:
+            # Selected form: list the picked items
             _shown = list(_val)[:3]
             _suffix = f" +{len(_val) - 3}" if len(_val) > 3 else ""
             _sidebar_chips.append(f"{_label}: {', '.join(_shown)}{_suffix}")
