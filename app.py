@@ -5765,11 +5765,37 @@ with tab_deepdive:
 
                 if pick == "—":
                     # ── Landscape view (default) ──
-                    st.caption(f"{len(agg)} diseases · sorted by trial count")
-                    st.dataframe(
+                    st.caption(
+                        f"{len(agg)} diseases · sorted by trial count "
+                        "· click any row to focus on that disease"
+                    )
+                    _dl_event = st.dataframe(
                         agg, width='stretch', hide_index=True,
                         column_config=_landscape_table_cols("Disease", "Disease"),
+                        on_select="rerun", selection_mode="single-row",
+                        key="dd_disease_landscape_table",
                     )
+                    # Click-to-focus: setting the picker's session_state +
+                    # rerun pushes the user straight to the focused view.
+                    # The "last_acted" guard prevents a re-bounce when the
+                    # user navigates back to landscape — the dataframe
+                    # widget preserves its selection state across reruns,
+                    # so without the guard a preserved [X] selection
+                    # would set the picker to DiseaseX immediately on
+                    # mount.
+                    _dl_rows = (
+                        _dl_event.selection.rows
+                        if _dl_event and hasattr(_dl_event, "selection") else []
+                    )
+                    if not _dl_rows:
+                        st.session_state.pop("dd_disease_last_acted", None)
+                    else:
+                        _picked_d = str(agg.iloc[_dl_rows[0]]["Disease"])
+                        if (_picked_d in disease_choices
+                            and st.session_state.get("dd_disease_last_acted") != _picked_d):
+                            st.session_state["dd_disease_last_acted"] = _picked_d
+                            st.session_state["dd_disease_pick"] = _picked_d
+                            st.rerun()
 
                     # ── Phase 1 additions: landscape-level overview figures ──
                     st.markdown("##### Disease landscape — patterns at a glance")
@@ -6361,7 +6387,7 @@ with tab_deepdive:
                 .sort_values("Trials", ascending=False)
                 .head(_top_n)
             )
-            st.dataframe(
+            _al_event = st.dataframe(
                 _landscape,
                 width="stretch", height=460, hide_index=True,
                 column_config={
@@ -6372,11 +6398,27 @@ with tab_deepdive:
                     "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
                     "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
                 },
+                on_select="rerun", selection_mode="single-row",
+                key="dd_target_landscape_table",
             )
             st.caption(
                 f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
-                "Pick a specific antigen above to see its full focus view."
+                "Click any row to focus on that antigen, or pick above."
             )
+            # Click-to-focus mirror of the disease-landscape pattern.
+            _al_rows = (
+                _al_event.selection.rows
+                if _al_event and hasattr(_al_event, "selection") else []
+            )
+            if not _al_rows:
+                st.session_state.pop("dd_target_last_acted", None)
+            else:
+                _picked_t = str(_landscape.iloc[_al_rows[0]]["TargetCategory"])
+                if (_picked_t in _target_options_sorted
+                    and st.session_state.get("dd_target_last_acted") != _picked_t):
+                    st.session_state["dd_target_last_acted"] = _picked_t
+                    st.session_state["dd_target_pick"] = _picked_t
+                    st.rerun()
         else:
             # Filter by whichever pickers are set. Either or both can be
             # at "any" — the focused view only narrows on the active axes.
@@ -7243,11 +7285,30 @@ with tab_deepdive:
                     )
             elif pick == "—":
                 # ── Landscape view (default) ──
-                st.caption(f"{len(agg)} sponsor categories · sorted by trial count")
-                st.dataframe(
+                st.caption(
+                    f"{len(agg)} sponsor categories · sorted by trial count "
+                    "· click any row to focus on that sponsor type"
+                )
+                _sl_event = st.dataframe(
                     agg, width='stretch', hide_index=True,
                     column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
+                    on_select="rerun", selection_mode="single-row",
+                    key="dd_sponsor_landscape_table",
                 )
+                # Click-to-focus mirror of the disease + antigen pattern.
+                _sl_rows = (
+                    _sl_event.selection.rows
+                    if _sl_event and hasattr(_sl_event, "selection") else []
+                )
+                if not _sl_rows:
+                    st.session_state.pop("dd_sponsor_last_acted", None)
+                else:
+                    _picked_sp = str(agg.iloc[_sl_rows[0]]["SponsorType"])
+                    if (_picked_sp in sp_choices
+                        and st.session_state.get("dd_sponsor_last_acted") != _picked_sp):
+                        st.session_state["dd_sponsor_last_acted"] = _picked_sp
+                        st.session_state["dd_sponsor_pick"] = _picked_sp
+                        st.rerun()
 
                 # ── Phase 1 additions: sponsor-type landscape figures ──
                 st.markdown("##### Sponsor-type landscape — patterns at a glance")
