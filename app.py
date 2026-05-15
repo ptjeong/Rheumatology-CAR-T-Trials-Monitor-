@@ -4636,13 +4636,15 @@ with tab_overview:
                 _ra_view["LastUpdatePostDate"] = _ra_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
                 # No string-pre-truncation: Streamlit's table renders
                 # full text on hover when the column overflows.
-                st.dataframe(
+                _ra_event = st.dataframe(
                     _ra_view, width="stretch", hide_index=True, height=480,
+                    on_select="rerun", selection_mode="single-row",
+                    key="overview_recently_updated_table",
                     column_config={
                         "NCTId":              st.column_config.TextColumn("NCT", width="small"),
                         "BriefTitle":         st.column_config.TextColumn(
                             "Title", width="large",
-                            help="Hover any cell to see the full title.",
+                            help="Hover any cell to see the full title. Click a row for the full trial drilldown.",
                         ),
                         "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
                         "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
@@ -4652,8 +4654,20 @@ with tab_overview:
                 st.caption(
                     f"{len(_ra_view)} trial(s) updated in the "
                     f"{_ra_timeframe.lower()}, matching the filter. "
-                    f"Sorted newest first."
+                    "Sorted newest first · click a row for full details."
                 )
+                _ra_sel = (
+                    _ra_event.selection.rows
+                    if _ra_event and hasattr(_ra_event, "selection") else []
+                )
+                if _ra_sel:
+                    _ra_nct = _ra_view.iloc[_ra_sel[0]]["NCTId"]
+                    _ra_full = df_filt[df_filt["NCTId"] == _ra_nct]
+                    if not _ra_full.empty:
+                        _render_trial_drilldown(
+                            _ra_full.iloc[0],
+                            key_suffix=f"overview_recently_updated_{_ra_nct}",
+                        )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
 
@@ -4734,14 +4748,16 @@ with tab_overview:
                 ]].copy()
                 _rc_view["OverallStatus"] = _rc_view["OverallStatus"].map(STATUS_DISPLAY).fillna(_rc_view["OverallStatus"])
                 _rc_view["LastUpdatePostDate"] = _rc_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
-                st.dataframe(
+                _rc_event = st.dataframe(
                     _rc_view, width="stretch", hide_index=True,
                     height=min(480, 60 + 36 * len(_rc_view)),
+                    on_select="rerun", selection_mode="single-row",
+                    key="overview_recently_closed_table",
                     column_config={
                         "NCTId":              st.column_config.TextColumn("NCT", width="small"),
                         "BriefTitle":         st.column_config.TextColumn(
                             "Title", width="large",
-                            help="Hover any cell to see the full title.",
+                            help="Hover any cell to see the full title. Click a row for the full trial drilldown.",
                         ),
                         "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
                         "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
@@ -4753,8 +4769,20 @@ with tab_overview:
                     f"{len(_rc_view)} trial(s) with closure status in the "
                     f"{_rc_tf.lower()}, matching the filter. Sort proxy: "
                     "LastUpdatePostDate (CT.gov CompletionDate not in "
-                    "this snapshot yet)."
+                    "this snapshot yet) · click a row for full details."
                 )
+                _rc_sel = (
+                    _rc_event.selection.rows
+                    if _rc_event and hasattr(_rc_event, "selection") else []
+                )
+                if _rc_sel:
+                    _rc_nct = _rc_view.iloc[_rc_sel[0]]["NCTId"]
+                    _rc_full = df_filt[df_filt["NCTId"] == _rc_nct]
+                    if not _rc_full.empty:
+                        _render_trial_drilldown(
+                            _rc_full.iloc[0],
+                            key_suffix=f"overview_recently_closed_{_rc_nct}",
+                        )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
 
