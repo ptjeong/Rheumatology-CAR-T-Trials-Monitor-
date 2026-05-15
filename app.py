@@ -2588,6 +2588,46 @@ def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     return fig
 
 
+def _render_sparkbar_panel(
+    source,
+    *,
+    color: str = "#1d4ed8",
+) -> None:
+    """Render a sparkbar list from a `value_counts`-style pandas
+    Series, a `(name, count)`-shaped DataFrame, or a list of
+    (label, count) pairs. Wraps the `st.markdown + unsafe_allow_html`
+    boilerplate that previously repeated ~10× across Deep Dive
+    focused views.
+
+    No-op when the source is empty. Caller still owns the header
+    (`st.markdown("**…**")`) and is expected to render that even
+    when the panel itself short-circuits — so the section title
+    stays visible above an empty placeholder.
+    """
+    if source is None:
+        return
+    if isinstance(source, pd.Series):
+        if source.empty:
+            return
+        items = list(zip(
+            source.index.astype(str).tolist(),
+            source.values.astype(int).tolist(),
+        ))
+    elif isinstance(source, pd.DataFrame):
+        if source.empty or source.shape[1] < 2:
+            return
+        _cols = source.columns.tolist()
+        items = list(zip(
+            source[_cols[0]].astype(str).tolist(),
+            source[_cols[1]].astype(int).tolist(),
+        ))
+    else:
+        items = [(str(k), int(v)) for k, v in source]
+    if not items:
+        return
+    st.markdown(_topn_sparkbar_html(items, color=color), unsafe_allow_html=True)
+
+
 def _render_phase_mix_panel(
     df_slice: pd.DataFrame,
     *,
@@ -5140,16 +5180,7 @@ with tab_geo:
                     )
                     if "Trials" not in _cd.columns:
                         _cd.columns = ["Disease", "Trials"]
-                    if not _cd.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(
-                                list(zip(
-                                    _cd["Disease"].astype(str),
-                                    _cd["Trials"].astype(int),
-                                ))
-                            ),
-                            unsafe_allow_html=True,
-                        )
+                    _render_sparkbar_panel(_cd)
                 with _cdz2:
                     st.markdown("**Top antigens**")
                     _ct = (
@@ -5159,16 +5190,7 @@ with tab_geo:
                         .groupby("TargetCategory").size().sort_values(ascending=False)
                         .head(10).reset_index(name="Trials")
                     )
-                    if not _ct.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(
-                                list(zip(
-                                    _ct["TargetCategory"].astype(str),
-                                    _ct["Trials"].astype(int),
-                                ))
-                            ),
-                            unsafe_allow_html=True,
-                        )
+                    _render_sparkbar_panel(_ct)
 
             _country_geo = _get_geo_sites()
             if not _country_geo.empty:
@@ -5945,12 +5967,9 @@ with tab_deepdive:
                         # bucket sparkbar is 4 short rows; fits fine in a
                         # thin top band while the table gets full width
                         # for the wide-content columns.
-                        st.markdown(
-                            _topn_sparkbar_html(
-                                [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
-                                color="#0c4a6e",
-                            ),
-                            unsafe_allow_html=True,
+                        _render_sparkbar_panel(
+                            [(b, int(_bcnt[b])) for b in _BUCKETS if int(_bcnt[b]) > 0],
+                            color="#0c4a6e",
                         )
                         _stalled = _open_age[_open_age["TrialAge"] >= 3].sort_values(
                             "TrialAge", ascending=False
@@ -6074,24 +6093,10 @@ with tab_deepdive:
                     cA, cB = st.columns(2)
                     with cA:
                         st.markdown("**Antigen targets**")
-                        if not _tgt.empty:
-                            st.markdown(
-                                _topn_sparkbar_html(list(zip(
-                                    _tgt["Target"].astype(str),
-                                    _tgt["Trials"].astype(int),
-                                ))),
-                                unsafe_allow_html=True,
-                            )
+                        _render_sparkbar_panel(_tgt)
                     with cB:
                         st.markdown("**Product types**")
-                        if not _prod.empty:
-                            st.markdown(
-                                _topn_sparkbar_html(list(zip(
-                                    _prod["Product"].astype(str),
-                                    _prod["Trials"].astype(int),
-                                ))),
-                                unsafe_allow_html=True,
-                            )
+                        _render_sparkbar_panel(_prod)
 
                     # ── Product portfolio table (pharma-intel centrepiece) ──
                     # Mirrors the antigen + sponsor focused-view tables but
@@ -6739,32 +6744,16 @@ with tab_deepdive:
                 _spk1, _spk2, _spk3 = st.columns(3)
                 with _spk1:
                     st.markdown("**Modality split**")
-                    _mods = (
+                    _render_sparkbar_panel(
                         focus.get("Modality", pd.Series(dtype=str)).fillna("Unspecified")
                         .value_counts().head(8)
                     )
-                    if not _mods.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _mods.index.astype(str),
-                                _mods.values.astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
                 with _spk2:
                     st.markdown("**Disease family**")
-                    _fam = (
+                    _render_sparkbar_panel(
                         focus.get("DiseaseFamily", pd.Series(dtype=str)).fillna("Unspecified")
                         .value_counts().head(8)
                     )
-                    if not _fam.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _fam.index.astype(str),
-                                _fam.values.astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
                 with _spk3:
                     st.markdown(
                         f"**Top sponsors** "
@@ -6772,15 +6761,9 @@ with tab_deepdive:
                         f"({_sponsors} total)</span>",
                         unsafe_allow_html=True,
                     )
-                    _spons = focus["LeadSponsor"].dropna().value_counts().head(10)
-                    if not _spons.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _spons.index.astype(str),
-                                _spons.values.astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
+                    _render_sparkbar_panel(
+                        focus["LeadSponsor"].dropna().value_counts().head(10)
+                    )
 
                 _section_anchor("ag-trials")
                 # Trial list with row-click → drilldown
@@ -7343,33 +7326,16 @@ with tab_deepdive:
                 _st_a, _st_b = st.columns(2)
                 with _st_a:
                     st.markdown("**Diseases**")
-                    _sdi = (
-                        spt["DiseaseEntity"].fillna("Unspecified").value_counts().head(8)
-                        .rename_axis("Disease").reset_index(name="Trials")
+                    _render_sparkbar_panel(
+                        spt["DiseaseEntity"].fillna("Unspecified")
+                        .value_counts().head(8)
                     )
-                    if not _sdi.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _sdi["Disease"].astype(str),
-                                _sdi["Trials"].astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
                 with _st_b:
                     st.markdown("**Antigen targets**")
-                    _stg = (
+                    _render_sparkbar_panel(
                         spt.loc[~spt["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
                         .fillna("Unspecified").value_counts().head(8)
-                        .rename_axis("Target").reset_index(name="Trials")
                     )
-                    if not _stg.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _stg["Target"].astype(str),
-                                _stg["Trials"].astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
                 _section_anchor("sp-trials")
                 # Sponsor's full trial list
                 st.markdown(
@@ -7496,45 +7462,22 @@ with tab_deepdive:
                 _render_phase_mix_panel(
                     sub, key=f"dd_sponsor_type_phase_{pick}", height=220,
                 )
-                _top_sponsors = (
-                    sub["LeadSponsor"].dropna().value_counts().head(15)
-                    .rename_axis("Lead sponsor").reset_index(name="Trials")
-                )
                 st.markdown("**Top sponsors**")
-                if not _top_sponsors.empty:
-                    st.markdown(
-                        _topn_sparkbar_html(list(zip(
-                            _top_sponsors["Lead sponsor"].astype(str),
-                            _top_sponsors["Trials"].astype(int),
-                        ))),
-                        unsafe_allow_html=True,
-                    )
-                _prod = sub["ProductType"].fillna("Unclear").value_counts().rename_axis("Product").reset_index(name="Trials")
-                _tgt = (
-                    sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
-                    .fillna("Unspecified").value_counts().rename_axis("Target").reset_index(name="Trials")
+                _render_sparkbar_panel(
+                    sub["LeadSponsor"].dropna().value_counts().head(15)
                 )
                 cA, cB = st.columns(2)
                 with cA:
                     st.markdown("**Antigen targets**")
-                    if not _tgt.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _tgt["Target"].astype(str),
-                                _tgt["Trials"].astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
+                    _render_sparkbar_panel(
+                        sub.loc[~sub["TargetCategory"].isin(_PLATFORM_LABELS), "TargetCategory"]
+                        .fillna("Unspecified").value_counts()
+                    )
                 with cB:
                     st.markdown("**Product types**")
-                    if not _prod.empty:
-                        st.markdown(
-                            _topn_sparkbar_html(list(zip(
-                                _prod["Product"].astype(str),
-                                _prod["Trials"].astype(int),
-                            ))),
-                            unsafe_allow_html=True,
-                        )
+                    _render_sparkbar_panel(
+                        sub["ProductType"].fillna("Unclear").value_counts()
+                    )
 
                 # Trial list with row-click → drilldown
                 _sp_trials = sub.copy()
@@ -7771,10 +7714,7 @@ with tab_deepdive:
                     (f"{sp}{_yr_hint(sp)}", int(_sp_top[sp]))
                     for sp in _sp_top.index
                 ]
-                st.markdown(
-                    _topn_sparkbar_html(_sp_items),
-                    unsafe_allow_html=True,
-                )
+                _render_sparkbar_panel(_sp_items)
 
             # ── Phase-progression heatmap (start-year × current phase) ──
             # Was a Sankey, but the crossing flow bands made it too busy
