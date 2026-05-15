@@ -2588,6 +2588,52 @@ def make_bar(df_plot, x, y, height=360, color="#1d4ed8"):
     return fig
 
 
+def _render_phase_mix_panel(
+    df_slice: pd.DataFrame,
+    *,
+    key: str,
+    height: int = 240,
+    config: dict | None = None,
+) -> None:
+    """Render the canonical "Phase mix" panel used by every Deep Dive
+    focused view (By disease / By antigen / By sponsor / sponsor-type
+    drilldown).
+
+    Groups by `PhaseLabel` (falling back to `Phase` if not present),
+    orders categories per `PHASE_ORDER`, renders a vertical bar via
+    `make_bar`, and shells out to `_chart`. No-op when the slice is
+    empty. Replaces four near-identical ~10-line inline blocks across
+    the focused views — single source of truth, single visual
+    language (DEEP_DIVE_DESIGN_REVIEW_2026-05-15.md cross-tab pattern
+    consolidation).
+    """
+    if df_slice.empty:
+        return
+    _phase_col = df_slice.get("PhaseLabel")
+    if _phase_col is None:
+        _phase_col = df_slice.get("Phase", pd.Series("Unknown", index=df_slice.index))
+    _pcts = (
+        df_slice.assign(_PhaseLabel=_phase_col)
+        .groupby("_PhaseLabel").size().reset_index(name="Trials")
+    )
+    _present = [
+        PHASE_LABELS[p] for p in PHASE_ORDER
+        if PHASE_LABELS[p] in set(_pcts["_PhaseLabel"])
+    ]
+    if not _present:
+        return
+    _pcts["_PhaseLabel"] = pd.Categorical(
+        _pcts["_PhaseLabel"], categories=_present, ordered=True,
+    )
+    _pcts = _pcts.sort_values("_PhaseLabel")
+    _pcts = _pcts.rename(columns={"_PhaseLabel": "Phase"})
+    _chart_kwargs: dict = {"key": key}
+    if config is not None:
+        _chart_kwargs["config"] = config
+        _chart_kwargs["width"] = "stretch"
+    _chart(make_bar(_pcts, "Phase", "Trials", height=height), **_chart_kwargs)
+
+
 def _topn_sparkbar_html(
     items: list[tuple[str, int]],
     *,
@@ -5975,21 +6021,9 @@ with tab_deepdive:
                     _dz1, _dz2, _dz3 = st.columns(3)
                     with _dz1:
                         st.markdown("**Phase mix**")
-                        _phase_counts = (
-                            sub.assign(PhaseLabel=sub.get("PhaseLabel", sub["Phase"]))
-                            .groupby("PhaseLabel").size().reset_index(name="Trials")
+                        _render_phase_mix_panel(
+                            sub, key=f"dd_disease_phase_{pick}",
                         )
-                        _phase_counts["PhaseLabel"] = pd.Categorical(
-                            _phase_counts["PhaseLabel"],
-                            categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_phase_counts["PhaseLabel"])],
-                            ordered=True,
-                        )
-                        _phase_counts = _phase_counts.sort_values("PhaseLabel")
-                        if not _phase_counts.empty:
-                            _chart(
-                                make_bar(_phase_counts, "PhaseLabel", "Trials", height=240),
-                                key=f"dd_disease_phase_{pick}",
-                            )
                     with _dz2:
                         st.markdown("**Sponsor-type split**")
                         if "SponsorType" in sub.columns:
@@ -6628,20 +6662,11 @@ with tab_deepdive:
                         )
                 with _ch2:
                     st.markdown("**Phase distribution**")
-                    _phase_counts = (
-                        focus.groupby("PhaseOrdered", observed=False).size()
-                        .reset_index(name="Count")
+                    _render_phase_mix_panel(
+                        focus,
+                        key=f"focus_phase_{_focus_token}",
+                        config=PUB_EXPORT,
                     )
-                    _phase_counts["Phase"] = (
-                        _phase_counts["PhaseOrdered"].astype(str).map(PHASE_LABELS)
-                    )
-                    _phase_counts = _phase_counts[_phase_counts["Count"] > 0]
-                    if not _phase_counts.empty:
-                        _chart(
-                            make_bar(_phase_counts, "Phase", "Count", height=240),
-                            key=f"focus_phase_{_focus_token}",
-                            width="stretch", config=PUB_EXPORT,
-                        )
                 with _ch3:
                     st.markdown("**Annual trial starts**")
                     _chart(
@@ -7239,21 +7264,9 @@ with tab_deepdive:
                 _spA, _spB = st.columns(2)
                 with _spA:
                     st.markdown("**Phase distribution**")
-                    _pcts = (
-                        spt.assign(PhaseLabel=spt.get("PhaseLabel", spt["Phase"]))
-                        .groupby("PhaseLabel").size().reset_index(name="Trials")
+                    _render_phase_mix_panel(
+                        spt, key=f"dd_sponsor_one_phase_{sponsor_pick}",
                     )
-                    _pcts["PhaseLabel"] = pd.Categorical(
-                        _pcts["PhaseLabel"],
-                        categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_pcts["PhaseLabel"])],
-                        ordered=True,
-                    )
-                    _pcts = _pcts.sort_values("PhaseLabel")
-                    if not _pcts.empty:
-                        _chart(
-                            make_bar(_pcts, "PhaseLabel", "Trials", height=240),
-                            key=f"dd_sponsor_one_phase_{sponsor_pick}",
-                        )
                 with _spB:
                     st.markdown("**Cumulative trial starts by disease**")
                     _chart(
@@ -7480,21 +7493,9 @@ with tab_deepdive:
                 # sponsor-type drilldown in line with every other Deep
                 # Dive focused view. Was previously the only chartless
                 # focused view in the section.
-                _stype_phase = (
-                    sub.assign(PhaseLabel=sub.get("PhaseLabel", sub["Phase"]))
-                    .groupby("PhaseLabel").size().reset_index(name="Trials")
+                _render_phase_mix_panel(
+                    sub, key=f"dd_sponsor_type_phase_{pick}", height=220,
                 )
-                _stype_phase["PhaseLabel"] = pd.Categorical(
-                    _stype_phase["PhaseLabel"],
-                    categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_stype_phase["PhaseLabel"])],
-                    ordered=True,
-                )
-                _stype_phase = _stype_phase.sort_values("PhaseLabel")
-                if not _stype_phase.empty:
-                    _chart(
-                        make_bar(_stype_phase, "PhaseLabel", "Trials", height=220),
-                        key=f"dd_sponsor_type_phase_{pick}",
-                    )
                 _top_sponsors = (
                     sub["LeadSponsor"].dropna().value_counts().head(15)
                     .rename_axis("Lead sponsor").reset_index(name="Trials")
