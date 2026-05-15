@@ -3382,36 +3382,37 @@ _FILTER_QPARAM = {
 }
 
 
+# One-time cleanup of stale sidebar-multiselect URL params left over
+# from URLs generated before the retirement of multiselect URL sync
+# (2026-05-15). Without this, existing shared URLs render with the
+# old `?t=…&d=…&s=…` clutter still in the address bar even though
+# the app no longer reads or writes those params.
+for _qk in _FILTER_QPARAM.values():
+    st.query_params.pop(_qk, None)
+
+
 def _seed_filter_from_query(state_key: str, options: list[str]) -> None:
-    """If query string has a value for this filter and session_state doesn't,
-    seed session_state. Unknown tokens are silently dropped."""
-    if state_key in st.session_state:
-        return
-    qkey = _FILTER_QPARAM[state_key]
-    raw = st.query_params.get(qkey)
-    if raw is None:
-        return
-    if isinstance(raw, list):
-        raw = ",".join(raw)
-    items = [x.strip() for x in str(raw).split(",") if x.strip()]
-    opt_set = set(options)
-    valid = [x for x in items if x in opt_set]
-    if valid:
-        st.session_state[state_key] = valid
+    """Multiselect-filter URL round-trip retired 2026-05-15. Function
+    kept as a no-op for callsite compatibility (called from every
+    sidebar multiselect's `_FILTER_KEYS` setup).
+
+    Why: encoding 11 multiselect states in the URL produced ~400-char
+    URLs (e.g. `t=BAFF-R,BCMA,BCMA/CD70 dual,…+10 more`), and the
+    "omit when all-selected" rule degraded over time as new
+    classifier labels appeared in the snapshot (the URL captured the
+    option set at write time; on later loads the snapshot had grown
+    new options the URL didn't know about, so the multiselect read
+    as "narrowed" forever). Sidebar filters are working-state, not
+    shareable-view-state; the shareable bits live in the focus
+    pickers (fd/ft/fsp/…), the tab pill, and the fragment anchor.
+    """
+    del state_key, options  # signature-compat no-op
 
 
 def _sync_filters_to_query(opt_map: dict[str, list[str]]) -> None:
-    """Write current filter state to URL. Omit params that equal 'all selected'."""
-    for state_key, options in opt_map.items():
-        qkey = _FILTER_QPARAM[state_key]
-        val = st.session_state.get(state_key)
-        if val is None:
-            st.query_params.pop(qkey, None)
-            continue
-        if set(val) == set(options):
-            st.query_params.pop(qkey, None)
-        else:
-            st.query_params[qkey] = ",".join(val)
+    """Multiselect-filter URL round-trip retired — see docstring on
+    `_seed_filter_from_query` for rationale. No-op."""
+    del opt_map
 
 
 # ── Deep Dive focus pickers — single-value URL binding ──────────────────────
