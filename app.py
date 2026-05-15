@@ -3531,9 +3531,11 @@ def _sync_filters_to_query(opt_map: dict[str, list[str]]) -> None:
 #
 # Map: session_state key → URL param key.
 _FOCUS_PICKER_QPARAM = {
-    "dd_disease_pick":      "fd",   # focus disease
-    "dd_target_pick":       "ft",   # focus target
-    "dd_sponsor_pick":      "fst",  # focus sponsor type
+    # The disease / target / sponsor-type pickers were retired 2026-05-15
+    # — they duplicated the sidebar's flt_disease / flt_target /
+    # flt_sponsor filters. Specific-sponsor and country pickers stay:
+    # they have no sidebar equivalent (a 100+-option multiselect is the
+    # wrong shape for those questions).
     "dd_sponsor_one_pick":  "fsp",  # focus specific sponsor (label-suffixed)
     "dd_geo_country_pick":  "fco",  # focus country
 }
@@ -3578,22 +3580,6 @@ def _sync_pick_to_query(state_key: str, no_focus_sentinels: tuple[str, ...]) -> 
         st.query_params[qkey] = str(val)
 
 
-def _apply_pending_pick(state_key: str) -> None:
-    """Transfer a pending click-to-focus value into a picker's
-    session_state key BEFORE the picker is instantiated.
-
-    Streamlit forbids modifying `st.session_state[key]` after the
-    widget with that key has been instantiated in the same run. The
-    click-to-focus landscape tables sit BELOW their picker on the
-    page, so they cannot write the picker's key directly — they
-    write to `<key>_pending` and call `st.rerun()`; on the next run
-    this helper (called just before the picker's `st.selectbox`)
-    transfers the pending value into the real key."""
-    pending_key = f"{state_key}_pending"
-    if pending_key in st.session_state:
-        st.session_state[state_key] = st.session_state.pop(pending_key)
-
-
 def _any_focus_active() -> bool:
     """True if any Deep Dive focus picker is set to a non-default value.
     Drives the visibility of the "Reset focus" button."""
@@ -3630,9 +3616,6 @@ def _active_focus_picks() -> list[tuple[str, str]]:
     pickers that are currently set to a non-default value."""
     sentinels = {"—", "—", "", None}
     labels = {
-        "dd_disease_pick":     "Disease",
-        "dd_target_pick":      "Target",
-        "dd_sponsor_pick":     "Sponsor type",
         "dd_sponsor_one_pick": "Sponsor",
         "dd_geo_country_pick": "Country",
     }
@@ -5873,71 +5856,27 @@ with tab_deepdive:
                 )
                 agg["MedianEnrollment"] = agg["MedianEnrollment"].fillna(0).astype(int)
 
-                # ── Focus picker at TOP of tab body ──
-                # Layout restructure 2026-05-15: default = landscape view
-                # (the across-all-diseases summary table + figures below);
-                # picking a specific disease here REPLACES the landscape
-                # with a focused drilldown for that disease. The previous
-                # layout had the picker mid-page after the landscape, which
-                # meant the reader scrolled past every chart before
-                # discovering the drilldown affordance.
+                # Focus is now derived from the sidebar disease filter:
+                # when that filter is narrowed to a single disease, the
+                # tab renders the focused drilldown; otherwise it
+                # renders the landscape. The standalone focus picker +
+                # click-to-focus mechanism were retired 2026-05-15 —
+                # they duplicated work the sidebar filter already did.
                 disease_choices = agg["Disease"].tolist()
-                _apply_pending_pick("dd_disease_pick")
-                _seed_pick_from_query("dd_disease_pick", disease_choices)
-                pick = st.selectbox(
-                    "Focus on a disease",
-                    options=["—"] + disease_choices,
-                    key="dd_disease_pick",
-                    help="Leave at '—' to see the cross-disease landscape. Pick a specific disease to drill into its targets, sponsors, countries, and trial list.",
-                )
-                _sync_pick_to_query("dd_disease_pick", ("—",))
+                pick = disease_choices[0] if len(disease_choices) == 1 else "—"
 
                 if pick == "—":
-                    # ── Landscape view (default) ──
-                    # Detect user navigating BACK to landscape via the
-                    # dropdown — clear the click-tracker so a re-click
-                    # on the same row will re-fire (otherwise
-                    # `last_acted == _picked_d` would veto it, requiring
-                    # the user to click a different row first;
-                    # DEBUG_REVIEW_2026-05-15.md M1).
-                    if st.session_state.get("dd_disease_prev_pick") not in (None, "—"):
-                        st.session_state.pop("dd_disease_last_acted", None)
-                    st.session_state["dd_disease_prev_pick"] = "—"
+                    # ── Landscape view ──
                     st.caption(
                         f"{len(agg)} diseases · sorted by trial count "
-                        "· click any row to focus on that disease"
+                        "· narrow the sidebar **Disease entity** filter "
+                        "to one to drill into a single disease."
                     )
-                    _dl_event = st.dataframe(
+                    st.dataframe(
                         agg, width='stretch', hide_index=True,
                         column_config=_landscape_table_cols("Disease", "Disease"),
-                        on_select="rerun", selection_mode="single-row",
                         key="dd_disease_landscape_table",
                     )
-                    # Click-to-focus: setting the picker's session_state +
-                    # rerun pushes the user straight to the focused view.
-                    # The "last_acted" guard prevents a re-bounce when the
-                    # user navigates back to landscape — the dataframe
-                    # widget preserves its selection state across reruns,
-                    # so without the guard a preserved [X] selection
-                    # would set the picker to DiseaseX immediately on
-                    # mount.
-                    _dl_rows = (
-                        _dl_event.selection.rows
-                        if _dl_event and hasattr(_dl_event, "selection") else []
-                    )
-                    if not _dl_rows:
-                        st.session_state.pop("dd_disease_last_acted", None)
-                    else:
-                        _picked_d = str(agg.iloc[_dl_rows[0]]["Disease"])
-                        if (_picked_d in disease_choices
-                            and st.session_state.get("dd_disease_last_acted") != _picked_d):
-                            st.session_state["dd_disease_last_acted"] = _picked_d
-                            # Writing the picker key directly is forbidden
-                            # once the picker has been instantiated this
-                            # run; transferred on next run by
-                            # `_apply_pending_pick`.
-                            st.session_state["dd_disease_pick_pending"] = _picked_d
-                            st.rerun()
 
                     # ── Phase 1 additions: landscape-level overview figures ──
                     st.markdown("##### Disease landscape — patterns at a glance")
@@ -5980,8 +5919,7 @@ with tab_deepdive:
                     # the ≥3 y stalled bucket).
 
                 else:
-                    # ── Focused view: drilldown for the picked disease ──
-                    st.session_state["dd_disease_prev_pick"] = pick
+                    # ── Focused view: drilldown for the single disease ──
                     sub = dd_df[dd_df["_Disease"] == pick].drop_duplicates(subset=["NCTId"])
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Trials", len(sub))
@@ -6183,46 +6121,20 @@ with tab_deepdive:
             _antigens_only, key=lambda t: -_target_counts.get(t, 0)
         )
 
-        # Two focus dimensions in By target: antigen AND modality. Picking
-        # antigen=CD19 + modality=Allogeneic shows the allogeneic CD19
-        # sub-population. Each picker independently defaults to "any" so
-        # the user can focus on one axis at a time. The landscape view
-        # renders when BOTH are at "any".
+        # Focus is now derived from the sidebar Antigen target +
+        # Modality filters: when either narrows the data to a single
+        # antigen or single modality, the focused view renders;
+        # otherwise it's the cross-antigen landscape. Standalone focus
+        # pickers + click-to-focus were retired 2026-05-15 — the
+        # sidebar already had the equivalent filters and the second
+        # mechanism was friction without payoff.
         _modality_options_dd = [m for m in _MODALITY_ORDER if m in set(df_filt["Modality"])]
-        # Two focus pickers, 50/50 split. The previous layout had a
-        # third column showing a small "Antigens N" metric tile — that
-        # standalone count number didn't add enough value to earn its
-        # ~20% of horizontal space. The count now lives as a small
-        # caption below the antigen picker (compact + on-context).
-        ct1, ct2 = st.columns(2)
-        with ct1:
-            _apply_pending_pick("dd_target_pick")
-            _seed_pick_from_query("dd_target_pick", _target_options_sorted)
-            target_pick = st.selectbox(
-                f"Focus on an antigen target — {len(_antigens_only)} available",
-                ["—"] + _target_options_sorted,
-                key="dd_target_pick",
-                format_func=lambda t: (
-                    t if t == "—"
-                    else f"{t}  ({_target_counts.get(t, 0)} trials)"
-                ),
-                help="Leave at '—' to see all antigens. Pick one to filter to that antigen — combine with the modality picker for cross-axis narrowing. Catch-all buckets (Other_or_unknown / CAR-T_unspecified) are excluded.",
-            )
-            _sync_pick_to_query("dd_target_pick", ("—",))
-        with ct2:
-            # Modality focus — applies AS A FILTER on top of antigen
-            # picker; doesn't reset disease/sponsor sidebar filters.
-            _seed_pick_from_query("dd_target_modality_pick", _modality_options_dd)
-            modality_pick = st.selectbox(
-                f"Focus on a modality — {len(_modality_options_dd)} available",
-                ["(any)"] + _modality_options_dd,
-                key="dd_target_modality_pick",
-                help="Applies as an additional filter on top of the antigen pick. Leave at '(any)' for no modality filter.",
-            )
-            _sync_pick_to_query("dd_target_modality_pick", ("(any)",))
-
-        # Compute the focused subset once — used by all focused-view
-        # panels below. Landscape renders when both picks are default.
+        target_pick = (
+            _target_options_sorted[0] if len(_target_options_sorted) == 1 else "—"
+        )
+        modality_pick = (
+            _modality_options_dd[0] if len(_modality_options_dd) == 1 else "(any)"
+        )
         _target_no_focus = (
             target_pick == "—" and modality_pick == "(any)"
         )
@@ -6230,12 +6142,6 @@ with tab_deepdive:
         if df_filt.empty:
             _empty_state_panel(_sync_opt_map, caller_id="dd_target")
         elif _target_no_focus:
-            # Detect user navigating BACK to landscape via the picker
-            # — clear the click-tracker so a re-click on the same
-            # antigen row re-fires (DEBUG_REVIEW_2026-05-15.md M1).
-            if st.session_state.get("dd_target_prev_pick") not in (None, "—"):
-                st.session_state.pop("dd_target_last_acted", None)
-            st.session_state["dd_target_prev_pick"] = "—"
             # ── Antigen landscape figures (restructured 2026-05-14) ──
             # Previous layout: 2 columns, heatmap on the left (took the
             # full vertical), emergence + phase composition stacked on
@@ -6507,7 +6413,7 @@ with tab_deepdive:
                 .sort_values("Trials", ascending=False)
                 .head(_top_n)
             )
-            _al_event = st.dataframe(
+            st.dataframe(
                 _landscape,
                 width="stretch", height=460, hide_index=True,
                 column_config={
@@ -6518,34 +6424,16 @@ with tab_deepdive:
                     "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
                     "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
                 },
-                on_select="rerun", selection_mode="single-row",
                 key="dd_target_landscape_table",
             )
             st.caption(
                 f"Showing top {len(_landscape)} of {len(_antigens_only)} antigens. "
-                "Click any row to focus on that antigen, or pick above."
+                "Narrow the sidebar **Antigen target** filter to one to drill in."
             )
-            # Click-to-focus mirror of the disease-landscape pattern.
-            _al_rows = (
-                _al_event.selection.rows
-                if _al_event and hasattr(_al_event, "selection") else []
-            )
-            if not _al_rows:
-                st.session_state.pop("dd_target_last_acted", None)
-            else:
-                _picked_t = str(_landscape.iloc[_al_rows[0]]["TargetCategory"])
-                if (_picked_t in _target_options_sorted
-                    and st.session_state.get("dd_target_last_acted") != _picked_t):
-                    st.session_state["dd_target_last_acted"] = _picked_t
-                    # Writing the picker key directly is forbidden once
-                    # the picker has been instantiated this run;
-                    # transferred on next run by `_apply_pending_pick`.
-                    st.session_state["dd_target_pick_pending"] = _picked_t
-                    st.rerun()
         else:
-            st.session_state["dd_target_prev_pick"] = target_pick
-            # Filter by whichever pickers are set. Either or both can be
-            # at "any" — the focused view only narrows on the active axes.
+            # Filter by whichever sidebar axes narrowed to one value.
+            # Either or both can be at the no-focus sentinel — the
+            # focused view only narrows on the active axes.
             focus = df_filt.copy()
             if target_pick != "—":
                 focus = focus[focus["TargetCategory"] == target_pick]
@@ -7118,12 +7006,13 @@ with tab_deepdive:
             #
             # Priority logic (specific-sponsor wins because it's the
             # narrower scope):
-            #   1. Specific sponsor picked → that sponsor's portfolio
-            #   2. Sponsor type picked     → type drilldown
-            #   3. Both at default          → cross-type landscape
+            #   1. Specific sponsor picked          → that sponsor's portfolio
+            #   2. Sidebar narrowed to 1 type       → type drilldown
+            #   3. Multiple types in sidebar        → cross-type landscape
+            # The sponsor-TYPE focus is now derived from the sidebar
+            # `flt_sponsor` filter (which is the same axis); the
+            # standalone dropdown was retired 2026-05-15.
             sp_choices = agg["SponsorType"].tolist()
-            _apply_pending_pick("dd_sponsor_pick")
-            _seed_pick_from_query("dd_sponsor_pick", sp_choices)
 
             # Specific-sponsor options (label-suffixed with count for
             # quick scan; the bare name is recovered post-selection).
@@ -7153,23 +7042,18 @@ with tab_deepdive:
                 return f"{_v}  ({_n} trial{'s' if _n != 1 else ''})"
             _seed_pick_from_query("dd_sponsor_one_pick", _sp_one_options[1:])
 
-            _spc1, _spc2 = st.columns(2)
-            with _spc1:
-                pick = st.selectbox(
-                    "Focus on a sponsor type",
-                    options=["—"] + sp_choices, key="dd_sponsor_pick",
-                    help="Leave at '—' to see the cross-type landscape. Pick a type (Industry / Academic / Gov / Other) to see its top sponsors, antigens, and product mix.",
-                )
-                _sync_pick_to_query("dd_sponsor_pick", ("—",))
-            with _spc2:
-                sponsor_pick = st.selectbox(
-                    "Focus on a specific sponsor",
-                    _sp_one_options,
-                    key="dd_sponsor_one_pick",
-                    format_func=_fmt_sponsor,
-                    help="Leave at '—' for no specific sponsor. Pick a sponsor to see their full portfolio: phases, diseases, antigens, geography, and activity over time. Takes priority over the sponsor-type picker.",
-                )
-                _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
+            # Sponsor type derives from the sidebar; specific-sponsor
+            # picker stays (no sidebar equivalent — a 100+-option
+            # multiselect was not the right shape for the question).
+            pick = sp_choices[0] if len(sp_choices) == 1 else "—"
+            sponsor_pick = st.selectbox(
+                "Focus on a specific sponsor",
+                _sp_one_options,
+                key="dd_sponsor_one_pick",
+                format_func=_fmt_sponsor,
+                help="Leave at '—' for no specific sponsor. Pick a sponsor to see their full portfolio: phases, diseases, antigens, geography, and activity over time. Takes priority over the sidebar's sponsor-type filter.",
+            )
+            _sync_pick_to_query("dd_sponsor_one_pick", ("—",))
             if sponsor_pick == "—":
                 sponsor_pick = None
 
@@ -7355,40 +7239,17 @@ with tab_deepdive:
                         key_suffix=f"deep_sponsor_one_{sponsor_pick}",
                     )
             elif pick == "—":
-                # ── Landscape view (default) ──
-                # Clear click-tracker on navigation back to landscape
-                # so re-clicking the same row re-fires
-                # (DEBUG_REVIEW_2026-05-15.md M1).
-                if st.session_state.get("dd_sponsor_prev_pick") not in (None, "—"):
-                    st.session_state.pop("dd_sponsor_last_acted", None)
-                st.session_state["dd_sponsor_prev_pick"] = "—"
+                # ── Landscape view ──
                 st.caption(
-                    f"{len(agg)} sponsor categories · sorted by trial count "
-                    "· click any row to focus on that sponsor type"
+                    f"{len(agg)} sponsor categories · sorted by trial "
+                    "count · narrow the sidebar **Sponsor type** filter "
+                    "to one to drill into a single type."
                 )
-                _sl_event = st.dataframe(
+                st.dataframe(
                     agg, width='stretch', hide_index=True,
                     column_config=_landscape_table_cols("SponsorType", "Sponsor type"),
-                    on_select="rerun", selection_mode="single-row",
                     key="dd_sponsor_landscape_table",
                 )
-                # Click-to-focus mirror of the disease + antigen pattern.
-                _sl_rows = (
-                    _sl_event.selection.rows
-                    if _sl_event and hasattr(_sl_event, "selection") else []
-                )
-                if not _sl_rows:
-                    st.session_state.pop("dd_sponsor_last_acted", None)
-                else:
-                    _picked_sp = str(agg.iloc[_sl_rows[0]]["SponsorType"])
-                    if (_picked_sp in sp_choices
-                        and st.session_state.get("dd_sponsor_last_acted") != _picked_sp):
-                        st.session_state["dd_sponsor_last_acted"] = _picked_sp
-                        # Writing the picker key directly is forbidden
-                        # once the picker has been instantiated this run;
-                        # transferred on next run by `_apply_pending_pick`.
-                        st.session_state["dd_sponsor_pick_pending"] = _picked_sp
-                        st.rerun()
 
                 # ── Top sponsors by trial count (with year range) ──
                 # Sponsor-level leaderboard that complements the
@@ -7455,7 +7316,6 @@ with tab_deepdive:
                     # "Sponsor type") is the canonical home for this view.
                     # Removing the duplicate keeps each tab focused.
             else:
-                st.session_state["dd_sponsor_prev_pick"] = pick
                 sub = df_filt[df_filt["SponsorType"] == pick].copy()
 
                 st.markdown(
