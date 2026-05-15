@@ -7348,6 +7348,42 @@ with tab_deepdive:
                         st.session_state["dd_sponsor_pick"] = _picked_sp
                         st.rerun()
 
+                # ── Top sponsors by trial count (with year range) ──
+                # Sponsor-level leaderboard that complements the
+                # sponsor-type aggregate table directly above (which
+                # only shows the 4-bucket Industry/Academic/Gov/Other
+                # split). The year-range parenthetical is a one-glance
+                # maturity hint without committing to a full temporal
+                # chart. Moved here from the By time tab 2026-05-15 —
+                # the question it answers ("who's most active?") is
+                # fundamentally a sponsor question, and By time's
+                # other panels already cover growth / cohort maturity.
+                st.markdown("**Top sponsors by trial count**")
+                _sp_top = (
+                    df_filt["LeadSponsor"].dropna().value_counts().head(10)
+                )
+                if not _sp_top.empty:
+                    _sp_in_all = df_filt[df_filt["LeadSponsor"].isin(_sp_top.index)].copy()
+                    _sp_years = _sp_in_all["StartYearNumeric"]
+                    _sp_in_all = _sp_in_all.assign(_yr=_sp_years).dropna(subset=["_yr"])
+                    _sp_in_all = _sp_in_all[_sp_in_all["_yr"] <= _today_year()]
+                    _sp_year_range = (
+                        _sp_in_all.groupby("LeadSponsor")["_yr"]
+                        .agg(["min", "max"])
+                        if not _sp_in_all.empty else pd.DataFrame()
+                    )
+                    def _yr_hint(_sp: str) -> str:
+                        if _sp not in _sp_year_range.index:
+                            return ""
+                        _lo = int(_sp_year_range.loc[_sp, "min"])
+                        _hi = int(_sp_year_range.loc[_sp, "max"])
+                        return f"  ({_lo}–{_hi})" if _lo != _hi else f"  ({_lo})"
+                    _sp_items = [
+                        (f"{sp}{_yr_hint(sp)}", int(_sp_top[sp]))
+                        for sp in _sp_top.index
+                    ]
+                    _render_sparkbar_panel(_sp_items)
+
                 # ── Phase 1 additions: sponsor-type landscape figures ──
                 st.markdown("##### Sponsor-type landscape — patterns at a glance")
                 _spl_a, _spl_b = st.columns(2)
@@ -7611,42 +7647,11 @@ with tab_deepdive:
             # "how mature is this cohort?" without scrolling past two
             # near-identical charts.
 
-            # ── Top sponsors by trial count (with year range) ──
-            # Was a 10-row × 5-7 column heatmap of sponsor × year.
-            # Most cells were 0, 1, or 2 — the colour gradient could
-            # not carry information, the eye read it as a sea of
-            # low-saturation cells (same failure mode as the box-plots
-            # the user has dropped multiple times;
-            # DEEP_DIVE_DESIGN_REVIEW_2026-05-15.md T1.2).
-            # Replaced with a sparkbar list — trial count is the
-            # signal, year range a one-glance maturity hint. The "Year-
-            # over-year movers" table directly above already covers
-            # the year-on-year-change question.
-            st.markdown("**Top sponsors by trial count**")
-            _sp_top = (
-                df_filt["LeadSponsor"].dropna().value_counts().head(10)
-            )
-            if not _sp_top.empty:
-                _sp_in_all = df_filt[df_filt["LeadSponsor"].isin(_sp_top.index)].copy()
-                _sp_years = _sp_in_all["StartYearNumeric"]
-                _sp_in_all = _sp_in_all.assign(_yr=_sp_years).dropna(subset=["_yr"])
-                _sp_in_all = _sp_in_all[_sp_in_all["_yr"] <= _today_year()]
-                _sp_year_range = (
-                    _sp_in_all.groupby("LeadSponsor")["_yr"]
-                    .agg(["min", "max"])
-                    if not _sp_in_all.empty else pd.DataFrame()
-                )
-                def _yr_hint(_sp: str) -> str:
-                    if _sp not in _sp_year_range.index:
-                        return ""
-                    _lo = int(_sp_year_range.loc[_sp, "min"])
-                    _hi = int(_sp_year_range.loc[_sp, "max"])
-                    return f"  ({_lo}–{_hi})" if _lo != _hi else f"  ({_lo})"
-                _sp_items = [
-                    (f"{sp}{_yr_hint(sp)}", int(_sp_top[sp]))
-                    for sp in _sp_top.index
-                ]
-                _render_sparkbar_panel(_sp_items)
+            # "Top sponsors by trial count" sparkbar moved to By
+            # sponsor landscape 2026-05-15 — the question it answers
+            # ("who's most active?") is fundamentally a sponsor
+            # question, and the year-range parenthetical was the only
+            # temporal flavour. By time keeps growth + cohort maturity.
 
             # ── Phase-progression heatmap (start-year × current phase) ──
             # Was a Sankey, but the crossing flow bands made it too busy
