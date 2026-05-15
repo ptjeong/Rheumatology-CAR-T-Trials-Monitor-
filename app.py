@@ -6013,6 +6013,7 @@ with tab_deepdive:
                 .agg(
                     Trials=("NCTId", "nunique"),
                     Sponsors=("LeadSponsor", "nunique"),
+                    Products=("ProductName", "nunique"),
                     TopDisease=("DiseaseEntity",
                                 lambda s: s.value_counts().index[0] if not s.empty else "—"),
                     Diseases=("DiseaseEntity",
@@ -6029,6 +6030,7 @@ with tab_deepdive:
                     "TargetCategory": st.column_config.TextColumn("Antigen", width="medium"),
                     "Trials":         st.column_config.NumberColumn("Trials", format="%d", width="small"),
                     "Sponsors":       st.column_config.NumberColumn("# Sponsors", format="%d", width="small"),
+                    "Products":       st.column_config.NumberColumn("# Products", format="%d", width="small", help="Distinct named products (KYV-101, CABA-201, …) targeting this antigen. A high product count signals a crowded competitive field."),
                     "TopDisease":     st.column_config.TextColumn("Top disease", width="small"),
                     "Diseases":       st.column_config.TextColumn("Diseases (top)", width="large"),
                 },
@@ -6316,59 +6318,54 @@ with tab_deepdive:
                 _n = len(focus)
                 _rec = int(focus["OverallStatus"].isin(
                     ["RECRUITING", "NOT_YET_RECRUITING"]).sum())
-                _sponsors = focus["LeadSponsor"].dropna().nunique()
+                _sponsors = int(focus["LeadSponsor"].dropna().nunique())
                 _countries = set()
                 for cs in focus["Countries"].dropna():
                     for c in str(cs).split("|"):
                         c = c.strip()
                         if c:
                             _countries.add(c)
-                _enroll = pd.to_numeric(focus["EnrollmentCount"], errors="coerce").dropna()
-                _med_e = int(_enroll.median()) if not _enroll.empty else 0
+                _distinct_products = (
+                    int(focus["ProductName"].dropna().nunique())
+                    if "ProductName" in focus.columns else 0
+                )
 
+                # Metric strip: swapped "Median enrollment" for "Distinct
+                # products" — pharma-relevant for an antigen view ("how
+                # many separate products compete for this target?"). The
+                # median-enrollment number was rarely the headline here.
                 m1, m2, m3, m4 = st.columns(4)
                 with m1:
                     st.metric("Trials", f"{_n:,}", help=f"Focus: {_focus_label}")
                 with m2:
                     st.metric("Open / recruiting", f"{_rec:,}")
                 with m3:
-                    st.metric("Distinct sponsors", f"{_sponsors:,}")
-                with m4:
-                    st.metric("Median enrollment", f"{_med_e:,}",
+                    st.metric("Distinct sponsors", f"{_sponsors:,}",
                               help=f"across {len(_countries)} countries")
+                with m4:
+                    st.metric("Distinct products", f"{_distinct_products:,}",
+                              help="Named CAR-T products (CT.gov InterventionName → resolved alias) targeting this antigen.")
 
-                # 2x2 panel grid: disease entity / phase / modality / family
-                # (rheum is single-branch — replaced onc's "Branch split" with
-                # DiseaseFamily split; replaced onc's "DiseaseCategory
-                # breakdown" with DiseaseEntity breakdown.)
-                ta1, ta2 = st.columns(2)
-                with ta1:
+                # ── Charts row (3-col): Disease entities | Phase | Annual ──
+                # Was a 2×2 grid mixing charts and small tables; now one
+                # clean row of 3 charts gives the visual gestalt, with
+                # the smaller tables converted to sparkbar lists below.
+                _focus_with_disease = _expand_disease_rows(focus)
+                _ch1, _ch2, _ch3 = st.columns(3)
+                with _ch1:
                     st.markdown("**Disease entity breakdown**")
                     _ents = (
                         focus["DiseaseEntity"].fillna("Unknown")
-                        .value_counts().head(15)
+                        .value_counts().head(10)
                         .rename_axis("Entity").reset_index(name="Trials")
                     )
                     if not _ents.empty:
                         _chart(
-                            make_bar(_ents, "Entity", "Trials", height=280),
+                            make_bar(_ents, "Entity", "Trials", height=240),
                             key=f"focus_entity_{_focus_token}",
                             width="stretch", config=PUB_EXPORT,
                         )
-
-                    st.markdown("**Modality breakdown**")
-                    _mods = (
-                        focus.get("Modality", pd.Series(dtype=str)).fillna("Unknown")
-                        .value_counts()
-                        .rename_axis("Modality").reset_index(name="Trials")
-                    )
-                    if not _mods.empty:
-                        st.dataframe(
-                            _mods, width="stretch", hide_index=True,
-                            column_config=_mini_count_cols("Modality"),
-                        )
-
-                with ta2:
+                with _ch2:
                     st.markdown("**Phase distribution**")
                     _phase_counts = (
                         focus.groupby("PhaseOrdered", observed=False).size()
@@ -6380,62 +6377,122 @@ with tab_deepdive:
                     _phase_counts = _phase_counts[_phase_counts["Count"] > 0]
                     if not _phase_counts.empty:
                         _chart(
-                            make_bar(_phase_counts, "Phase", "Count", height=280),
+                            make_bar(_phase_counts, "Phase", "Count", height=240),
                             key=f"focus_phase_{_focus_token}",
                             width="stretch", config=PUB_EXPORT,
                         )
-
-                    st.markdown("**Disease family split**")
-                    _fam = (
-                        focus.get("DiseaseFamily", pd.Series(dtype=str)).fillna("Unknown")
-                        .value_counts()
-                        .rename_axis("Family").reset_index(name="Trials")
-                    )
-                    if not _fam.empty:
-                        st.dataframe(
-                            _fam, width="stretch", hide_index=True,
-                            column_config=_mini_count_cols("Family"),
-                        )
-
-                # ── Phase 1 additions: per-target drill-in figures ──
-                _td1, _td2 = st.columns(2)
-                with _td1:
-                    st.markdown(f"**Annual trial starts — {_focus_label}**")
-                    _focus_with_disease = _expand_disease_rows(focus)
+                with _ch3:
+                    st.markdown("**Annual trial starts**")
                     _chart(
                         _deepdive_timeline(
                             _focus_with_disease.drop_duplicates(subset=["NCTId", "_Disease"]),
-                            group_col="_Disease", height=280, top_n=5,
+                            group_col="_Disease", height=240, top_n=5,
                         ),
                         key=f"dd_target_timeline_{_focus_token}",
                     )
-                with _td2:
-                    st.markdown("**Enrollment-size distribution by disease**")
-                    _enr_box_in = _focus_with_disease.drop_duplicates(subset=["NCTId", "_Disease"]).copy()
-                    _chart(
-                        _deepdive_box(
-                            _enr_box_in, group_col="_Disease",
-                            value_col="EnrollmentCount",
-                            height=280, top_n=8,
-                        ),
-                        key=f"dd_target_enrollment_box_{_focus_token}",
+
+                # ── Product portfolio table — the pharma-intel centrepiece ──
+                # Same pattern as the sponsor-focused view, but pivoted
+                # to "which products use this antigen?". Row = product;
+                # columns surface sponsor / modality / disease coverage /
+                # phase activity / trial-and-open counts / year range.
+                if "ProductName" in focus.columns:
+                    st.markdown("##### Products targeting this antigen")
+                    st.caption(
+                        "Aggregated by ProductName — shows sponsor, "
+                        "modality, diseases targeted, phases active, "
+                        "and the run of years. Trials without an "
+                        "inferred product name bucket as “(unnamed)”."
+                    )
+                    _pf = focus.copy()
+                    _pf["ProductName"] = _pf["ProductName"].fillna("(unnamed)")
+                    _pf_rows = []
+                    for _prod_name, _g in _pf.groupby("ProductName", dropna=False):
+                        _g_sponsors = sorted(_g["LeadSponsor"].dropna().unique().tolist())
+                        _g_diseases = sorted(_g["DiseaseEntity"].dropna().unique().tolist())
+                        _g_modalities = sorted(_g["ProductType"].dropna().unique().tolist())
+                        _phase_sorted = _g.dropna(subset=["PhaseLabel"]).sort_values("PhaseOrdered")
+                        _g_phases = _phase_sorted["PhaseLabel"].drop_duplicates().tolist()
+                        _years = pd.to_numeric(_g["StartYear"], errors="coerce")
+                        if _years.notna().any():
+                            _ymin, _ymax = int(_years.min()), int(_years.max())
+                            _yrange = f"{_ymin}–{_ymax}" if _ymin != _ymax else f"{_ymin}"
+                        else:
+                            _yrange = "—"
+                        _pf_rows.append({
+                            "Product": _prod_name,
+                            "Sponsor": ", ".join(_g_sponsors) if _g_sponsors else "—",
+                            "Modality": ", ".join(_g_modalities) if _g_modalities else "—",
+                            "Diseases": ", ".join(_g_diseases) if _g_diseases else "—",
+                            "Phases": ", ".join(_g_phases) if _g_phases else "—",
+                            "Trials": len(_g),
+                            "Open": int(_g["OverallStatus"].isin(OPEN_STATUSES).sum()),
+                            "Years": _yrange,
+                        })
+                    _pf_df = pd.DataFrame(_pf_rows).sort_values(
+                        ["Trials", "Open"], ascending=[False, False],
+                    ).reset_index(drop=True)
+                    st.dataframe(
+                        _pf_df, width="stretch", hide_index=True,
+                        height=min(380, 50 + 36 * len(_pf_df)),
+                        column_config={
+                            "Product":  st.column_config.TextColumn("Product",  width="medium"),
+                            "Sponsor":  st.column_config.TextColumn("Sponsor",  width="medium"),
+                            "Modality": st.column_config.TextColumn("Modality", width="small"),
+                            "Diseases": st.column_config.TextColumn("Diseases", width="large"),
+                            "Phases":   st.column_config.TextColumn("Phases",   width="medium"),
+                            "Trials":   st.column_config.NumberColumn("Trials", width="small", format="%d"),
+                            "Open":     st.column_config.NumberColumn("Open",   width="small", format="%d"),
+                            "Years":    st.column_config.TextColumn("Years",    width="small"),
+                        },
                     )
 
-                # Top sponsors developing this antigen
-                st.markdown(
-                    f"**Top sponsors — {_focus_label}** "
-                    f"<span class='meta-small'>"
-                    f"({_sponsors} distinct sponsors total)</span>",
-                    unsafe_allow_html=True,
-                )
-                _spon_top = (
-                    focus["LeadSponsor"].dropna().value_counts().head(15)
-                    .rename_axis("Lead sponsor").reset_index(name="Trials")
-                )
-                st.dataframe(
-                    _spon_top, width="stretch", hide_index=True,
-                    column_config=_mini_count_cols("Lead sponsor"),
-                )
+                # ── Sparkbar lists row (3-col): Modality | Family | Top sponsors ──
+                _spk1, _spk2, _spk3 = st.columns(3)
+                with _spk1:
+                    st.markdown("**Modality split**")
+                    _mods = (
+                        focus.get("Modality", pd.Series(dtype=str)).fillna("Unknown")
+                        .value_counts().head(8)
+                    )
+                    if not _mods.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _mods.index.astype(str),
+                                _mods.values.astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
+                with _spk2:
+                    st.markdown("**Disease family**")
+                    _fam = (
+                        focus.get("DiseaseFamily", pd.Series(dtype=str)).fillna("Unknown")
+                        .value_counts().head(8)
+                    )
+                    if not _fam.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _fam.index.astype(str),
+                                _fam.values.astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
+                with _spk3:
+                    st.markdown(
+                        f"**Top sponsors** "
+                        f"<span class='meta-small'>"
+                        f"({_sponsors} total)</span>",
+                        unsafe_allow_html=True,
+                    )
+                    _spons = focus["LeadSponsor"].dropna().value_counts().head(10)
+                    if not _spons.empty:
+                        st.markdown(
+                            _topn_sparkbar_html(list(zip(
+                                _spons.index.astype(str),
+                                _spons.values.astype(int),
+                            ))),
+                            unsafe_allow_html=True,
+                        )
 
                 # Trial list with row-click → drilldown
                 st.markdown(
