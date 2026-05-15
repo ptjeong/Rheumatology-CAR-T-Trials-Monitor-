@@ -7096,13 +7096,6 @@ with tab_deepdive:
                         )
                 with _spB:
                     st.markdown("**Cumulative trial starts by disease**")
-                    st.caption(
-                        "Running total of trials this sponsor has started "
-                        "each year, split by disease. Better than per-year "
-                        "counts for small sponsors — a 4-trial portfolio "
-                        "over 7 years has near-flat annual lines but a "
-                        "visible cumulative growth pattern."
-                    )
                     _chart(
                         _deepdive_timeline(
                             spt, group_col="DiseaseEntity",
