@@ -4188,21 +4188,6 @@ with m3:
     )
 with m4:
     metric_card("Top target", top_target, "Most common target category")
-# Caveat for the analytical reader: CT.gov's EnrollmentType=ACTUAL
-# flag is reported with a multi-month lag, so the field's true
-# cumulative enrollment isn't reliably computable from the snapshot.
-# Sum-of-targets is the only defensible enrollment headline today.
-st.markdown(
-    f'<p class="small-note" style="color:{THEME["muted"]};'
-    ' margin-top: 0.2rem; margin-bottom: 0.6rem;">'
-    "Cumulative actual enrollment is not shown as a headline KPI — "
-    "CT.gov's <code>EnrollmentType=ACTUAL</code> flag has a long "
-    "reporting lag (most closed-enrolment trials still carry "
-    "estimated targets), so neither status-based nor flag-based "
-    "totals are defensibly accurate at this field maturity."
-    "</p>",
-    unsafe_allow_html=True,
-)
 
 st.markdown(
     f"""
@@ -4558,24 +4543,20 @@ with tab_overview:
         # sub-tab, where it sits next to the annual-starts line and
         # cohort heatmap.
 
-        # ── Recently updated (now full-width — YoY movers moved to By time) ──
+        # ── Recently updated ──
+        # Single panel covers "what changed recently?" across the
+        # whole status spectrum. The separate "Recently closed"
+        # panel was redundant — its closure-type filter is now
+        # folded into this panel's status dropdown, and "All time"
+        # joins the timeframe pills for the no-bound view.
         st.markdown("##### Recently updated trials")
         if "LastUpdatePostDate" in df_filt.columns:
-            # Filter affordances: timeframe pills + family + status.
-            # Timeframe is a pill row above the two selectboxes so the
-            # most-common interaction ("what changed recently?") is one
-            # click away. Pills > selectbox here because options are few
-            # (5) and the answer is usually visible at-glance.
-            # "All time" was previously here but it doesn't fit a
-            # "Recently updated" panel — when you don't bound the time
-            # window, you're not really asking "what changed recently",
-            # you're just asking "what's the dataset". Removed per user
-            # feedback 2026-05-15.
             _TIMEFRAME_DAYS = {
                 "Past week":     7,
                 "Past month":    30,
                 "Past 3 months": 90,
                 "Past year":     365,
+                "All time":      None,
             }
             _ra_timeframe = st.pills(
                 "Updated within",
@@ -4596,7 +4577,13 @@ with tab_overview:
                     label_visibility="collapsed",
                 )
             with _ra_f2:
-                _status_opts = ["All statuses", "Open / recruiting", "Active / not recruiting", "Completed"]
+                _status_opts = [
+                    "All statuses",
+                    "Open / recruiting",
+                    "Active / not recruiting",
+                    "Completed",
+                    "All closures",
+                ]
                 _ra_status = st.selectbox(
                     "Status", _status_opts, key="overview_recently_status",
                     label_visibility="collapsed",
@@ -4620,6 +4607,10 @@ with tab_overview:
                 _ra = _ra[_ra["OverallStatus"] == "ACTIVE_NOT_RECRUITING"]
             elif _ra_status == "Completed":
                 _ra = _ra[_ra["OverallStatus"] == "COMPLETED"]
+            elif _ra_status == "All closures":
+                _ra = _ra[_ra["OverallStatus"].isin(
+                    ["COMPLETED", "TERMINATED", "WITHDRAWN", "SUSPENDED"]
+                )]
 
             # Show every trial matching the timeframe + family + status
             # filters — no row cap. Even the widest window ("Past year")
@@ -4665,121 +4656,6 @@ with tab_overview:
                         _render_trial_drilldown(
                             _ra_full.iloc[0],
                             key_suffix=f"overview_recently_updated_{_ra_nct}",
-                        )
-        else:
-            st.caption("LastUpdatePostDate not in this snapshot.")
-
-        st.divider()
-
-        # ── Recently closed trials ────────────────────────────────────
-        # Separate from "Recently updated" because closures are a
-        # different kind of signal: pharma readers care about who's
-        # got results to publish, who terminated early, and what the
-        # historical pipeline looks like — the latter needing an
-        # "All time" option that didn't fit the updates panel.
-        # Sort is by LastUpdatePostDate because the snapshot doesn't
-        # carry a CT.gov CompletionDate field yet; it's a fair proxy
-        # (a closed trial's last update is typically the closure
-        # record).
-        # Default to "All closures" rather than "Completed only" —
-        # with only 3 COMPLETED trials field-wide in rheum CAR-T, the
-        # strict default rendered the panel useless. Pharma reviewers
-        # want closures of any kind (completed for results,
-        # terminated for safety signal, withdrawn for never-started).
-        st.markdown("##### Recently closed trials")
-        if "LastUpdatePostDate" in df_filt.columns:
-            _RC_TIMEFRAMES = {
-                "Past year":     365,
-                "Past 2 years":  730,
-                "Past 5 years":  1825,
-                "All time":      None,
-            }
-            _rc_tf = st.pills(
-                "Closed within",
-                options=list(_RC_TIMEFRAMES.keys()),
-                selection_mode="single",
-                default="Past year",
-                key="overview_completed_timeframe",
-                label_visibility="collapsed",
-            ) or "Past year"
-
-            _rc_f1, _rc_f2 = st.columns(2)
-            with _rc_f1:
-                _rc_fam_opts = ["All families"] + sorted(
-                    df_filt["DiseaseFamily"].dropna().unique().tolist()
-                ) if "DiseaseFamily" in df_filt.columns else ["All families"]
-                _rc_fam = st.selectbox(
-                    "Family", _rc_fam_opts, key="overview_completed_fam",
-                    label_visibility="collapsed",
-                )
-            with _rc_f2:
-                _rc_status_opts = {
-                    "All closures":            ["COMPLETED", "TERMINATED",
-                                                "WITHDRAWN", "SUSPENDED"],
-                    "Completed + terminated":  ["COMPLETED", "TERMINATED"],
-                    "Completed only":          ["COMPLETED"],
-                }
-                _rc_status_choice = st.selectbox(
-                    "Closure type", list(_rc_status_opts.keys()),
-                    key="overview_completed_status",
-                    label_visibility="collapsed",
-                )
-                _rc_statuses = _rc_status_opts[_rc_status_choice]
-
-            _rc = df_filt.copy()
-            _rc["LastUpdatePostDate"] = pd.to_datetime(_rc["LastUpdatePostDate"], errors="coerce")
-            _rc = _rc.dropna(subset=["LastUpdatePostDate"])
-            _rc = _rc[_rc["OverallStatus"].isin(_rc_statuses)]
-            _rc_days = _RC_TIMEFRAMES.get(_rc_tf)
-            if _rc_days is not None:
-                _cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=_rc_days)
-                _rc = _rc[_rc["LastUpdatePostDate"] >= _cutoff.tz_localize(None)]
-            if _rc_fam != "All families" and "DiseaseFamily" in _rc.columns:
-                _rc = _rc[_rc["DiseaseFamily"] == _rc_fam]
-            _rc = _rc.sort_values("LastUpdatePostDate", ascending=False)
-            if _rc.empty:
-                st.caption("No matching trials.")
-            else:
-                _rc_view = _rc[[
-                    "NCTId", "BriefTitle", "DiseaseEntity",
-                    "TargetCategory", "OverallStatus", "LastUpdatePostDate",
-                ]].copy()
-                _rc_view["OverallStatus"] = _rc_view["OverallStatus"].map(STATUS_DISPLAY).fillna(_rc_view["OverallStatus"])
-                _rc_view["LastUpdatePostDate"] = _rc_view["LastUpdatePostDate"].dt.strftime("%Y-%m-%d")
-                _rc_event = st.dataframe(
-                    _rc_view, width="stretch", hide_index=True,
-                    height=min(480, 60 + 36 * len(_rc_view)),
-                    on_select="rerun", selection_mode="single-row",
-                    key="overview_recently_closed_table",
-                    column_config={
-                        "NCTId":              st.column_config.TextColumn("NCT", width="small"),
-                        "BriefTitle":         st.column_config.TextColumn(
-                            "Title", width="large",
-                            help="Hover any cell to see the full title. Click a row for the full trial drilldown.",
-                        ),
-                        "DiseaseEntity":      st.column_config.TextColumn("Disease", width="small"),
-                        "TargetCategory":     st.column_config.TextColumn("Target", width="small"),
-                        "OverallStatus":      st.column_config.TextColumn("Closure", width="small"),
-                        "LastUpdatePostDate": st.column_config.TextColumn("Last update", width="small"),
-                    },
-                )
-                st.caption(
-                    f"{len(_rc_view)} trial(s) with closure status in the "
-                    f"{_rc_tf.lower()}, matching the filter. Sort proxy: "
-                    "LastUpdatePostDate (CT.gov CompletionDate not in "
-                    "this snapshot yet) · click a row for full details."
-                )
-                _rc_sel = (
-                    _rc_event.selection.rows
-                    if _rc_event and hasattr(_rc_event, "selection") else []
-                )
-                if _rc_sel:
-                    _rc_nct = _rc_view.iloc[_rc_sel[0]]["NCTId"]
-                    _rc_full = df_filt[df_filt["NCTId"] == _rc_nct]
-                    if not _rc_full.empty:
-                        _render_trial_drilldown(
-                            _rc_full.iloc[0],
-                            key_suffix=f"overview_recently_closed_{_rc_nct}",
                         )
         else:
             st.caption("LastUpdatePostDate not in this snapshot.")
