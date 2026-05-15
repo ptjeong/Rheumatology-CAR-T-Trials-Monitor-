@@ -4152,10 +4152,16 @@ median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
 # and showed "0 actual" even when 23 trials had clearly finished
 # enrolling. Switching to status-based classification is more honest:
 #
-#   ACTUAL   = enrollment is closed → use EnrollmentCount as the real
-#              number enrolled (COMPLETED / ACTIVE_NOT_RECRUITING /
-#              TERMINATED — these trials are NOT recruiting any new
-#              patients regardless of what the type flag says).
+#   ACTUAL   = CT.gov's EnrollmentType=ACTUAL flag — verified final
+#              accrual that the sponsor has explicitly marked closed.
+#              Status-based heuristic was tried earlier (count any
+#              COMPLETED / ACTIVE_NOT_RECRUITING / TERMINATED trial)
+#              but overclaimed by ~5× in rheum: a TERMINATED trial's
+#              EnrollmentCount is usually still the planned TARGET,
+#              not actual accrual. Per user feedback 2026-05-15:
+#              "only 3 trials actually completed, the rest withdrawn
+#              or suspended" — the heuristic was bundling target
+#              numbers into the actual tile and misleading readers.
 #   PLANNED  = enrollment is still open → use EnrollmentCount as the
 #              target (the OPEN_STATUSES set: RECRUITING /
 #              NOT_YET_RECRUITING / ENROLLING_BY_INVITATION).
@@ -4164,9 +4170,13 @@ median_enrolled = int(_enroll_known.median()) if not _enroll_known.empty else 0
 #   the planned bucket (2026-05-15 commit aligned it to OPEN_STATUSES
 #   instead so the "Open / recruiting" tile count and the planned-
 #   enrollment trial count match exactly).
-_actual_status = {"COMPLETED", "ACTIVE_NOT_RECRUITING", "TERMINATED"}
 _status_series = df_filt["OverallStatus"].astype(str).str.upper()
-_actual_mask = _status_series.isin(_actual_status) & _enroll_count.notna()
+_enroll_type = (
+    df_filt["EnrollmentType"].astype(str).str.upper()
+    if "EnrollmentType" in df_filt.columns
+    else pd.Series("", index=df_filt.index)
+)
+_actual_mask = (_enroll_type == "ACTUAL") & _enroll_count.notna()
 _planned_mask = _status_series.isin(OPEN_STATUSES) & _enroll_count.notna()
 _n_actual_pts = int(_enroll_count[_actual_mask].sum()) if _actual_mask.any() else 0
 _n_actual_trials = int(_actual_mask.sum())
@@ -4176,8 +4186,15 @@ _n_planned_trials = int(_planned_mask.sum())
 # Two-tile presentation of the enrollment split (planned vs actual).
 # For autoimmune CAR-T the planned tile is the big headline (the field
 # is mostly recruiting); the actual tile sits beside it with the
-# smaller-but-growing completed + active-not-recruiting accrual.
-m1, m2, m3, m4, m5 = st.columns(5)
+# verified-actual accrual (EnrollmentType=ACTUAL). When there are no
+# trials with verified-actual accrual yet, the actual tile drops out
+# of the strip — better than showing "0" / "—" or worse, an
+# overclaiming heuristic.
+if _n_actual_trials > 0:
+    m1, m2, m3, m4, m5 = st.columns(5)
+else:
+    m1, m2, m3, m5 = st.columns(4)
+    m4 = None
 with m1:
     metric_card("Filtered trials", total_trials, "Trials matching current filters")
 with m2:
@@ -4189,20 +4206,13 @@ with m3:
         f"Target across {_n_planned_trials:,} trials still enrolling"
         if _n_planned_trials else "No trials currently enrolling",
     )
-with m4:
-    # Short, single-line footer. The longer caveat (upper-bound nature
-    # of the number, EnrollmentType=ACTUAL confirmation sub-count, etc)
-    # was making the KPI strip visually noisy — moved to the Methods
-    # appendix where the methodology already lives.
-    if _n_actual_trials:
-        _actual_foot = f"Across {_n_actual_trials:,} closed-enrolment trials"
-    else:
-        _actual_foot = "No closed-enrolment trials yet (early field)"
-    metric_card(
-        "Actual enrollment",
-        f"{_n_actual_pts:,}",
-        _actual_foot,
-    )
+if m4 is not None:
+    with m4:
+        metric_card(
+            "Actual enrollment",
+            f"{_n_actual_pts:,}",
+            f"Across {_n_actual_trials:,} trials with verified accrual (EnrollmentType=ACTUAL)",
+        )
 with m5:
     metric_card("Top target", top_target, "Most common target category")
 
