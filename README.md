@@ -4,14 +4,17 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19713049.svg)](https://doi.org/10.5281/zenodo.19713049)
 
 An interactive dashboard that tracks CAR-T and related cell-therapy clinical
-trials for rheumatologic and immune-mediated diseases, sourced from the public
+trials for rheumatologic and autoimmune diseases, sourced from the public
 ClinicalTrials.gov registry.
 
 The app provides a filtered trial list, classification across six axes
 (disease entity, trial design, antigen target, cell-therapy modality, product
-type, sponsor type), geographic mapping (global + Germany-specific),
-publication-ready figures with provenance-tagged CSV exports, an auto-
-generated methods section, and an inter-rater κ validation study.
+type, sponsor type), geographic mapping, 11 publication-ready figures with
+provenance-tagged CSV exports, an auto-generated Methods section with
+explicit limitations, six Deep Dive axis-pages (By disease · By antigen ·
+By product · By sponsor · By time · Compare) supporting click-row drilldown
+from landscape tables to focused views, and an inter-rater κ validation
+study.
 
 Designed as a research and educational resource — **not** a medical,
 regulatory, or decision-support tool.
@@ -24,23 +27,24 @@ The app has 7 top-level tabs:
 
 | Tab | What it does |
 |---|---|
-| **Overview** | KPI strip (total trials, open, enrolled, top antigen) · top movers (YoY change) · recently-added trials · disease-hierarchy sunburst (3-ring: clinical specialty → indication → antigen target) · PRISMA flow expander |
-| **Geography / Map** | World choropleth of trial counts · open-sites layer · regional aggregates (Asia / Europe / Americas / Oceania) · country leaderboard · country-emergence scatter (year of first trial per country) · multi-country trials list · Germany-specific city + site drilldown |
+| **Overview** | KPI strip (filtered trials · open / recruiting · planned enrollment · top target) · disease-hierarchy sunburst (3-ring: clinical specialty → indication → antigen target) · family headline tiles · **Recently updated trials** panel (timeframe pills incl. All-time; family + status filters; click-row drilldown) · snapshot-diff expander vs previous snapshot |
+| **Geography / Map** | World choropleth of trial counts · open-sites layer · country leaderboard · country-emergence scatter (year of first trial per country) · multi-country trials list · per-country drilldown (top diseases + top antigens as sparkbars, site-level map, city breakdown) |
 | **Data** | Full filterable trial table with row-click drilldown to a per-trial classification rationale + suggest-correction form |
-| **Deep Dive** | 5 axis-pages (see below) |
+| **Deep Dive** | 6 axis-pages (see below) — landscape view by default; click any landscape-table row to focus, or use the pickers |
 | **Publication Figures** | 11 publication-ready figures (Fig 1-11) with provenance-tagged CSV exports |
-| **Methods & Appendix** | PRISMA ledger · auto-generated methods text · ontology table · sub-family routing audit · curation-loop CSV download · validation-sample export |
+| **Methods & Appendix** | PRISMA ledger · auto-generated methods text · ontology table · sub-family routing audit · curation-loop CSV download · validation-sample export · explicit limitations section |
 | **About** | Dashboard description · contact · auto-populated citation block |
 
 ### Deep Dive sub-tabs
 
 | Sub-tab | Contents |
 |---|---|
-| **By disease** | Disease landscape figures (Disease × Antigen heatmap, phase composition, trial-age vs status, top-3 sponsor share, age-group coverage with paediatric-gap callouts) · per-disease drilldown · side-by-side disease/target comparator |
-| **By target** | Antigen landscape (Target × Disease heatmap, emergence timeline, phase composition) · per-target drilldown (timeline + enrollment box) · per-named-product pipeline view |
-| **By sponsor** | Sponsor-type aggregate (Industry / Academic / Government / Other) · sponsor type × disease heatmap · phase composition by sponsor type · drill into a specific sponsor (full portfolio: phases, diseases, targets, timeline) |
-| **By geography** | Country leaderboard · country × disease heatmap · phase composition by country · drill into a specific country (top diseases + top antigens) |
-| **By time** | Annual trial starts (selectable colour axis: disease / target / family / sponsor type) · cumulative active trials · cohort × phase % · top-10 sponsor activity timeline · phase-progression Sankey |
+| **By disease** | Disease landscape figures (Disease × Antigen heatmap, phase composition stacked bar, open-trial age watchlist — directly surfaces stalled-enrolment trials) · per-disease focused view: 3-chart row (phase mix, sponsor-type donut, top countries), sparkbar lists for antigen targets + product types, trial table with row-click drilldown |
+| **By antigen** | Antigen landscape (Target × Disease heatmap, emergence timeline + phase composition with shared y-axis, top-antigens table with `# Products` column) · per-antigen focused view: 4-tile metric strip, 3-chart row (diseases, phases, annual trial starts), **Products targeting this antigen** portfolio table, sparkbar lists, top sponsors, trial drilldown |
+| **By product** | Per-named-product pipeline view: each row a CAR-T product (KYV-101, CABA-201, …) with sponsor, modality, primary target, indications, furthest phase, trial count. Click a product row → that product's full trial list. Shared-axis phase × enrollment landscape chart |
+| **By sponsor** | Sponsor-type landscape (Industry / Academic / Government / Other) with click-row drilldown · per-sponsor focused view: 4-tile metric strip (trials / distinct products / distinct diseases / open), **product portfolio table** (one row per product the sponsor runs, with modality / antigen / diseases / phases / years), aggregate sparkbar lists, trial table sorted by Product → Phase → StartYear |
+| **By time** | Annual trial starts (selectable colour axis: disease / target / family / sponsor type) · cumulative active trials · cohort × phase % heatmap · year-over-year movers (risers / fallers) |
+| **Compare** | Paired side-by-side comparator with shared scales — pick any two diseases, antigens, modalities, sponsors, or products. Shows compact paired metric strip, grouped phase-mix bars (shared y-axis), paired horizontal 100%-stacked sponsor-type bars, and paired sparkbar cross-axis lists (e.g. sponsor compare → disease coverage + antigen coverage) |
 
 ### Sidebar display options
 
@@ -71,28 +75,47 @@ The app has 7 top-level tabs:
     sub-family (Cytopenias, Glomerular, Endocrine, Dermatologic, GVHD).
     Pure-OIM multi-disease trials are promoted to baskets even when no strict
     rheum entity matches.
-  - **15 antigen-target categories** — CD19, BCMA, CD20, CD70, CD6, CD7, BAFF,
-    BAFF-R, dual / combinatorial variants (CD19/BCMA, CD19/CD20, CD19/BAFF,
-    BCMA/CD70), platform labels (CAR-NK, CAAR-T, CAR-Treg), plus `CAR-T_unspecified`
-    fallback. Includes a ligand-CAR convention: BAFF-CAR designs route to
-    `BAFF-R` (the receptor on the target cell) rather than `BAFF` (the ligand).
+  - **Antigen-target categories** — CD19, CD20, CD22, BCMA, CD70, BAFF / BAFF-R,
+    CD6, CD7, plus arbitrary-arity multi-target labels (`CD19/BCMA dual`,
+    `CD19/CD22/BCMA triple`, `CD19/CD20/CD22 multi`, etc.) generated by a
+    collect-then-format pattern that scales to any combination, and platform
+    labels (CAR-NK, CAAR-T, CAR-Treg) plus `CAR-T_unspecified` / `Other_or_unknown`
+    fallbacks. Ligand-CAR convention: BAFF-CAR designs route to `BAFF-R` (the
+    receptor on the target cell) rather than `BAFF` (the ligand). Adding a new
+    antigen is a one-line addition to `CAR_SPECIFIC_TARGET_TERMS`.
   - **8 cell-therapy modalities** — Auto / Allo CAR-T, CAR-T (unclear), CAR-γδ
     T, CAR-NK, CAR-Treg, CAAR-T, In vivo CAR
   - **Sponsor classification** — Industry / Academic / Government / Other,
     via `leadSponsor.class` + name-based heuristics
   - **Trial design** — Single disease vs Basket/Multidisease (≥2 distinct
     entities or generic broad-basket phrasing)
-- **Three-layer validation loop**:
+- **Multi-layer validation infrastructure**:
   - Locked benchmark of 21 hand-curated trials with per-axis F1 floors
     (`tests/test_benchmark.py`)
+  - Classifier unit tests (187 tests; `tests/test_classifier.py` locks
+    every rule including multi-target arity, CD22 detection, CAR-NK Allo
+    default, named-product priority, BAFF-R supersedes BAFF, word-boundary
+    detection for CD6/CD7)
+  - **Product-consistency audit** (`scripts/audit_product_consistency.py`) —
+    scans the current snapshot for named products with divergent
+    TargetCategory across their trials, flagging classifier drift or
+    new genuinely-dual-target products needing a `NAMED_PRODUCT_TARGETS`
+    update
   - Independent-LLM cross-validation with per-provider Cohen's κ across
     Gemini / OpenAI / Groq / Anthropic (`scripts/validate_independent_llm.py`)
-  - Snapshot-to-snapshot reclassification diff (`scripts/snapshot_diff.py`)
+  - Snapshot-to-snapshot reclassification diff via the Overview tab's
+    "Changes since previous snapshot" expander (both sides are
+    post-processed so the diff reflects real day-over-day changes, not
+    static in-memory reclassification deltas)
   - **Inter-rater κ validation study** — standalone Streamlit app at
     `validation_study/app.py` where two raters independently classify a locked
     100-trial sample on 6 axes (Disease family, Disease entity, Trial design,
     Target category, Product type, Sponsor type); Cohen's κ between raters is
     the primary outcome
+  - **App smoke test** (`tests/test_app_smoke.py`) — boots the Streamlit
+    script via `AppTest` against a pinned snapshot, asserts no exceptions,
+    all tabs render, the KPI strip is present, and the sidebar reset
+    button is wired
 - **LLM-assisted classification** via `validate.py` — Claude-powered
   second-opinion tool that writes persistent per-trial overrides to
   `llm_overrides.json`, picked up automatically by the pipeline
@@ -167,27 +190,64 @@ hard-exclusion NCT ID list (see `config.py`).
 
 ## Classification strategy
 
-Trials are classified in layers, from most durable to most specific:
+Antigen + product-type classification runs as a strict priority chain, applied
+in this order at both snapshot-build time AND at every app load (so
+code-level classifier fixes apply immediately without waiting for a nightly
+rebuild — see "Re-classification on load" below):
 
-1. **`config.py` keyword tables** — `DISEASE_ENTITIES`,
-   `OTHER_IMMUNE_MEDIATED_TERMS`, `CAR_SPECIFIC_TARGET_TERMS`,
-   `ALLOGENEIC_MARKERS`, `AUTOL_MARKERS`. Shared, deterministic.
-2. **OIM-cluster terms** — `_OIM_CLUSTERS` in `pipeline.py` provides
-   second-pass disease-cluster detection for non-rheum autoimmune diseases
-   (MS, NMOSD, CIDP, MOGAD, AIE, Myasthenia, Stiff-person, Pemphigus,
-   T1D, ITP, AIHA, IgAN, Membranous, FSGS). Used for basket detection
-   (≥2 distinct OIM clusters → Basket/Multidisease) and L2 sub-family
-   labelling in the sunburst.
-3. **Named-product lookup tables** — `NAMED_PRODUCT_TARGETS` and
-   `NAMED_PRODUCT_TYPES` resolve specific products (e.g. `kn5601`,
-   `ytb323`, `rapcabtagene autoleucel`) when the abstract text alone is
-   insufficient.
-4. **LLM overrides** — per-trial JSON entries in `llm_overrides.json` produced
-   by `python validate.py`. Applied in `pipeline._classify_disease()` before
-   keyword matching; trials are flagged with `LLMOverride = True` in the
-   dataframe and surfaced in the Data Quality panel.
+1. **LLM overrides** — per-trial JSON entries in `llm_overrides.json` produced
+   by `python validate.py` (Claude-powered) or curated by hand for ambiguous
+   trials (e.g. dual-arm protocols testing two products of different
+   mechanism). Trials are flagged with `LLMOverride = True`.
+2. **Named-product lookup** — `NAMED_PRODUCT_TARGETS` /
+   `NAMED_PRODUCT_TYPES` in `config.py` resolve known canonical CAR-T
+   products (KYV-101, CABA-201, CT1192, YTB323, …) directly to their
+   documented antigen / modality. This is the **primary** resolver, not a
+   fallback — keyword matching is layered beneath it. The priority avoids
+   comedication mentions (e.g. "Anti-CD20 mAB" administered alongside a
+   KYV-101 CD19 CAR-T) being misread as a dual-target CAR-T construct.
+3. **Explicit text-pattern detection** — `CAR_SPECIFIC_TARGET_TERMS` plus
+   bare-token matches over a closed vocabulary (CD19, CD20, CD22, BCMA,
+   CD70, BAFF-R / BAFF, CD6, CD7). All detected antigens are collected
+   into a sorted list and emitted as a multi-target label
+   (`"CD19"` / `"CD19/BCMA dual"` / `"CD19/CD22/BCMA triple"` / `"… multi"`)
+   — this replaced an earlier hardcoded if-chain that handled only specific
+   dual pairs and silently dropped third antigens. CAR-NK products default
+   to Allogeneic when no explicit autologous marker is present (the
+   field-standard default for NK-cell CAR products in autoimmune).
+4. **CAR-core fallback** — `CAR-T_unspecified` when CAR-related terms are
+   present but no antigen is identifiable.
 5. **Hard-exclusion list** — `HARD_EXCLUDED_NCT_IDS` in `config.py` for trials
-   that should never appear.
+   that should never appear in the dataset (regardless of keyword matching).
+
+### Disease classification
+
+Trials are mapped to one of the 10 strict-vocab disease entities (SLE / SSc /
+Sjogren / CTD_other / IIM / AAV / RA / IgG4-RD / Behcet / cGVHD), the generic
+`Basket/Multidisease` category (for trials enrolling ≥2 distinct systemic
+entities or registered with generic broad-basket phrasing), or
+`Other immune-mediated` (rolled-up bucket for non-classical-rheum autoimmune).
+An L2 sub-classifier (`_OIM_CLUSTERS` in `pipeline.py`) routes "Other
+immune-mediated" trials into one of seven neurologic clusters (MS, NMOSD,
+CIDP, MOGAD, AIE, Myasthenia, Stiff-person) or a non-neuro sub-family
+(Cytopenias, Glomerular, Endocrine, Dermatologic, GVHD). Neurologic-cluster
+matches are **promoted to their own L1 family** (Neurologic autoimmune),
+shown as a distinct violet wedge in the sunburst alongside the classical
+rheum cluster.
+
+### Re-classification on load
+
+The classifier (`_assign_target` + `_assign_product_type` in `pipeline.py`) is
+executed at snapshot-build time AND again at every app load inside
+`_post_process_trials`. The saved snapshot's `TargetCategory`, `TargetSource`,
+`ProductType`, and `ProductTypeSource` columns are advisory — overwritten in
+memory whenever the rule-based classifier output differs from the saved value.
+This guarantees that code-level classifier improvements take effect
+immediately, without waiting for the nightly snapshot rebuild. The canonical
+source of truth for a trial's classification is the **code + raw data at view
+time**, not the saved CSV. For frozen reproducibility, pin a snapshot AND
+check out the code at that date (the classifier is deterministic for given
+code + input).
 
 ### Basket sub-classification
 
@@ -271,7 +331,7 @@ filter state, row count, and API source — readable via
 | `validate.py` | Standalone Claude-powered validation tool |
 | `llm_overrides.json` | Generated per-trial classification overrides |
 | `snapshots/<date>/` | Reproducible frozen datasets |
-| `tests/` | Pytest suite (175+ tests covering classifier, pipeline I/O, basket detection, validation κ, flag consensus, moderator helpers) |
+| `tests/` | Pytest suite (187 tests covering classifier rules — including multi-target arity, CD22 detection, CAR-NK Allo default, named-product priority — pipeline I/O, basket detection, validation κ, flag consensus, moderator helpers, plus a `streamlit.testing.v1.AppTest` smoke test for cold-boot regression) |
 | `validation_study/app.py` | Standalone inter-rater κ validation Streamlit app |
 | `scripts/` | Audit, snapshot diff, and curation-loop helpers |
 | `docs/internal/` | Self-contained prompts for cross-app sync, audit walkthroughs, and curation loops |

@@ -7,6 +7,130 @@ of minor UI / figure tweaks.
 
 ## [Unreleased]
 
+### Classifier — May 2026 wave
+
+- **Multi-target arbitrary-arity labels**: the explicit-marker layer in
+  `_assign_target` now collects all detected antigens and emits a label
+  via `_format_target_label` (`"CD19"` → `"CD19/BCMA dual"` →
+  `"CD19/CD22/BCMA triple"` → `"… multi"`). Replaced an earlier
+  hardcoded if-chain that handled only specific dual pairs and silently
+  dropped any 3rd antigen. Surfaced when NCT07174843 (BZE2204) was
+  reported as "CD19/BCMA dual" despite explicitly being a
+  CD19/CD22/BCMA triple-target CAR-T.
+- **CD22 detection** added to `CAR_SPECIFIC_TARGET_TERMS`. Previously
+  unsupported; CD22-bearing trials fell to `CAR-T_unspecified`.
+- **Named-product first** priority — `_lookup_named_product` runs BEFORE
+  explicit-marker text matching, so known canonical CAR-T products
+  (KYV-101, CABA-201, CT1192, …) resolve to their documented antigen
+  regardless of comedication mentions in the text. Fixed NCT06384976
+  (KYSA-7: KYV-101 + anti-CD20 mAB) being mis-classified as
+  CD19/CD20 dual.
+- **CAR-NK platform → Allogeneic** default rule. CAR-NK products in
+  autoimmune are predominantly allogeneic; the earlier default-to-
+  Autologous rule mis-classified ~5 trials per snapshot. Triggered
+  by a manual validation pass against a 200-trial sample.
+- **Word-boundary regex on short tokens** (CD6, CD7) — `"cd7" in text`
+  was matching the "cd7" inside "cd70", producing false-positive
+  triple labels for CHT105 ("anti-CD19/70 CAR-T") and similar.
+- **NAMED_PRODUCT_TARGETS corrections**: LCAR-AIO restored from
+  "CD19/CD20 dual" (previously downgraded "as closest fit") to
+  "CD19/CD20/CD22 triple" now that the classifier supports triples;
+  LMY-920 corrected to BAFF-R per the ligand-CAR convention; GT719
+  corrected to CD19 per its explicit "CD19-targeted iNKT Cell"
+  interventions string.
+- **Re-classification on snapshot load**: `_assign_target` and
+  `_assign_product_type` are re-run inside `_post_process_trials` at
+  every load. Saved snapshot columns become advisory; the canonical
+  source of truth is code + raw data at view time.
+- **Product-consistency audit script**
+  (`scripts/audit_product_consistency.py`) flags named products with
+  inconsistent TargetCategory across their trials — a drift sentinel
+  paired with the reclassification refactor.
+
+### UX — Deep Dive restructure
+
+- **6 sub-tabs**: By disease · By antigen (was "By target") · By
+  product (new) · By sponsor · By time · Compare (new). Each focused
+  view follows a consistent shape: metric strip → charts row →
+  product-portfolio table (where applicable) → sparkbar lists →
+  trial table with row-click drilldown.
+- **Click-to-focus on landscape tables**: clicking any row in the
+  Disease / Antigen / Sponsor-type landscape tables sets the focus
+  picker and jumps directly to the focused view.
+- **Compact sparkbar lists** replaced narrow Plotly bar charts for
+  small-N panels (country drilldown, focused-view antigen/product
+  breakdowns, modality split). Constant per-row height regardless
+  of category count.
+- **Product portfolio table** centrepiece in both By sponsor and
+  By antigen focused views: one row per `ProductName` showing
+  sponsor / modality / antigen / diseases / phases active / trials
+  / open / year range.
+- **Compare tab**: paired-row layout with shared scales (grouped
+  phase-mix bars, paired 100%-stacked sponsor-type bars, paired
+  sparkbar cross-axis lists), replacing the prior two parallel
+  panels with independent y-axes. Supports 5 axes: Disease entity ·
+  Antigen target · Modality · Sponsor · Product.
+- **In-tab TOC** on the three long focused views (Disease / Antigen /
+  Sponsor) for scroll-relief.
+- **Recently updated panel** absorbed the separate "Recently closed"
+  panel; status filter expanded to "All closures", new "All time"
+  timeframe pill. Row-click → trial drilldown matches the Data tab
+  pattern.
+- **Sidebar filter chip strip removed**. Both the focus-picker chip
+  strip and the sidebar-filter chip strip are gone; the sidebar
+  itself is the source of truth and the trial-count footer conveys
+  narrowing.
+
+### Methods + data integrity
+
+- **Methods text** (`_build_methods_text`) updated to reflect current
+  classifier (named-product first priority, CD22, multi-target arity,
+  CAR-NK Allo default, re-classification on load). Added explicit
+  **Limitations** section covering registry-source caveat, search
+  recall/precision tradeoff, classification subjectivity,
+  EnrollmentType reporting lag, declared-vs-actual geographic
+  coverage, and snapshot-freshness caveat.
+- **"Actual enrollment" KPI tile dropped**. Neither the status-based
+  heuristic nor the strict `EnrollmentType=ACTUAL` flag produces a
+  defensible number at this field maturity (heuristic overclaimed
+  by ~5×, flag underclaimed by ~4×). "Planned enrollment" remains
+  the headline.
+- **Snapshot diff fix**: the Overview tab's "Changes since previous
+  snapshot" panel now post-processes both sides before diffing.
+  Previously surfaced ~14 phantom `target_changed` + ~4 phantom
+  `product_changed` entries per load.
+- Antigen-focus "Open / recruiting" metric now uses canonical
+  `OPEN_STATUSES` (was hardcoded 2-status list missing
+  `ENROLLING_BY_INVITATION`, disagreeing with every other tab).
+- **Site title** updated to "CAR-T Rheumatology & Autoimmune Trials
+  Monitor" (was "CAR-T Rheumatology Trials Monitor"). Reflects that
+  the dataset has always included neurologic autoimmune trials
+  (MS, NMOSD, MG) and other immune-mediated conditions.
+
+### Speed wins
+
+- **`_expand_disease_rows` vectorised** — was a per-row `iterrows()`
+  loop called 6+ times per render. Replaced with column-wise split /
+  explode; per-row Python helpers only run on the "Other immune-
+  mediated" subset that needs subfamily reclassification. ~200-400 ms
+  saved per warm rerun.
+- **`EnrollmentCountNumeric` + `StartYearNumeric` baked** at
+  `_post_process_trials` time; 16 render-time `pd.to_numeric(...,
+  errors="coerce")` call sites swapped to read the baked columns
+  directly. ~80 ms / rerun.
+- `_post_process_trials` reorder so the in-memory classifier runs
+  BEFORE `_add_modality_vectorized` — fixes a stale-Modality bug
+  where 14 trials had their TargetCategory updated but Modality
+  still reflected the pre-reclassification values.
+
+### Testing
+
+- 187 pytest cases (up from 175), incl. `tests/test_app_smoke.py`
+  smoke test via `streamlit.testing.v1.AppTest`. Locks every
+  classifier rule including multi-target arity, CD22 detection,
+  CAR-NK Allo default, named-product priority, BAFF-R supersedes
+  BAFF, word-boundary detection for CD6/CD7.
+
 ### Changed
 - Snapshots are now byte-deterministic given identical upstream data.
   `trials.csv` and `sites.csv` are sorted on stable keys before write;
