@@ -4659,7 +4659,7 @@ with tab_overview:
 
         st.divider()
 
-        # ── Recently completed trials ─────────────────────────────────
+        # ── Recently closed trials ────────────────────────────────────
         # Separate from "Recently updated" because closures are a
         # different kind of signal: pharma readers care about who's
         # got results to publish, who terminated early, and what the
@@ -4667,9 +4667,14 @@ with tab_overview:
         # "All time" option that didn't fit the updates panel.
         # Sort is by LastUpdatePostDate because the snapshot doesn't
         # carry a CT.gov CompletionDate field yet; it's a fair proxy
-        # (a completed trial's last update is typically the closure
+        # (a closed trial's last update is typically the closure
         # record).
-        st.markdown("##### Recently completed trials")
+        # Default to "All closures" rather than "Completed only" —
+        # with only 3 COMPLETED trials field-wide in rheum CAR-T, the
+        # strict default rendered the panel useless. Pharma reviewers
+        # want closures of any kind (completed for results,
+        # terminated for safety signal, withdrawn for never-started).
+        st.markdown("##### Recently closed trials")
         if "LastUpdatePostDate" in df_filt.columns:
             _RC_TIMEFRAMES = {
                 "Past year":     365,
@@ -4678,7 +4683,7 @@ with tab_overview:
                 "All time":      None,
             }
             _rc_tf = st.pills(
-                "Completed within",
+                "Closed within",
                 options=list(_RC_TIMEFRAMES.keys()),
                 selection_mode="single",
                 default="Past year",
@@ -4697,10 +4702,10 @@ with tab_overview:
                 )
             with _rc_f2:
                 _rc_status_opts = {
-                    "Completed only":          ["COMPLETED"],
-                    "Completed + terminated":  ["COMPLETED", "TERMINATED"],
                     "All closures":            ["COMPLETED", "TERMINATED",
                                                 "WITHDRAWN", "SUSPENDED"],
+                    "Completed + terminated":  ["COMPLETED", "TERMINATED"],
+                    "Completed only":          ["COMPLETED"],
                 }
                 _rc_status_choice = st.selectbox(
                     "Closure type", list(_rc_status_opts.keys()),
