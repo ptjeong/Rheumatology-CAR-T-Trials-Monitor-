@@ -7065,7 +7065,11 @@ with tab_deepdive:
                 # had to scroll past everything to reach the specific
                 # picker. Now it renders at top when picked.
                 spt = df_filt[df_filt["LeadSponsor"] == sponsor_pick].copy()
-                _sm1, _sm2, _sm3, _sm4 = st.columns(4)
+                # 5-tile metric strip. Planned-enrolment Σ added 2026-05-15
+                # to surface a sponsor's total patient-slot footprint
+                # (sum of EnrollmentCount across their trials — most
+                # trials report this as the design target).
+                _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
                 _sm1.metric("Trials led", f"{len(spt):,}")
                 _sm2.metric(
                     "Distinct products",
@@ -7078,6 +7082,14 @@ with tab_deepdive:
                 _sm4.metric(
                     "Open / recruiting",
                     int(spt["OverallStatus"].isin(OPEN_STATUSES).sum()),
+                )
+                _enr_spt = int(
+                    pd.to_numeric(spt.get("EnrollmentCount", pd.Series(dtype=float)),
+                                  errors="coerce").fillna(0).sum()
+                )
+                _sm5.metric(
+                    "Planned enrolment (Σ)", f"{_enr_spt:,}",
+                    help="Sum of EnrollmentCount across this sponsor's trials. Most CT.gov entries report this as the design target (ANTICIPATED while open, ACTUAL once closed).",
                 )
                 _spy = spt["StartYearNumeric"]
                 if _spy.notna().any():
@@ -7914,15 +7926,35 @@ with tab_deepdive:
                             _m3_a = int(_slice_a["LeadSponsor"].dropna().nunique())
                             _m3_b = int(_slice_b["LeadSponsor"].dropna().nunique())
 
+                        # Planned-enrollment total — sum of EnrollmentCount
+                        # across the slice. Most CT.gov trials report this
+                        # as the trial-design target (EnrollmentType =
+                        # ANTICIPATED while open, ACTUAL once closed) so
+                        # the sum reads as "total patient-slot footprint".
+                        _enr_a = int(pd.to_numeric(_slice_a.get("EnrollmentCount", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
+                        _enr_b = int(pd.to_numeric(_slice_b.get("EnrollmentCount", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
+
                         st.markdown(
-                            '<div style="display:grid; grid-template-columns:1fr 1fr 1fr;'
+                            '<div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr;'
                             ' gap:0 24px; padding:6px 0 14px;">'
                             f'{_kv_block("Trials", _n_a, _n_b)}'
                             f'{_kv_block("Open", _open_a, _open_b)}'
                             f'{_kv_block(_m3_label, _m3_a, _m3_b)}'
+                            f'{_kv_block("Planned enrolment (Σ)", _enr_a, _enr_b)}'
                             '</div>',
                             unsafe_allow_html=True,
                         )
+
+                        # Long sponsor / product names get truncated for
+                        # the chart legends — full name is in the
+                        # comparison heading above and on hover. Without
+                        # this, a 90-char Chinese-hospital name wraps
+                        # onto two legend lines and overflows down into
+                        # the plot area.
+                        def _legend_label(_v: str, _max: int = 38) -> str:
+                            _s = str(_v)
+                            return _s if len(_s) <= _max else _s[: _max - 1] + "…"
+                        _leg_a, _leg_b = _legend_label(_pick_a), _legend_label(_pick_b)
 
                         # ── Phase mix: grouped bars, shared y-axis ──
                         st.markdown("**Phase mix**")
@@ -7939,24 +7971,27 @@ with tab_deepdive:
                             if PHASE_LABELS[p] in set(_ph_all["PhaseLabel"])
                         ]
                         _ph_fig = go.Figure()
-                        for _grp, _col in [(_pick_a, _COL_A), (_pick_b, _COL_B)]:
+                        for _grp, _leg, _col in [
+                            (_pick_a, _leg_a, _COL_A),
+                            (_pick_b, _leg_b, _COL_B),
+                        ]:
                             _g = (
                                 _ph_all[_ph_all["_Group"] == _grp]
                                 .set_index("PhaseLabel")["Trials"]
                                 .reindex(_ph_categories, fill_value=0)
                             )
                             _ph_fig.add_trace(go.Bar(
-                                x=_ph_categories, y=_g.values, name=_grp,
+                                x=_ph_categories, y=_g.values, name=_leg,
                                 marker_color=_col, marker_line_width=0,
                                 hovertemplate=f"<b>{_grp}</b><br>%{{x}}: %{{y}} trials<extra></extra>",
                             ))
                         _ph_fig.update_layout(
-                            barmode="group", height=240, template="plotly_white",
-                            margin=dict(l=8, r=8, t=8, b=40),
+                            barmode="group", height=280, template="plotly_white",
+                            margin=dict(l=8, r=8, t=56, b=40),
                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                             font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                             legend=dict(
-                                orientation="h", yanchor="bottom", y=1.0,
+                                orientation="h", yanchor="bottom", y=1.04,
                                 x=0, bgcolor="rgba(0,0,0,0)",
                             ),
                             xaxis_title=None, yaxis_title=None,
@@ -7999,7 +8034,7 @@ with tab_deepdive:
                                 _bp = float((_sb == _spt).mean() * 100) if _n_b else 0.0
                                 # Order y so A sits on TOP (reversed in plot space).
                                 _spt_fig.add_trace(go.Bar(
-                                    y=[_pick_b, _pick_a], x=[_bp, _ap],
+                                    y=[_leg_b, _leg_a], x=[_bp, _ap],
                                     name=_spt, marker_color=_SP_COLORS[_spt],
                                     orientation="h", marker_line_width=0,
                                     hovertemplate=(
@@ -8015,13 +8050,13 @@ with tab_deepdive:
                                     insidetextanchor="middle",
                                 ))
                             _spt_fig.update_layout(
-                                barmode="stack", height=140, template="plotly_white",
-                                margin=dict(l=130, r=8, t=8, b=8),
+                                barmode="stack", height=180, template="plotly_white",
+                                margin=dict(l=130, r=8, t=44, b=8),
                                 paper_bgcolor="rgba(0,0,0,0)",
                                 plot_bgcolor="rgba(0,0,0,0)",
                                 font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
                                 legend=dict(
-                                    orientation="h", yanchor="bottom", y=1.0,
+                                    orientation="h", yanchor="bottom", y=1.05,
                                     x=0, bgcolor="rgba(0,0,0,0)",
                                 ),
                                 xaxis=dict(
@@ -8122,6 +8157,10 @@ with tab_deepdive:
                                 "DiseaseEntity", "Disease mix", {"Unclassified"},
                             )
                         elif _axis_col_cmp == "LeadSponsor":
+                            _render_cross_mix(
+                                "ProductName", "Products developed",
+                                set(), head_n=10,
+                            )
                             _render_cross_mix(
                                 "DiseaseEntity", "Disease coverage", {"Unclassified"},
                             )
