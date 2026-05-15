@@ -2685,6 +2685,13 @@ def _topn_sparkbar_html(
     (e.g., country drilldowns where some countries have 3 antigens and
     others 10): rows stack vertically with constant per-row height, so
     no large empty plot area appears for short lists.
+
+    The whole panel is capped at 560 px wide so when it's rendered
+    full-width on a wide viewport (e.g. the disease-landscape
+    open-trial-age bucket panel, stacked above the stalled-trial
+    table) the label / count / bar columns stay packed together
+    rather than splaying to the screen edges with a gulf of
+    whitespace in between.
     """
     if not items:
         return ""
@@ -2694,7 +2701,7 @@ def _topn_sparkbar_html(
         _pct = max(2, int(round(100 * _n / _max)))
         _rows.append(
             '<div style="display:grid; grid-template-columns:'
-            ' minmax(0,1fr) auto 120px; gap: 0 10px; align-items: center;'
+            ' minmax(0,1fr) auto 200px; gap: 0 10px; align-items: center;'
             ' padding: 3px 0;">'
             f'<span style="font-size: var(--fs-sm); color: {THEME["text"]};'
             ' white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"'
@@ -2707,7 +2714,7 @@ def _topn_sparkbar_html(
             f'<div style="background: {color}; height: 100%; width: {_pct}%;"></div>'
             '</div></div>'
         )
-    return "".join(_rows)
+    return f'<div style="max-width: 560px;">{"".join(_rows)}</div>'
 
 
 def uniq_join(series):
