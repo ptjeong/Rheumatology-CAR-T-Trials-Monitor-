@@ -17,6 +17,14 @@ from pipeline import (
     save_snapshot,
     BASE_URL,
     _normalize_text,
+    # Classifier hooks — used by _post_process_trials to re-classify
+    # TargetCategory / ProductType on every load, so code-level
+    # classifier fixes apply immediately instead of waiting for the
+    # next nightly snapshot rebuild. The saved snapshot's columns
+    # become advisory (overwritten if they differ from the current
+    # classifier output).
+    _assign_target as _reclassify_target,
+    _assign_product_type as _reclassify_product_type,
     # Used by `_disease_family()` to split basket trials by family:
     #  - Classical-rheum basket  → "Rheumatology basket" family wedge
     #  - Neuro-only basket       → rolled into "Neurologic autoimmune"
@@ -2387,6 +2395,31 @@ def _post_process_trials(raw_df: pd.DataFrame) -> pd.DataFrame:
         "https://clinicaltrials.gov/study/" + _nct.fillna(""),
         None,
     )
+    # Re-run the antigen + product-type classifier so code-level
+    # fixes apply immediately on load, without waiting for a nightly
+    # snapshot rebuild. Previously the saved CSV's TargetCategory was
+    # trusted as-is — meaning trials like NCT06249438 (C-CAR168,
+    # CD20/BCMA-directed) stayed mis-classified as "BCMA" until the
+    # next pipeline run, even though the in-code classifier already
+    # produced the correct "CD20/BCMA dual" label. Re-classification
+    # is fast (~30 ms on 290 rows) and the result is @st.cache_data-
+    # cached at this function's level, so it runs once per session.
+    if not out.empty:
+        _new_targets: list[str] = []
+        _new_target_sources: list[str] = []
+        _new_prod_types: list[str] = []
+        _new_prod_sources: list[str] = []
+        for _row in out.to_dict(orient="records"):
+            _tg, _tg_src = _reclassify_target(_row)
+            _new_targets.append(_tg)
+            _new_target_sources.append(_tg_src)
+            _pt, _pt_src = _reclassify_product_type(_row, target_source=_tg_src)
+            _new_prod_types.append(_pt)
+            _new_prod_sources.append(_pt_src)
+        out["TargetCategory"] = _new_targets
+        out["TargetSource"] = _new_target_sources
+        out["ProductType"] = _new_prod_types
+        out["ProductTypeSource"] = _new_prod_sources
     # Bake numeric versions of the two columns that get hit repeatedly
     # with pd.to_numeric(..., errors="coerce") across the render path
     # (EnrollmentCount + StartYear, ~15 call sites total). Doing it once
