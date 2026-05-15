@@ -107,6 +107,20 @@ class TestTargetAssignment:
         assert target == "CD19"
         assert source == "named_product"
 
+    def test_named_product_wins_over_comedication_marker(self):
+        # Regression: NCT06384976 (KYSA-7) — KYV-101 CD19 CAR-T given
+        # alongside an anti-CD20 monoclonal antibody as comedication in
+        # MS. The old priority order (explicit_marker before
+        # named_product) misread the CD20 mAB mention as a dual-target
+        # CAR-T → "CD19/CD20 dual". Named-product lookup now wins, so
+        # the CAR-T's canonical CD19 target is honoured.
+        target, source = _assign_target(self._row(
+            BriefTitle="A Study of Anti-CD19 CAR T-Cell Therapy in MS",
+            Interventions="Anti-CD20 mAB|KYV-101|Standard lymphodepletion regimen",
+        ))
+        assert target == "CD19"
+        assert source == "named_product"
+
     def test_car_core_fallback(self):
         target, source = _assign_target(self._row(
             BriefTitle="CAR-T cells for SLE",

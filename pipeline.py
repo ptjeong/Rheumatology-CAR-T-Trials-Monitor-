@@ -603,8 +603,24 @@ _TARGET_FALLBACK_LABELS = {"CAR-T_unspecified", "Other_or_unknown"}
 def _assign_target(row: dict) -> tuple[str, str]:
     """Return (target_category, source).
 
-    source ∈ {"llm_override", "explicit_marker", "named_product",
+    source ∈ {"llm_override", "named_product", "explicit_marker",
               "car_core_fallback", "unknown"}.
+
+    Priority order:
+      1. LLM override (manual)
+      2. Named-product lookup — IF a known canonical CAR-T product is
+         identified (KYV-101, CABA-201, …) its mapped target wins. The
+         NAMED_PRODUCT_TARGETS table is our ground truth for these
+         products; trusting keyword matching over it caused
+         comedication mentions (e.g. "Anti-CD20 mAB" alongside KYV-101
+         CD19 CAR-T in MS combo studies) to be misread as dual-target
+         CAR-Ts. Single source of truth resolves the ambiguity. If a
+         future product is genuinely dual-target, add it to the dict
+         with target="CD19/CD20 dual" — same hook.
+      3. Explicit-marker text patterns (dual-target first, then
+         single-target)
+      4. CAR-core fallback ("CAR-T_unspecified")
+      5. Unknown
     """
     nct = _safe_text(row.get("NCTId")).strip()
     ov = _LLM_OVERRIDES.get(nct) if nct else None
@@ -612,6 +628,12 @@ def _assign_target(row: dict) -> tuple[str, str]:
         return ov["target_category"], "llm_override"
 
     text = _row_text(row)
+
+    # Named-product lookup before explicit_marker — fixes the
+    # comedication-mention problem (see priority-order docstring above).
+    named_target = _lookup_named_product(text, NAMED_PRODUCT_TARGETS)
+    if named_target:
+        return named_target, "named_product"
 
     has_car_nk = _contains_any(text, CAR_NK_TERMS) or ("car nk" in text)
     has_caar_t = _contains_any(text, CAAR_T_TERMS)
@@ -672,11 +694,10 @@ def _assign_target(row: dict) -> tuple[str, str]:
         return "CD6", "explicit_marker"
     if has_cd7:
         return "CD7", "explicit_marker"
-    # Named product fallback: resolves target for well-known products that omit the
-    # antigen name from accessible study text (title / brief summary / interventions).
-    named_target = _lookup_named_product(text, NAMED_PRODUCT_TARGETS)
-    if named_target:
-        return named_target, "named_product"
+    # (Named-product lookup moved to the top of this function — see
+    # the priority-order docstring. Reaching this point means the text
+    # has neither a recognised explicit antigen marker nor a known
+    # named product; fall through to the CAR-core / unknown buckets.)
     if _contains_any(text, CAR_CORE_TERMS):
         return "CAR-T_unspecified", "car_core_fallback"
     return "Other_or_unknown", "unknown"
