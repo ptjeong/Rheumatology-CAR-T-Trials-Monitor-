@@ -7596,87 +7596,238 @@ with tab_deepdive:
                 if _pick_a == _pick_b:
                     st.warning("Pick two different categories.")
                 else:
-                    def _mini_panel(df_slice: pd.DataFrame, label: str, key_suffix: str) -> None:
-                        # H5 (not H4) to match every other inline panel
-                        # header in the app — H4 was a one-off outlier.
-                        st.markdown(f"##### {label}")
-                        if df_slice.empty:
-                            st.info("No trials in this slice.")
-                            return
-                        _ma, _mb, _mc = st.columns(3)
-                        _ma.metric("Trials", f"{len(df_slice):,}")
-                        _mb.metric(
-                            "Open",
-                            int(df_slice["OverallStatus"].isin(OPEN_STATUSES).sum()),
-                        )
-                        _mc.metric(
-                            "Sponsors",
-                            f"{df_slice['LeadSponsor'].dropna().nunique():,}",
-                        )
+                    # ── Paired-comparison view ──
+                    # Replaces the old two-parallel-panels layout, which
+                    # had independent y-axes per side and so killed
+                    # at-a-glance comparison (a 5-trial slice and a
+                    # 121-trial slice each took the full panel height).
+                    # Each visual block now shows BOTH categories with
+                    # shared scales: grouped bars for the phase mix,
+                    # paired horizontal stacked bars for the sponsor
+                    # split (0-100% by definition), and a paired
+                    # sparkbar list for the antigen/disease mix.
+                    _slice_a = df_filt[df_filt[_axis_col_cmp] == _pick_a].copy()
+                    _slice_b = df_filt[df_filt[_axis_col_cmp] == _pick_b].copy()
+                    _COL_A = "#0b3d91"   # navy — THEME["primary"]
+                    _COL_B = "#0f766e"   # teal-700 — THEME["teal"]
 
-                        # Phase mix
-                        _ph = (
-                            df_slice.assign(PhaseLabel=df_slice.get("PhaseLabel", df_slice["Phase"]))
-                            .groupby("PhaseLabel").size().reset_index(name="Trials")
-                        )
-                        _ph["PhaseLabel"] = pd.Categorical(
-                            _ph["PhaseLabel"],
-                            categories=[PHASE_LABELS[p] for p in PHASE_ORDER if PHASE_LABELS[p] in set(_ph["PhaseLabel"])],
-                            ordered=True,
-                        )
-                        _ph = _ph.sort_values("PhaseLabel")
-                        if not _ph.empty:
-                            _chart(
-                                make_bar(_ph, "PhaseLabel", "Trials", height=220),
-                                key=f"dd_compare_phase_{key_suffix}",
+                    st.markdown(
+                        f"##### Comparing: "
+                        f"<span style='color:{_COL_A}'>**{_pick_a}**</span>"
+                        f" vs "
+                        f"<span style='color:{_COL_B}'>**{_pick_b}**</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                    if _slice_a.empty or _slice_b.empty:
+                        st.info("One of the selected categories has no trials under the current filters.")
+                    else:
+                        _n_a, _n_b = len(_slice_a), len(_slice_b)
+                        _open_a = int(_slice_a["OverallStatus"].isin(OPEN_STATUSES).sum())
+                        _open_b = int(_slice_b["OverallStatus"].isin(OPEN_STATUSES).sum())
+                        _spn_a = int(_slice_a["LeadSponsor"].dropna().nunique())
+                        _spn_b = int(_slice_b["LeadSponsor"].dropna().nunique())
+
+                        def _kv_block(label: str, a: int, b: int) -> str:
+                            return (
+                                '<div style="padding:4px 0;">'
+                                f'<div style="font-size:var(--fs-xs); color:{THEME["muted"]};'
+                                ' text-transform:uppercase; letter-spacing:0.06em;'
+                                f' margin-bottom:4px;">{label}</div>'
+                                '<div style="display:grid; grid-template-columns: 1fr 1fr;'
+                                ' gap:0 12px; align-items:baseline;">'
+                                f'<span style="font-size:var(--fs-lg); font-weight:600;'
+                                f' color:{_COL_A}; font-variant-numeric:tabular-nums;">{a:,}</span>'
+                                f'<span style="font-size:var(--fs-lg); font-weight:600;'
+                                f' color:{_COL_B}; font-variant-numeric:tabular-nums;">{b:,}</span>'
+                                '</div></div>'
                             )
 
-                        # Sponsor type
-                        if "SponsorType" in df_slice.columns:
-                            _spt_d = (
-                                df_slice["SponsorType"].fillna("Other").value_counts()
-                                .rename_axis("Sponsor type").reset_index(name="Trials")
+                        st.markdown(
+                            '<div style="display:grid; grid-template-columns:1fr 1fr 1fr;'
+                            ' gap:0 24px; padding:6px 0 14px;">'
+                            f'{_kv_block("Trials", _n_a, _n_b)}'
+                            f'{_kv_block("Open", _open_a, _open_b)}'
+                            f'{_kv_block("Sponsors", _spn_a, _spn_b)}'
+                            '</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        # ── Phase mix: grouped bars, shared y-axis ──
+                        st.markdown("**Phase mix**")
+                        _ph_all = (
+                            pd.concat([
+                                _slice_a.assign(_Group=_pick_a),
+                                _slice_b.assign(_Group=_pick_b),
+                            ])
+                            .assign(PhaseLabel=lambda d: d.get("PhaseLabel", d["Phase"]))
+                            .groupby(["_Group", "PhaseLabel"]).size().reset_index(name="Trials")
+                        )
+                        _ph_categories = [
+                            PHASE_LABELS[p] for p in PHASE_ORDER
+                            if PHASE_LABELS[p] in set(_ph_all["PhaseLabel"])
+                        ]
+                        _ph_fig = go.Figure()
+                        for _grp, _col in [(_pick_a, _COL_A), (_pick_b, _COL_B)]:
+                            _g = (
+                                _ph_all[_ph_all["_Group"] == _grp]
+                                .set_index("PhaseLabel")["Trials"]
+                                .reindex(_ph_categories, fill_value=0)
                             )
-                            _chart(
-                                _deepdive_donut(
-                                    _spt_d, label_col="Sponsor type", height=200,
-                                    color_map={
-                                        "Industry":   "#0c4a6e",
-                                        "Academic":   "#0369a1",
-                                        "Government": "#0284c7",
-                                        "Other":      "#94a3b8",
-                                    },
+                            _ph_fig.add_trace(go.Bar(
+                                x=_ph_categories, y=_g.values, name=_grp,
+                                marker_color=_col, marker_line_width=0,
+                                hovertemplate=f"<b>{_grp}</b><br>%{{x}}: %{{y}} trials<extra></extra>",
+                            ))
+                        _ph_fig.update_layout(
+                            barmode="group", height=240, template="plotly_white",
+                            margin=dict(l=8, r=8, t=8, b=40),
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                            legend=dict(
+                                orientation="h", yanchor="bottom", y=1.0,
+                                x=0, bgcolor="rgba(0,0,0,0)",
+                            ),
+                            xaxis_title=None, yaxis_title=None,
+                            bargap=0.30, bargroupgap=0.12,
+                        )
+                        _ph_fig.update_xaxes(
+                            showgrid=False, color=THEME["muted"], tickfont_size=11,
+                        )
+                        _ph_fig.update_yaxes(
+                            gridcolor=THEME["grid"], color=THEME["muted"],
+                            tickfont_size=11, zeroline=False, rangemode="tozero",
+                        )
+                        _chart(
+                            _ph_fig,
+                            key=f"dd_compare_phase_grouped_{_pick_a}_{_pick_b}",
+                        )
+
+                        # ── Sponsor-type split: paired horizontal 100% bars ──
+                        if "SponsorType" in df_filt.columns:
+                            st.markdown(
+                                "**Sponsor-type split** "
+                                f"<span style='color:{THEME['muted']}; font-weight:400;'>(% of trials)</span>",
+                                unsafe_allow_html=True,
+                            )
+                            _SP_TYPES = ["Industry", "Academic", "Government", "Other"]
+                            _SP_COLORS = {
+                                "Industry":   "#0c4a6e",
+                                "Academic":   "#0369a1",
+                                "Government": "#0284c7",
+                                "Other":      "#94a3b8",
+                            }
+                            _sa = _slice_a["SponsorType"].fillna("Other")
+                            _sb = _slice_b["SponsorType"].fillna("Other")
+                            _spt_fig = go.Figure()
+                            for _spt in _SP_TYPES:
+                                _ap = float((_sa == _spt).mean() * 100) if _n_a else 0.0
+                                _bp = float((_sb == _spt).mean() * 100) if _n_b else 0.0
+                                # Order y so A sits on TOP (reversed in plot space).
+                                _spt_fig.add_trace(go.Bar(
+                                    y=[_pick_b, _pick_a], x=[_bp, _ap],
+                                    name=_spt, marker_color=_SP_COLORS[_spt],
+                                    orientation="h", marker_line_width=0,
+                                    hovertemplate=(
+                                        f"<b>%{{y}}</b><br>{_spt}: %{{x:.1f}}%"
+                                        "<extra></extra>"
+                                    ),
+                                    text=[
+                                        f"{_spt} {_bp:.0f}%" if _bp >= 12 else "",
+                                        f"{_spt} {_ap:.0f}%" if _ap >= 12 else "",
+                                    ],
+                                    textposition="inside",
+                                    textfont=dict(color="white", size=10),
+                                    insidetextanchor="middle",
+                                ))
+                            _spt_fig.update_layout(
+                                barmode="stack", height=140, template="plotly_white",
+                                margin=dict(l=130, r=8, t=8, b=8),
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                font=dict(family=FONT_FAMILY, size=11, color=THEME["text"]),
+                                legend=dict(
+                                    orientation="h", yanchor="bottom", y=1.0,
+                                    x=0, bgcolor="rgba(0,0,0,0)",
                                 ),
-                                key=f"dd_compare_sptype_{key_suffix}",
+                                xaxis=dict(
+                                    showgrid=False, showticklabels=False,
+                                    range=[0, 100], fixedrange=True,
+                                ),
+                                yaxis=dict(
+                                    showgrid=False, color=THEME["text"],
+                                    tickfont_size=12, fixedrange=True,
+                                ),
+                                bargap=0.40,
                             )
-
-                        # Other-axis mix (if comparing diseases, show targets; vice versa)
-                        if _axis_col_cmp == "DiseaseEntity":
-                            st.markdown("**Antigen mix**")
-                            _xb = (
-                                df_slice.loc[~df_slice["TargetCategory"].isin(_PLATFORM_LABELS | {"Other_or_unknown"}), "TargetCategory"]
-                                .value_counts().head(8)
-                                .rename_axis("Target").reset_index(name="Trials")
-                            )
-                        else:
-                            st.markdown("**Disease mix**")
-                            _xb = (
-                                df_slice["DiseaseEntity"].value_counts().head(8)
-                                .rename_axis("Disease").reset_index(name="Trials")
-                            )
-                        if not _xb.empty:
                             _chart(
-                                make_bar(_xb, _xb.columns[0], "Trials", height=220),
-                                key=f"dd_compare_xmix_{key_suffix}",
+                                _spt_fig,
+                                key=f"dd_compare_sptype_paired_{_pick_a}_{_pick_b}",
                             )
 
-                    _ca, _cb = st.columns(2)
-                    with _ca:
-                        _slice_a = df_filt[df_filt[_axis_col_cmp] == _pick_a].copy()
-                        _mini_panel(_slice_a, _pick_a, f"a_{_pick_a}")
-                    with _cb:
-                        _slice_b = df_filt[df_filt[_axis_col_cmp] == _pick_b].copy()
-                        _mini_panel(_slice_b, _pick_b, f"b_{_pick_b}")
+                        # ── Other-axis mix: paired sparkbar list ──
+                        if _axis_col_cmp == "DiseaseEntity":
+                            _xlabel, _xcol = "Antigen mix", "TargetCategory"
+                            _hide = _PLATFORM_LABELS | {"Other_or_unknown"}
+                        elif _axis_col_cmp == "TargetCategory":
+                            _xlabel, _xcol = "Disease mix", "DiseaseEntity"
+                            _hide = {"Unclassified"}
+                        else:  # Modality axis → show disease mix
+                            _xlabel, _xcol = "Disease mix", "DiseaseEntity"
+                            _hide = {"Unclassified"}
+                        _a_counts = (
+                            _slice_a.loc[~_slice_a[_xcol].isin(_hide), _xcol]
+                            .value_counts()
+                        )
+                        _b_counts = (
+                            _slice_b.loc[~_slice_b[_xcol].isin(_hide), _xcol]
+                            .value_counts()
+                        )
+                        _union = list(
+                            _a_counts.add(_b_counts, fill_value=0)
+                            .sort_values(ascending=False).head(10).index
+                        )
+                        if _union:
+                            st.markdown(
+                                f"**{_xlabel}** "
+                                f"<span style='color:{THEME['muted']}; font-weight:400;'>"
+                                f"(top {len(_union)} across both)</span>",
+                                unsafe_allow_html=True,
+                            )
+                            _max = max(
+                                int(_a_counts.reindex(_union, fill_value=0).max()),
+                                int(_b_counts.reindex(_union, fill_value=0).max()),
+                                1,
+                            )
+                            _rows: list[str] = []
+                            for _cat in _union:
+                                _av = int(_a_counts.get(_cat, 0))
+                                _bv = int(_b_counts.get(_cat, 0))
+                                _ap = max(2, int(round(100 * _av / _max))) if _av else 0
+                                _bp = max(2, int(round(100 * _bv / _max))) if _bv else 0
+                                _rows.append(
+                                    '<div style="display:grid;'
+                                    ' grid-template-columns: minmax(0,1.4fr) 30px 1fr 30px 1fr;'
+                                    ' gap: 0 10px; align-items:center; padding:3px 0;">'
+                                    f'<span style="font-size:var(--fs-sm); color:{THEME["text"]};'
+                                    ' white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"'
+                                    f' title="{_cat}">{_cat}</span>'
+                                    f'<span style="font-size:var(--fs-sm); font-weight:600;'
+                                    f' color:{_COL_A}; font-variant-numeric:tabular-nums;'
+                                    f' text-align:right;">{_av}</span>'
+                                    f'<div style="background:{THEME["surf2"]}; height:8px;'
+                                    ' border-radius:2px; overflow:hidden;">'
+                                    f'<div style="background:{_COL_A}; height:100%; width:{_ap}%;"></div>'
+                                    '</div>'
+                                    f'<span style="font-size:var(--fs-sm); font-weight:600;'
+                                    f' color:{_COL_B}; font-variant-numeric:tabular-nums;'
+                                    f' text-align:right;">{_bv}</span>'
+                                    f'<div style="background:{THEME["surf2"]}; height:8px;'
+                                    ' border-radius:2px; overflow:hidden;">'
+                                    f'<div style="background:{_COL_B}; height:100%; width:{_bp}%;"></div>'
+                                    '</div></div>'
+                                )
+                            st.markdown("".join(_rows), unsafe_allow_html=True)
 
 
 with tab_pub:
