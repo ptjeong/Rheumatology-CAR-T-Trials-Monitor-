@@ -7798,12 +7798,27 @@ with tab_deepdive:
                             f"{'s' if len(_bucket_trials) != 1 else ''} "
                             f"in *{_picked_bucket}*** since start"
                         )
-                        st.dataframe(
+                        # Bucket-trial table is now row-selectable —
+                        # matches every other trial table in the app.
+                        # Picker key embeds the bucket name so each
+                        # bucket has its own selection state (clicking
+                        # a row in the "1–2 y" bucket doesn't preserve
+                        # selection when the user switches to "≥3 y").
+                        _bt_key = (
+                            "dd_time_bucket_table_"
+                            + _picked_bucket.replace(" ", "_").replace("?", "")
+                        )
+                        _bt_event = st.dataframe(
                             _bt, width='stretch', hide_index=True,
                             height=min(420, 38 + 36 * len(_bt)),
+                            on_select="rerun", selection_mode="single-row",
+                            key=_bt_key,
                             column_config={
                                 "NCTId":   st.column_config.TextColumn("NCT", width="small"),
-                                "BriefTitle": st.column_config.TextColumn("Title", width="large"),
+                                "BriefTitle": st.column_config.TextColumn(
+                                    "Title", width="large",
+                                    help="Click a row for the full trial drilldown.",
+                                ),
                                 "Disease": st.column_config.TextColumn("Disease", width="small"),
                                 "Phase":   st.column_config.TextColumn("Phase", width="small"),
                                 "Status":  st.column_config.TextColumn("Status", width="small"),
@@ -7811,6 +7826,18 @@ with tab_deepdive:
                                 "Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
                             },
                         )
+                        _bt_sel = (
+                            _bt_event.selection.rows
+                            if _bt_event and hasattr(_bt_event, "selection") else []
+                        )
+                        if _bt_sel:
+                            _bt_nct = _bt.iloc[_bt_sel[0]]["NCTId"]
+                            _bt_full = df_filt[df_filt["NCTId"] == _bt_nct]
+                            if not _bt_full.empty:
+                                _render_trial_drilldown(
+                                    _bt_full.iloc[0],
+                                    key_suffix=f"dd_time_bucket_{_bt_nct}",
+                                )
             else:
                 st.caption("No open trials in the current filter selection.")
 
